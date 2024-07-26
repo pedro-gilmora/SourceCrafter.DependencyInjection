@@ -1,0 +1,25 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+		<LangVersion>latest</LangVersion>
+		<Nullable>enable</Nullable>
+		<PackageVersion>
+			$([System.Convert]::ToUInt16(
+				$([MSBuild]::Add(
+					$([System.DateTime]::Now.Year),
+					-2023
+				))
+			)).
+			$([System.DateTime]::Now.ToString('yy')).
+			$([System.DateTime]::Now.DayOfYear).
+			$([System.Convert]::ToUInt16(
+				$([MSBuild]::Divide(
+					$([System.DateTime]::Now.TimeOfDay.TotalMinutes),
+					15
+				))
+			))
+		</PackageVersion>
+  </PropertyGroup>
+
+</Project>
