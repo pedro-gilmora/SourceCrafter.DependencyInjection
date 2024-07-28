@@ -470,6 +470,14 @@ public class Set<T>
             action(ref item.Value);
         }
     }
+    public void ForEach(Action<T> action)
+    {
+        for (int i = 0; i < _count; i++)
+        {
+            ref var item = ref _entries![i];
+            action(item.Value);
+        }
+    }
     public void Clear()
     {
         int count = _count;

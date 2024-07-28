@@ -13,9 +13,7 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration;
 [Generator]
 public class Generator : IIncrementalGenerator
 {
-
     internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
-
     static volatile bool isSet = false;
     static volatile bool isMsConfigInstalled = false;
 
@@ -34,7 +32,8 @@ public class Generator : IIncrementalGenerator
     {
         if (!IsMsConfigInstalled(compilation)) return null;
 
-        StringBuilder extraCode = new(@"using Microsoft.Extensions.Configuration;
+        StringBuilder extraCode = new(@"#nullable enable
+using Microsoft.Extensions.Configuration;
 
 ");
 
@@ -61,7 +60,7 @@ public class Generator : IIncrementalGenerator
         get 
         {
             if (__appConfig__ is null)
-			    lock (_lock)
+			    lock (__lock)
 				    return __appConfig__ ??= new ConfigurationBuilder()
                         .SetBasePath(global::System.IO.Directory.GetCurrentDirectory())
                         .AddJsonFile(""appsettings.json"", optional: true, reloadOnChange: true)
@@ -108,7 +107,7 @@ public class Generator : IIncrementalGenerator
 
                     var suffix = key.Replace(':', '_').ToUpper();
 
-                    var identifier = item.Identifier = @"__APPCONFIG__" + suffix;
+                    var identifier = item.CacheMethodName = @"__APPCONFIG__" + suffix;
 
                     item.GenerateValue = existingOrNew = code => code.Append(identifier);
 
@@ -132,7 +131,7 @@ public class Generator : IIncrementalGenerator
             if (__appConfig__")
                         .Append(suffix)
                         .Append(@" is null)
-			    lock (_lock)     
+			    lock (__lock)     
 				    return __appConfig__")
                         .Append(suffix)
                         .Append(@" ??= BuildSetting();

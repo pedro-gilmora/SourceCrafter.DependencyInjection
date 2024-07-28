@@ -95,9 +95,14 @@ namespace SourceCrafter.DependencyInjection
             return e;
         }
 
-        static string Capitalize(this string str)
+        internal static string Capitalize(this string str)
         {
             return str is [{ } f, .. { } rest] ? char.ToUpper(f) + rest : str;
+        }
+
+        internal static string Camelize(this string str)
+        {
+            return str is [{ } f, .. { } rest] ? char.ToLower(f) + rest : str;
         }
 
         public static bool IsPrimitive(this ITypeSymbol target, bool includeObject = true) =>
@@ -195,12 +200,12 @@ namespace SourceCrafter.DependencyInjection
 
         public static string GenKey(ServiceDescriptor serviceDescriptor)
         {
-            return $"{serviceDescriptor.ServiceType}|{serviceDescriptor.ExportTypeName}|{serviceDescriptor.Name}";
+            return $"{serviceDescriptor.Lifetime}|{serviceDescriptor.ExportTypeName}|{serviceDescriptor.KeyEnumTypeName}";
         }
 
-        public static string GenKey(ServiceType serviceType, string typeFullName, string? name)
+        public static string GenKey(Lifetime lifetime, string typeFullName, IFieldSymbol? name)
         {
-            return $"{serviceType}|{typeFullName}|{name}";
+            return $"{lifetime}|{typeFullName}|{name?.Type?.ToGlobalNamespaced()}";
         }
 
 

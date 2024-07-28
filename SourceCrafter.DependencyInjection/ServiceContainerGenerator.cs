@@ -9,7 +9,9 @@ using System.Text;
 
 using System;
 using SourceCrafter.DependencyInjection.Interop;
-using System.Runtime.ConstrainedExecution;
+using Microsoft.CodeAnalysis.CSharp;
+
+using static SourceCrafter.DependencyInjection.Interop.ServiceDescriptor;
 
 namespace SourceCrafter.DependencyInjection;
 
@@ -21,13 +23,16 @@ class ServiceContainerGenerator
     readonly ImmutableArray<AttributeData> attributes;
 
     readonly SemanticModel _model;
+    private readonly Set<Diagnostic> _diagnostics;
     readonly INamedTypeSymbol _providerClass;
     private readonly Compilation _compilation;
-    readonly StringBuilder code = new();
+    readonly StringBuilder code = new(@"#nullable enable
+");
 
+    readonly HashSet<(bool, string)> enumKeysRegistry = [];
     readonly HashSet<string>
         propsRegistry = [],
-         interfacesRegistry = [];
+        interfacesRegistry = [];
 
     readonly Set<ServiceDescriptor> entries = new(Extensions.GenKey);
 
@@ -41,66 +46,71 @@ class ServiceContainerGenerator
         methods = null,
         props = null;
 
-    Action?
+    Action<StringBuilder>?
         singletonDisposeStatments = null,
         disposeStatments = null;
 
     bool useIComma = false,
-        hasScoped = false,
-        requiresLocker = false;
+        hasScopedService = false,
+        requiresLocker = false,
+        requiresSemaphore = false;
 
     readonly bool
-        hasNamedService = true,
-        hasService = true;
+        hasService = false,
+        hasAsyncService = false;
 
-    readonly byte disposability = 0;
+    readonly Disposability disposability = 0;
 
     readonly static Dictionary<int, string>
         genericParamNames = new()
         {
-            {0, "name"},
-            {1, "factory"}
+            {0, KeyParamName},
+            {1, FactoryOrInstanceParamName },
+            {2, CacheParamName }
         },
         paramNames = new()
         {
-            {0, "impl"},
-            {1, "iface"},
-            {2, "name"},
-            {3, "factory"}
+            {0, KeyParamName },
+            {1, ImplParamName },
+            {2, IfaceParamName },
+            {3, FactoryOrInstanceParamName },
+            {4, CacheParamName }
         };
 
-    public ServiceContainerGenerator(INamedTypeSymbol providerClass, Compilation compilation, SemanticModel model)
+    public ServiceContainerGenerator(INamedTypeSymbol providerClass, Compilation compilation, SemanticModel model, Set<Diagnostic> diagnostics)
     {
         _providerClass = providerClass;
         _compilation = compilation;
         _model = model;
-
+        _diagnostics = diagnostics;
         providerTypeName = _providerClass.ToGlobalNamespaced();
         providerClassName = _providerClass.ToNameOnly();
         attributes = _providerClass.GetAttributes();
 
         foreach (var attr in attributes)
         {
-            ServiceType serviceType;
+            Lifetime lifetime;
 
             switch (attr.AttributeClass!.ToGlobalNonGenericNamespace())
             {
-                case "global::SourceCrafter.DependencyInjection.Attributes.SingletonAttribute":
-                    serviceType = ServiceType.Singleton;
+                case SingletonAttr:
+                    lifetime = Lifetime.Singleton;
                     break;
-                case "global::SourceCrafter.DependencyInjection.Attributes.ScopedAttribute":
-                    serviceType = ServiceType.Scoped;
+                case ScopedAttr:
+                    lifetime = Lifetime.Scoped;
                     break;
-                case "global::SourceCrafter.DependencyInjection.Attributes.TransientAttribute":
-                    serviceType = ServiceType.Transient;
+                case TransientAttr:
+                    lifetime = Lifetime.Transient;
                     break;
                 default: continue;
             };
 
             ITypeSymbol type;
             ITypeSymbol? iface;
-            IMethodSymbol? factory;
-            string? name;
+            ISymbol? factory;
+            SymbolKind factoryKind;
+            IFieldSymbol? key;
+            bool? cache;
 
             var attrSyntax = (AttributeSyntax)attr.ApplicationSyntaxReference!.GetSyntax();
 
@@ -111,60 +121,99 @@ class ServiceContainerGenerator
             if (attr.AttributeClass!.TypeArguments is { IsDefaultOrEmpty: false } typeArgs)
             {
                 GetTypes(typeArgs, out type, out iface);
-                GetParams(_params, out name, out factory);
+                GetParams(_params, out key, out factory, out factoryKind, out cache);
             }
             else
             {
-                GetTypesAndParams(_params, out type, out iface, out name, out factory);
+                GetTypesAndParams(_params, out type, out iface, out key, out factory, out factoryKind, out cache);
             }
 
-            if (name != null)
-            {
-                hasNamedService |= true;
+            ITypeSymbol? factoryType;
 
-                serviceType = serviceType switch
+            var (isAsync, shouldAddAsyncAwait) = (factoryType = factory switch
+            {
+                IMethodSymbol m => m.ReturnType,
+                IPropertySymbol p => p.Type,
+                IFieldSymbol p => p.Type,
+                _ => null
+            })?.ToGlobalNonGenericNamespace() switch
+            {
+                "global::System.Threading.Tasks.ValueTask" => (true, false),
+                "global::System.Threading.Tasks.Task" => (true, true),
+                _ => (false, false)
+            };
+
+            if (isAsync)
+            {
+                UpdateSemaphoreUsage();
+
+                if (factoryKind is SymbolKind.Method
+                    && !((IMethodSymbol)factory!).Parameters.Any(p => p.Type.ToDisplayString() is CancelTokenFQMetaName))
                 {
-                    ServiceType.Singleton => ServiceType.NamedSingleton,
-                    ServiceType.Scoped => ServiceType.NamedScoped,
-                    _ => ServiceType.NamedTransient,
-                };
-            }
-            else
-            {
-                hasService |= true;
+                    _diagnostics.TryAdd(ServiceContainerGeneratorDiagnostics.CancellationTokenShouldBeProvided(factory, attrSyntax));
+                }
             }
 
             var thisDisposability = UpdateDisposability(type);
 
             if (thisDisposability > disposability) disposability = thisDisposability;
 
-            var varName = SanitizeTypeName(type, name);
+            var identifier = SanitizeTypeName(type, key);
             var typeName = type.ToGlobalNamespaced();
             var exportTypeFullName = iface?.ToGlobalNamespaced() ?? typeName;
 
             ref var existingOrNew = ref entries
                 .GetOrAddDefault(
-                    Extensions.GenKey(serviceType, exportTypeFullName, name),
+                    Extensions.GenKey(lifetime, exportTypeFullName, key),
                     out var exists)!;
 
             if (exists)
             {
-                // TODO: Notify duplicate registration
+                _diagnostics.TryAdd(
+                    ServiceContainerGeneratorDiagnostics.DuplicateService(lifetime, key, attrSyntax, typeName, exportTypeFullName));
+
                 continue;
             }
             else
             {
-                existingOrNew = new(type, typeName, exportTypeFullName, iface)
+                if (type.IsPrimitive() && key is null)
                 {
-                    ServiceType = serviceType,
-                    Name = name,
-                    Identifier = varName,
+                    _diagnostics.TryAdd(
+                        ServiceContainerGeneratorDiagnostics.PrimitiveDependencyShouldBeKeyed(lifetime, attrSyntax, typeName, exportTypeFullName));
+                }
+
+                existingOrNew = new(type, typeName, exportTypeFullName, key, iface)
+                {
+                    Lifetime = lifetime,
+                    Key = key,
+                    CacheMethodName = identifier,
+                    CacheField = identifier.Camelize(),
                     Factory = factory,
+                    FactoryKind = factoryKind,
                     Disposability = thisDisposability,
                     Resolved = true,
                     Attributes = type.GetAttributes(),
-                    ContainerType = providerClass
+                    IsAsync = isAsync,
+                    ShouldAddAsyncAwait = shouldAddAsyncAwait,
+                    ContainerType = providerClass,
+                    Cached = cache ?? factory is null
                 };
+
+                if (existingOrNew.IsKeyed)
+                {
+                    enumKeysRegistry.Add((isAsync, existingOrNew.KeyEnumTypeName!));
+                }
+                else
+                {
+                    if (isAsync)
+                    {
+                        if (!hasAsyncService) hasAsyncService = true;
+                    }
+                    else if (!hasService)
+                    {
+                        hasService = true;
+                    }
+                }
             }
         }
 
@@ -173,33 +222,104 @@ class ServiceContainerGenerator
 
     void RegisterService(ref ServiceDescriptor service)
     {
-        if (service.NotRegistered) return;
+        if (service.NotRegistered || service.IsCancelTokenParam) return;
 
-        bool isNamed = service.Name != null;
-
-        if (interfacesRegistry.Add($"{isNamed}|{service.ExportTypeName}"))
+        if (interfacesRegistry.Add($"{service.KeyEnumTypeName}|{service.ExportTypeName}"))
         {
             interfaces += service.AddInterface;
         }
 
-        switch (service.ServiceType)
+        if (service.Lifetime is Lifetime.Scoped && !hasScopedService) hasScopedService = true;
+
+        if (service.Lifetime is not Lifetime.Transient)
         {
-            case ServiceType.Singleton or ServiceType.NamedSingleton:
+            if (service.IsAsync)
+            {
+                UpdateSemaphoreUsage();
+            }
+            else if (!requiresLocker)
+            {
+                requiresLocker = true;
+            }
 
-                if (!requiresLocker) requiresLocker = true;
+            switch (service.Disposability)
+            {
+                case Disposability.AsyncDisposable:
 
-                AppendDisposability(service.Disposability, service.Identifier, ref singletonDisposeStatments);
+                    if (service.Lifetime is Lifetime.Scoped)
+                    {
+                        disposeStatments += service.BuildDisposeAsyncStatment;
+                    }
+                    else
+                    {
+                        singletonDisposeStatments += service.BuildDisposeAsyncStatment;
+                    }
 
-                service.GenerateValue = service.BuildWithVarName;
+                    break;
+                case Disposability.Diposable:
 
-                service.ParseParams(entries);
+                    if (service.Lifetime is Lifetime.Scoped)
+                    {
+                        disposeStatments += service.BuildDisposeStatment;
+                    }
+                    else
+                    {
+                        singletonDisposeStatments += service.BuildDisposeStatment;
+                    }
+                    break;
+            }
 
-                props += service.BuildProperty;
+            if (!service.IsFactory || service.Cached) props += service.BuildCachedResolver;
+        }
+
+        service.GenerateValue = service.Lifetime is Lifetime.Transient
+            ? service.IsFactory ? service.UseFactoryResolver : service.UseInstance
+            : service is { IsFactory: true, Cached: false }
+                   ? service.UseFactoryResolver
+                   : service.UseCachedMethodResolver;
+
+        service.CheckParamsDependencies(entries, UpdateSemaphoreUsage, _compilation);
+
+        if (service.IsKeyed)
+        {
+            ref var builder = ref keyedMethods.GetOrAddDefault(
+                $"{service.IsAsync}|{service.ExportTypeName}|{service.KeyEnumTypeName}",
+                out var existKeyedMethod);
+
+            if (!existKeyedMethod) builder += service.BuildSwitchBranch(code);
+        }
+        else
+        {
+            methods += service.BuildMethod;
+        }
+
+        /*switch (service.Lifetime)
+        {
+            case Lifetime.Singleton:
+
+                if (service.IsAsync)
+                {
+                    UpdateSemaphoreUsage();
+                }
+                else if (!requiresLocker)
+                {
+                    requiresLocker = true;
+                }
+
+                AppendDisposability(service.Disposability, service.CacheField, ref singletonDisposeStatments);
+
+                if (!isFactory || service.Cached) props += service.BuildCachedResolver;
+
+                service.GenerateValue = service is { IsFactory: true, Cached: false }
+                    ? service.UseFactoryResolver
+                    : service.UseCachedMethodResolver;
+
+                service.CheckParamsDependencies(entries, ref requiresSemaphore);
 
                 if (isNamed)
                 {
                     ref var builder = ref keyedMethods.GetOrAddDefault(
-                        service.ExportTypeName,
+                        $"{service.IsAsync}|{service.ExportTypeName}",
                         out var existKeyedMethod);
 
                     builder += service.BuildSwitchBranch(code);
@@ -211,24 +331,33 @@ class ServiceContainerGenerator
 
                 return;
 
-            case ServiceType.Scoped or ServiceType.NamedScoped:
+            case Lifetime.Scoped:
 
-                hasScoped = true;
+                hasScopedService = true;
 
-                if (!requiresLocker) requiresLocker = true;
+                if (service.IsAsync)
+                {
+                    UpdateSemaphoreUsage();
+                }
+                else if (!requiresLocker)
+                {
+                    requiresLocker = true;
+                }
 
-                service.GenerateValue = service.BuildWithVarName;
+                if (!isFactory || service.Cached) props += service.BuildCachedResolver;
 
-                AppendDisposability(service.Disposability, service.Identifier, ref disposeStatments);
+                AppendDisposability(service.Disposability, service.CacheField, ref disposeStatments);
 
-                service.ParseParams(entries);
+                service.GenerateValue = service is { IsFactory: true, Cached: false }
+                    ? service.UseFactoryResolver
+                    : service.UseCachedMethodResolver;
 
-                props += service.BuildProperty;
+                service.CheckParamsDependencies(entries, ref requiresSemaphore);
 
                 if (service.Name != null)
                 {
                     ref var builder = ref keyedMethods.GetOrAddDefault(
-                        service.ExportTypeName,
+                        $"{service.IsAsync}|{service.ExportTypeName}",
                         out var existKeyedMethod);
 
                     builder += service.BuildSwitchBranch(code);
@@ -240,16 +369,16 @@ class ServiceContainerGenerator
 
                 return;
 
-            case ServiceType.Transient or ServiceType.NamedTransient:
+            case Lifetime.Transient:
 
-                service.GenerateValue = service.BuildInstance;
+                service.GenerateValue = service.IsFactory ? service.UseFactoryResolver : service.UseInstance;
 
-                service.ParseParams(entries);
+                service.CheckParamsDependencies(entries, ref requiresSemaphore);
 
                 if (isNamed)
                 {
                     ref var builder = ref keyedMethods.GetOrAddDefault(
-                        service.ExportTypeName,
+                        $"{service.IsAsync}|{service.ExportTypeName}",
                         out var existKeyedMethod);
 
                     builder += service.BuildSwitchBranch(code);
@@ -260,10 +389,29 @@ class ServiceContainerGenerator
                 }
 
                 return;
+        }*/
+    }
+
+    private void UpdateSemaphoreUsage()
+    {
+        if (!requiresSemaphore)
+        {
+            if (_compilation.GetTypeByMetadataName(CancelTokenFQMetaName) is { } cancelType)
+            {
+                string cancelTypeName = cancelType.ToGlobalNamespaced();
+
+                entries.TryAdd(new ServiceDescriptor(cancelType, cancelTypeName, cancelTypeName, null)
+                {
+                    Resolved = true,
+                    IsCancelTokenParam = true
+                });
+            }
+
+            requiresSemaphore = true;
         }
     }
 
-    public void TryBuild(Map<string, byte> uniqueName, Action<string, string> addSource)
+    public void TryBuild(ImmutableArray<InvocationExpressionSyntax> usages, Map<string, byte> uniqueName, Action<string, string> addSource)
     {
         if (interfaces == null) return;
 
@@ -271,7 +419,7 @@ class ServiceContainerGenerator
 
         foreach (var (prefix, extraCode) in DependencyInjectionPartsGenerator.InvokeContainerRegistration(code, _compilation, _providerClass, entries))
         {
-            addSource(fileName + "." + prefix, extraCode);
+            addSource(fileName + "." + prefix + ".generated", extraCode);
         }
 
         if (_providerClass.ContainingNamespace is { IsGlobalNamespace: false } ns)
@@ -283,29 +431,50 @@ class ServiceContainerGenerator
 ");
         }
 
+        var initialization = _providerClass.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() switch
+        {
+            ClassDeclarationSyntax { Modifiers: { } modifiers, Identifier: { } identifier, TypeParameterList: { } argList } iFaceDeclaration =>
+                $"{modifiers} {identifier}{argList}",
+            _ => "partial class "
+        };
+
         code.AppendLine(Generator.generatedCodeAttribute)
-            .Append("public partial class ")
+            .Append(initialization)
             .Append(providerClassName)
             .Append(@" : ");
 
         interfaces(ref useIComma, code);
 
-        if (hasNamedService)
-        {
-            code.Append(@",
-	global::SourceCrafter.DependencyInjection.IKeyedServiceProvider");
-        }
         if (hasService)
         {
             code.Append(@",
 	global::SourceCrafter.DependencyInjection.IServiceProvider");
         }
 
+        if (hasAsyncService)
+        {
+            code.Append(@",
+	global::SourceCrafter.DependencyInjection.IAsyncServiceProvider");
+        }
+
+        foreach (var (isAsync, enumFullType) in enumKeysRegistry)
+        {
+            code.Append(@",
+	global::SourceCrafter.DependencyInjection.IKeyed");
+
+            if (isAsync) code.Append("Async");
+
+            code.Append("ServiceProvider<")
+                .Append(enumFullType)
+                .Append(">");
+        }
+
         if (disposability > 0)
         {
             switch (disposability)
             {
-                case 1:
+                case Disposability.Diposable:
+
                     code.Append(@",
 	global::System.IDisposable	
 {
@@ -313,25 +482,9 @@ class ServiceContainerGenerator
                     .AppendLine(Generator.generatedCodeAttribute)
                     .Append(@"    public void Dispose()
 	{");
-                    disposeStatments?.Invoke();
 
-                    if (hasScoped)
-                    {
-                        if (disposeStatments != null)
-                        {
-                            code.AppendLine();
-                        }
-
-                        code.Append(@"
-		if(isScoped) return;
-");
-                    }
-                    singletonDisposeStatments?.Invoke();
-                    code.Append(@"
-	}
-");
                     break;
-                case 2:
+                case Disposability.AsyncDisposable:
                     code.Append(@",
 	global::System.IAsyncDisposable	
 {
@@ -339,25 +492,29 @@ class ServiceContainerGenerator
                     .AppendLine(Generator.generatedCodeAttribute)
                     .Append(@"    public async global::System.Threading.Tasks.ValueTask DisposeAsync()
 	{");
-                    disposeStatments?.Invoke();
 
-                    if (hasScoped)
-                    {
-                        if (disposeStatments != null)
-                        {
-                            code.AppendLine();
-                        }
-
-                        code.Append(@"
-		if(isScoped) return;
-");
-                    }
-                    singletonDisposeStatments?.Invoke();
-                    code.Append(@"
-	}
-");
                     break;
             }
+
+            disposeStatments?.Invoke(code);
+
+            if (hasScopedService)
+            {
+                if (disposeStatments != null)
+                {
+                    code.AppendLine();
+                }
+
+                code.Append(@"
+		if(isScoped) return;
+");
+            }
+
+            singletonDisposeStatments?.Invoke(code);
+
+            code.Append(@"
+	}
+");
         }
         else
         {
@@ -370,11 +527,20 @@ class ServiceContainerGenerator
         if (requiresLocker)
         {
             code.Append(@"
-    static readonly object _lock = new object();
+    static readonly object __lock = new object();
 ");
         }
 
-        if (hasScoped)
+        if (requiresSemaphore)
+        {
+            code.Append(@"
+    private static readonly global::System.Threading.SemaphoreSlim __globalSemaphore = new global::System.Threading.SemaphoreSlim(1, 1);
+
+    private static global::System.Threading.CancellationTokenSource __globalCancellationTokenSrc = new global::System.Threading.CancellationTokenSource();
+");
+        }
+
+        if (hasScopedService)
         {
             code.Append(@"
     private bool isScoped = false;
@@ -390,33 +556,65 @@ class ServiceContainerGenerator
 
         foreach (var tuple in keyedMethods.AsSpan())
         {
+            var parts = tuple.Key.Split('|');
+            (bool isAsync, string serviceName, string enumType) = (bool.Parse(parts[0]), parts[1], parts[2]);
+
             code
                 .Append(@"
 	")
                 .AppendLine(Generator.generatedCodeAttribute)
-                .Append("    ").Append(tuple.Key)
-                .Append(@" 
-        global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<")
-                .Append(tuple.Key)
-                .Append(@">
-            .GetService(string name)
+                .Append("    ");
+
+            if (isAsync)
+            {
+                code.Append("global::System.Threading.Tasks.ValueTask<")
+                    .Append(serviceName)
+                    .Append(@"> global::SourceCrafter.DependencyInjection.IKeyedAsyncServiceProvider<")
+                    .Append(enumType)
+                    .Append(@", ")
+                    .Append(serviceName)
+                    .Append(@">.GetServiceAsync(")
+                    .Append(enumType)
+                    .Append(" key, global::System.Threading.CancellationToken cancellationToken = default");
+            }
+            else
+            {
+                code.Append(serviceName)
+                    .Append(@" global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<")
+                    .Append(enumType)
+                    .Append(@", ")
+                    .Append(serviceName)
+                    .Append(@">.GetService(").Append(enumType).Append(" key");
+            }
+
+            code.Append(@")
 	{
-		switch(name)
+		switch(key)
 		{");
 
 
             tuple.Value();
 
             code.Append(@"
-			default: throw InvalidNamedService(""")
-                .Append(tuple.Key)
-                .Append(@""", name);
+			default: throw InvalidKeyedService(""")
+                .Append(serviceName)
+                .Append(@""", """)
+                .Append(enumType)
+                .Append(@""", key);
 		}
 	}
 ");
         }
 
-        if (hasScoped)
+        if (keyedMethods.Count > 0)
+        {
+            code.Append(@"
+	private static global::System.NotImplementedException InvalidKeyedService(string typeFullName, string serviceKeyName, Enum value) =>
+			new global::System.NotImplementedException($""There's no registered keyed-implementation for [{serviceKeyName}.{value} = global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<{typeFullName}>.GetService({serviceKeyName} name)]"");
+");
+        }
+
+        if (hasScopedService)
         {
             code.Append(@"
     ")
@@ -426,19 +624,45 @@ class ServiceContainerGenerator
 ");
         }
 
-        if (hasNamedService)
+        foreach (var (isAsync, enumFullType) in enumKeysRegistry)
         {
-            code
-                .Append(@"
+            if (isAsync)
+            {
+                code
+                    .Append(@"
     ")
-                .AppendLine(Generator.generatedCodeAttribute)
-                .Append(@"    public T GetService<T>(string key) => (this as global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<T> ?? throw InvalidNamedService(typeof(T).AssemblyQualifiedName!, key)).GetService(key);
-
-    ")
-                .AppendLine(Generator.generatedCodeAttribute)
-                .Append(@"    private static global::System.NotImplementedException InvalidNamedService(string typeFullName, string serviceKeyName) => 
-		new global::System.NotImplementedException($""There's no registered keyed-implementation for [{serviceKeyName} = global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<{typeFullName}>.GetService(string name)]"");
+                    .AppendLine(Generator.generatedCodeAttribute)
+                    .Append(@"    public global::System.Threading.Tasks.ValueTask<T> GetServiceAsync<T>(")
+                    .Append(enumFullType)
+                    .Append(@" key, global::System.Threading.CancellationToken cancellationToken = default) => 
+        ((global::SourceCrafter.DependencyInjection.IKeyedAsyncServiceProvider<")
+                    .Append(enumFullType)
+                    .Append(@", T>)
+            (global::SourceCrafter.DependencyInjection.IKeyedAsyncServiceProvider<")
+                    .Append(enumFullType)
+                    .Append(@">)this)
+                .GetServiceAsync(key, cancellationToken == default ? __globalCancellationTokenSrc.Token : cancellationToken);
 ");
+            }
+            else
+            {
+                code
+                    .Append(@"
+    ")
+                    .AppendLine(Generator.generatedCodeAttribute)
+                    .Append(@"    public T GetService<T>(")
+                    .Append(enumFullType)
+                    .Append(@" key) => 
+        ((global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<")
+                    .Append(enumFullType)
+                    .Append(@", T>)
+            (global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<")
+                    .Append(enumFullType)
+                    .Append(@">)this)
+                .GetService(key);
+");
+
+            }
         }
 
         if (hasService)
@@ -447,18 +671,97 @@ class ServiceContainerGenerator
                 .Append(@"
     ")
                 .AppendLine(Generator.generatedCodeAttribute)
-                .Append(@"    public T GetService<T>() => (this as global::SourceCrafter.DependencyInjection.IServiceProvider<T> ?? throw InvalidService(typeof(T).AssemblyQualifiedName!)).GetService();
+                .Append(@"    public T GetService<T>() => 
+        ((global::SourceCrafter.DependencyInjection.IServiceProvider<T>)
+            (global::SourceCrafter.DependencyInjection.IServiceProvider)this).GetService();
+");
+        }
 
+        if (hasAsyncService)
+        {
+            code
+                .Append(@"
     ")
                 .AppendLine(Generator.generatedCodeAttribute)
-                .Append(@"    private static global::System.NotImplementedException InvalidService(string typeFullName) =>
-		new global::System.NotImplementedException($""There's no registered implementation for [global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<{typeFullName}>.GetService(string name)]"");
+                .Append(@"    public global::System.Threading.Tasks.ValueTask<T> GetServiceAsync(global::System.Threading.CancellationToken cancellationToken = default) => 
+        ((global::SourceCrafter.DependencyInjection.IAsyncServiceProvider<T>)
+            (global::SourceCrafter.DependencyInjection.IAsyncServiceProvider)this)
+                .GetServiceAsync(cancellationToken == default ? __globalCancellationTokenSrc.Token : cancellationToken);
 ");
         }
 
         var codeStr = code.Append("}").ToString();
 
-        addSource(fileName, codeStr);
+        addSource(fileName + ".generated", codeStr);
+
+        CheckUsages(usages);
+    }
+
+    private void CheckUsages(ImmutableArray<InvocationExpressionSyntax> usages)
+    {
+        foreach (var invExpr in usages)
+        {
+            bool found = false;
+
+            if (((GenericNameSyntax)((MemberAccessExpressionSyntax)invExpr.Expression).Name)
+                    .TypeArgumentList
+                    .Arguments
+                    .FirstOrDefault() is not { } type)
+
+                continue;
+
+            var model = _compilation.GetSemanticModel(invExpr.SyntaxTree);
+
+            var refType = model.GetSymbolInfo(((MemberAccessExpressionSyntax)invExpr.Expression).Expression).Symbol switch
+            {
+                ILocalSymbol { Type: { } rType } => rType,
+                IFieldSymbol { Type: { } rType } => rType,
+                IPropertySymbol { Type: { } rType } => rType,
+                _ => null
+            };
+
+            if (refType is null || !SymbolEqualityComparer.Default.Equals(refType, _providerClass)) continue;
+
+            var typeSymbol = model.GetTypeInfo(type).Type;
+
+            if (typeSymbol is null) continue;
+
+            var typeFullName = typeSymbol.ToGlobalNamespaced();
+
+            IFieldSymbol? key = null;
+
+            if (invExpr.ArgumentList.Arguments is [{ Expression: { } keyArg } arg])
+            {
+                if (model.GetSymbolInfo(keyArg).Symbol is IFieldSymbol
+                {
+                    IsConst: true,
+                    Type: INamedTypeSymbol { TypeKind: TypeKind.Enum }
+                } f)
+                {
+                        key = f;
+                }
+                else
+                {
+                    _diagnostics.TryAdd(
+                        ServiceContainerGeneratorDiagnostics.InvalidKeyType(arg.Expression));
+                }
+            }
+
+            entries.ForEach((ref ServiceDescriptor item) =>
+            {
+                if (item.ExportTypeName == typeFullName
+                    && SymbolEqualityComparer.Default.Equals(item.Key, key) && item.Resolved)
+                {
+                    found = true;
+                }
+            });
+
+            if (!found)
+            {
+                _diagnostics.TryAdd(
+                    ServiceContainerGeneratorDiagnostics.UnresolvedDependency(invExpr, providerClassName, typeFullName, key));
+            }
+        }
     }
 
     void GetTypes(ImmutableArray<ITypeSymbol> symbols, out ITypeSymbol type, out ITypeSymbol? iface) =>
@@ -473,25 +776,12 @@ class ServiceContainerGenerator
                 _ => (default!, default)
             };
 
-    void AppendDisposability(byte thisDisposability, string varName, ref Action? statement)
+    string SanitizeTypeName(ITypeSymbol type, IFieldSymbol? prefix = null)
     {
-        switch (thisDisposability)
-        {
-            case 2:
-                statement += () => code.Append(@"
-		await ").Append(varName).Append(".DisposeAsync();");
-                break;
-            case 1:
-                disposeStatments += () => code.Append(@"
-		").Append(varName).Append(".Dispose();");
-                break;
-        }
-    }
+        string varName = (prefix is { ContainingType.Name: { } enumType, Name: { } name } ? $"{enumType}_{name}_" : null) + Sanitize(type).Capitalize();
 
-    string SanitizeTypeName(ITypeSymbol type, string? prefix = null)
-    {
-        string varName = prefix + Sanitize(type);
         string varName1 = varName;
+
         var i = 0;
 
         while (!propsRegistry.Add(varName1))
@@ -525,63 +815,87 @@ class ServiceContainerGenerator
         }
     }
 
-    byte UpdateDisposability(ITypeSymbol type)
+    Disposability UpdateDisposability(ITypeSymbol type)
     {
-        byte disposability = 0;
+        Disposability disposability = Disposability.None;
 
         foreach (var iFace in type.AllInterfaces)
         {
             switch (iFace.ToGlobalNonGenericNamespace())
             {
-                case "global::System.IDisposable" when disposability is 0:
-                    disposability = 1;
+                case "global::System.IDisposable" when disposability is Disposability.None:
+                    disposability = Disposability.Diposable;
                     break;
-                case "global::System.IAsyncDisposable" when disposability < 2:
-                    disposability = 2;
-                    break;
-            }
-
-            if (disposability == 2)
-            {
-                break;
+                case "global::System.IAsyncDisposable" when disposability < Disposability.AsyncDisposable:
+                    return Disposability.AsyncDisposable;
             }
         }
 
         return disposability;
     }
 
-    void GetParams(SeparatedSyntaxList<AttributeArgumentSyntax> _params, out string? name, out IMethodSymbol? factory)
+    void GetParams(SeparatedSyntaxList<AttributeArgumentSyntax> _params, out IFieldSymbol? key, out ISymbol? factory, out SymbolKind factoryKind, out bool? cache)
     {
-        name = null;
+        key = null;
         factory = null;
-
+        factoryKind = default;
+        cache = true;
         int i = 0;
 
         foreach (var arg in _params)
         {
             switch (arg.NameColon?.Name.Identifier.ValueText ?? genericParamNames[i])
             {
-                case "name":
-                    name = arg.Expression is LiteralExpressionSyntax { Token.Value: { } val } expr
-                        ? val.ToString()
-                        : arg.Expression.ToString();
-                    break;
-                case "factory":
-                    if (arg.Expression is InvocationExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.ValueText: "nameof" }, ArgumentList.Arguments: [{ } methodRef] })
+                case KeyParamName:
+
+                    if (_model.GetSymbolInfo(arg.Expression).Symbol is IFieldSymbol
+                        {
+                            IsConst: true,
+                            Type: INamedTypeSymbol { TypeKind: TypeKind.Enum }
+                        } field)
                     {
-                        var r = _model.GetSymbolInfo(((MemberAccessExpressionSyntax)methodRef.Expression).Expression).Symbol;
-                        factory = r as IMethodSymbol;
+                        key = field;
                     }
+                    else
+                    {
+
+                        _diagnostics.TryAdd(
+                            ServiceContainerGeneratorDiagnostics.InvalidKeyType(arg.Expression));
+                    }
+
+                    break;
+
+                case FactoryOrInstanceParamName:
+
+                    GetFactory(arg, ref factory, ref factoryKind);
+
+                    break;
+
+                case CacheParamName:
+
+                    cache = bool.Parse(arg.Expression.ToString());
+
                     break;
             }
+
+            i++;
         }
     }
 
-    void GetTypesAndParams(SeparatedSyntaxList<AttributeArgumentSyntax> _params, out ITypeSymbol implType, out ITypeSymbol? ifaceType, out string? name, out IMethodSymbol? factory)
+    void GetTypesAndParams(
+        SeparatedSyntaxList<AttributeArgumentSyntax> _params,
+        out ITypeSymbol implType,
+        out ITypeSymbol? ifaceType,
+        out IFieldSymbol? key,
+        out ISymbol? factory,
+        out SymbolKind factoryKind,
+        out bool? cache)
     {
-        name = null;
+        key = null;
         implType = ifaceType = null!;
         factory = null;
+        factoryKind = default;
+        cache = true;
 
         int i = 0;
 
@@ -589,23 +903,50 @@ class ServiceContainerGenerator
         {
             switch (arg.NameColon?.Name.Identifier.ValueText ?? paramNames[i])
             {
-                case "impl" when arg.Expression is TypeOfExpressionSyntax { Type: { } type }:
+                case ImplParamName when arg.Expression is TypeOfExpressionSyntax { Type: { } type }:
+
                     implType = (ITypeSymbol)_model!.GetSymbolInfo(type).Symbol!;
+
                     break;
-                case "iface" when arg.Expression is TypeOfExpressionSyntax { Type: { } type }:
+
+                case IfaceParamName when arg.Expression is TypeOfExpressionSyntax { Type: { } type }:
+
                     ifaceType = (ITypeSymbol)_model!.GetSymbolInfo(type).Symbol!;
+
                     break;
-                case "name":
-                    name = arg.Expression is LiteralExpressionSyntax { Token.Value: { } val } expr
-                        ? val.ToString()
-                        : arg.Expression.ToString();
+
+                case KeyParamName:
+
+                    if (_model.GetSymbolInfo(arg.Expression).Symbol is IFieldSymbol
+                        {
+                            IsConst: true,
+                            Type: INamedTypeSymbol { TypeKind: TypeKind.Enum }
+                        } field)
+                    {
+                        key = field;
+                    }
+                    else
+                    {
+                        _diagnostics.TryAdd(
+                            ServiceContainerGeneratorDiagnostics.InvalidKeyType(arg.Expression));
+                    }
+
                     break;
-                case "factory":
-                    factory = arg.Expression is InvocationExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.ValueText: "nameof" }, ArgumentList.Arguments: [{ } methodRef] }
-                        ? _model.GetSymbolInfo(methodRef).Symbol as IMethodSymbol
-                        : null;
+
+                case FactoryOrInstanceParamName:
+
+                    GetFactory(arg, ref factory, ref factoryKind);
+
+                    break;
+
+                case CacheParamName:
+
+                    cache = bool.Parse(arg.Expression.ToString());
+
                     break;
             }
+
+            i++;
         }
 
         if (ifaceType != null)
@@ -613,4 +954,24 @@ class ServiceContainerGenerator
             (ifaceType, implType) = (implType, ifaceType);
         }
     }
+
+    void GetFactory(AttributeArgumentSyntax arg, ref ISymbol? factory, ref SymbolKind factoryKind)
+    {
+        if (arg.Expression is InvocationExpressionSyntax { Expression: IdentifierNameSyntax { Identifier.ValueText: "nameof" }, ArgumentList.Arguments: [{ } methodRef] })
+        {
+            var info = _model.GetSymbolInfo(methodRef.Expression);
+
+            (factory, factoryKind) = info switch
+            {
+                { Symbol: (IFieldSymbol or IPropertySymbol) and { IsStatic: true, Kind: { } kind } fieldOrProp }
+                    => (fieldOrProp, kind),
+
+                { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [IMethodSymbol { ReturnsVoid: false, IsStatic: true } method] }
+                    => (method, SymbolKind.Method),
+
+                _ => (null, default)
+            };
+        }
+    }
+
 }

@@ -12,7 +12,7 @@
 //        get
 //        {
 //            if (__appConfig__ is null)
-//                lock (_lock)
+//                lock (__lock)
 //                    return __appConfig__ ??= new ConfigurationBuilder()
 //                        .SetBasePath(global::System.IO.Directory.GetCurrentDirectory())
 //                        .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
@@ -39,7 +39,7 @@
 //        get
 //        {
 //            if (__appConfig__SETTING1 is null)
-//                lock (_lock)
+//                lock (__lock)
 //                    return __appConfig__SETTING1 ??= BuildSetting();
 
 //            return __appConfig__SETTING1;

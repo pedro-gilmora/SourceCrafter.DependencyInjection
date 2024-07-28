@@ -12,12 +12,12 @@ namespace SourceCrafter.DependencyInjection.Tests
         {
             await using Server e = new();
 
-            //var config = e.GetService<IConfiguration>();
-            await using var scope = e.CreateScope();
-            using var db = scope.GetService<AuthService>();
-            //config.GetSection("AppSetings").Get<AppSettings>()!.Setting1.Should().Be("Value1");
+            string value = e.GetService<string>("");
+            //const string b = "a";
+            //string value2 = e.GetService<string>(b);
 
-            //appSettings.Setting1.Should().Be("Value1");
+            //await using var scope = e.CreateScope();
+            //using var db = scope.GetService<AuthService>();
         }
     }
 

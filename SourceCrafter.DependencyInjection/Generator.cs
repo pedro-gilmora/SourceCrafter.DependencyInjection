@@ -6,6 +6,8 @@ using System.Reflection;
 using SourceCrafter.DependencyInjection.Interop;
 using System.Text;
 using Microsoft.CodeAnalysis.Text;
+using System.Collections.Generic;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 //[assembly: InternalsVisibleTo("SourceCrafter.MappingGenerator.UnitTests")]
 namespace SourceCrafter.DependencyInjection;
@@ -13,7 +15,6 @@ namespace SourceCrafter.DependencyInjection;
 [Generator]
 public class Generator : IIncrementalGenerator
 {
-
     internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -24,31 +25,39 @@ public class Generator : IIncrementalGenerator
 
         context.RegisterPostInitializationOutput(GenerateAbstracts);
 
+        var getServiceCheck = context.SyntaxProvider
+                .CreateSyntaxProvider(
+                    (syntax, _) => syntax is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Name: GenericNameSyntax { TypeArgumentList.Arguments: [var a], Identifier.ValueText: "GetService" } } },
+                    (gsc, _) => (InvocationExpressionSyntax)gsc.Node).Collect();
+
         var serviceHostType = context.SyntaxProvider
                 .ForAttributeWithMetadataName("SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute",
                     (node, a) => true,
                     (t, c) => (t.SemanticModel, Class: (INamedTypeSymbol)t.TargetSymbol)).Collect();
 
-        context.RegisterSourceOutput(context.CompilationProvider.Combine(serviceHostType), static (p, info) =>
+        context.RegisterSourceOutput(context.CompilationProvider.Combine(serviceHostType).Combine(getServiceCheck), static (p, info) =>
         {
             Map<string, byte> uniqueName = new(StringComparer.Ordinal);
 
             var sb = new StringBuilder("/*").AppendLine();
             int start = sb.Length;
 
+            Set<Diagnostic> diagnostics = new(e => e.Location.ToString());
+
             try
             {
-                foreach (var item in info.Right)
+                foreach (var item in info.Left.Right)
                 {
-                    new ServiceContainerGenerator(item.Class, info.Left, item.SemanticModel)
-                              .TryBuild(uniqueName, p.AddSource);
-
+                    new ServiceContainerGenerator(item.Class, info.Left.Left, item.SemanticModel, diagnostics)
+                        .TryBuild(info.Right, uniqueName, p.AddSource);
                 }
             }
             catch (Exception e)
             {
                 sb.AppendLine(e.ToString());
             }
+
+            diagnostics.ForEach(item => p.ReportDiagnostic(item));
 
             if (sb.Length > start)
             {
@@ -78,35 +87,81 @@ public class Generator : IIncrementalGenerator
 
     private static void GenerateAbstracts(IncrementalGeneratorPostInitializationContext producer)
     {
-        producer.AddSource("SourceCrafter.DependencyInjection.Attributes", @"#pragma warning disable CS9113
+        const string Source = @"#nullable enable
+#pragma warning disable CS9113
 
 namespace SourceCrafter.DependencyInjection.Attributes
 {
+	[global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface | global::System.AttributeTargets.Parameter, AllowMultiple = true)]
 	public class ServiceContainerAttribute : Attribute;
-	public class SingletonAttribute<TImplementation>(string? name = null, string? factory = null) : SingletonAttribute(typeof(TImplementation), null, name, factory);
-	public class SingletonAttribute<T, TImplementation>(string? name = null, string? factory = null) : SingletonAttribute(typeof(TImplementation), typeof(T), name, factory);
-	public class SingletonAttribute(global::System.Type impl, global::System.Type? iface = null, string? name = null, string? factory = null) : Attribute;
-	public class ScopedAttribute<TImplementation>(string? name = null, string? factory = null) : SingletonAttribute(typeof(TImplementation), null, factory, name);
-	public class ScopedAttribute<T, TImplementation>(string? name = null, string? factory = null) : SingletonAttribute(typeof(TImplementation), typeof(T), name, factory);
-	public class ScopedAttribute(global::System.Type impl, global::System.Type? iface = null, string? name = null, string? factory = null) : Attribute;
-	public class TransientAttribute<TImplementation>(string? name = null, string? factory = null) : SingletonAttribute(typeof(TImplementation), null, name, factory);
-	public class TransientAttribute<T, TImplementation>(string? name = null, string? factory = null) : SingletonAttribute(typeof(TImplementation), typeof(T), name, factory);
-	public class TransientAttribute(global::System.Type impl, global::System.Type? iface = null, string? name = null, string? factory = null) : Attribute;
-	public class NamedSingletonServiceAttribute(string name) : Attribute;
-	public class NamedScopedServiceAttribute(string name) : Attribute;
-	public class NamedTransientServiceAttribute(string name) : Attribute;
-	public class NamedServiceAttribute(string name) : Attribute;
+
+	[global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface, AllowMultiple = true)]
+	public class SingletonAttribute<TImplementation>(object? key = null, string? factoryOrInstance = null, bool cache = true) : SingletonAttribute(key, typeof(TImplementation), null, factoryOrInstance, cache);
+
+	[global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface, AllowMultiple = true)]
+	public class SingletonAttribute<T, TImplementation>(object? key = null, string? factoryOrInstance = null, bool cache = true) : SingletonAttribute(key, typeof(TImplementation), typeof(T), factoryOrInstance, cache);
+
+	[global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface | global::System.AttributeTargets.Parameter, AllowMultiple = true)]
+	public class SingletonAttribute(object? key = null, global::System.Type? impl = null, global::System.Type? iface = null, string? factoryOrInstance = null, bool cache = true) : Attribute;
+
+	[global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface, AllowMultiple = true)]
+	public class ScopedAttribute<TImplementation>(object? key = null, string? factoryOrInstance = null, bool cache = true) : SingletonAttribute(key, typeof(TImplementation), null, factoryOrInstance, cache);
+
+	[global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface, AllowMultiple = true)]
+	public class ScopedAttribute<T, TImplementation>(object? key = null, string? factoryOrInstance = null, bool cache = true) : SingletonAttribute(key, typeof(TImplementation), typeof(T), factoryOrInstance, cache);
+
+	[global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface | global::System.AttributeTargets.Parameter, AllowMultiple = true)]
+	public class ScopedAttribute(object? key = null, global::System.Type? impl = null, global::System.Type? iface = null, string? factoryOrInstance = null, bool cache = true) : Attribute;
+
+	[global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface, AllowMultiple = true)]
+	public class TransientAttribute<TImplementation>(object? key = null, string? factoryOrInstance = null, bool cache = true) : SingletonAttribute(key, typeof(TImplementation), null, factoryOrInstance, cache);
+
+	[global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface, AllowMultiple = true)]
+	public class TransientAttribute<T, TImplementation>(object? key = null, string? factoryOrInstance = null, bool cache = true) : SingletonAttribute(key, typeof(TImplementation), typeof(T), factoryOrInstance, cache);
+
+	[global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface | global::System.AttributeTargets.Parameter, AllowMultiple = true)]
+	public class TransientAttribute(object? key = null, global::System.Type? impl = null, global::System.Type? iface = null, string? factoryOrInstance = null, bool cache = true) : Attribute;
 }
 
 namespace SourceCrafter.DependencyInjection
 {
-	public interface IServiceProvider<T> { T GetService(); }
-	public interface IKeyedServiceProvider<T> { T GetService(string key); }
-	public interface IServiceProvider { T GetService<T>(); }
-	public interface IKeyedServiceProvider { T GetService<T>(string key); }
+	public interface IServiceProvider<TDependency> : IServiceProvider
+	{
+		TDependency GetService();
+	}
+	public interface IKeyedServiceProvider<TEnumKey, TDependency> : IKeyedServiceProvider<TEnumKey> where TEnumKey : struct, Enum
+	{
+		TDependency GetService(TEnumKey key);
+	}
+	public interface IAsyncServiceProvider<TDependency>
+	{
+		global::System.Threading.Tasks.ValueTask<TDependency> GetServiceAsync(global::System.Threading.CancellationToken cancellationToken = default);
+	}
+	public interface IKeyedAsyncServiceProvider<TEnumKey, TDependency> : IKeyedServiceProvider<TEnumKey> where TEnumKey : struct, Enum
+	{
+		global::System.Threading.Tasks.ValueTask<TDependency> GetServiceAsync(TEnumKey key, global::System.Threading.CancellationToken cancellationToken = default);
+	}
+	public interface IServiceProvider
+	{
+		TDependency GetService<TDependency>();
+	}
+	public interface IKeyedServiceProvider<TEnumKey> where TEnumKey : struct, Enum
+	{
+		TDependency GetService<TDependency>(TEnumKey key); 
+    }
+	public interface IAsyncServiceProvider 
+    { 
+        global::System.Threading.Tasks.ValueTask<TDependency> GetServiceAsync<TDependency>(global::System.Threading.CancellationToken cancellationToken = default);
+	}
+	public interface IKeyedAsyncServiceProvider<TEnumKey> where TEnumKey : struct, Enum
+	{
+		global::System.Threading.Tasks.ValueTask<TDependency> GetServiceAsync<TDependency>(TEnumKey key, global::System.Threading.CancellationToken cancellationToken = default);
+	}
 }
 
-#pragma warning restore CS9113");
+#pragma warning restore CS9113";
+
+        producer.AddSource("SourceCrafter.DependencyInjection.Attributes", Source);
     }
 
 }

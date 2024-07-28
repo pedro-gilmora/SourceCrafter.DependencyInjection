@@ -3,22 +3,32 @@ using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
 
 namespace SourceCrafter.DependencyInjection.Tests
 {
+    public enum GlobalScope { Identity, Application }
+
     [ServiceContainer]
-    [Transient<Configuration>]
-    [Singleton<IDatabase, Database>(name: "identity")]
-    [Scoped<IDatabase, Database>(name: "company")]
-    [Scoped(typeof(AuthService))]
+    [Singleton<Configuration>(factoryOrInstance: nameof(BuildConfiguration))]
+    [Singleton<IDatabase, Database>(GlobalScope.Identity)]
+    [Scoped<IDatabase, Database>(GlobalScope.Application)]
+    [Scoped<AuthService>]
+    [Transient<int>(GlobalScope.Application, nameof(ResolveAsync))]
+    [Transient<string>(GlobalScope.Application, nameof(Name))]
     public sealed partial class Server
     {
+        const string Name = "Server::Name";
+
         static Configuration BuildConfiguration()
         {
             return default!;
         }
+        static ValueTask<int> ResolveAsync(CancellationToken _)
+        {
+            return ValueTask.FromResult(1);
+        }
     }
 
-    public class AuthService([NamedService("identity")] IDatabase db) : global::System.IDisposable
+    public class AuthService([Singleton(GlobalScope.Identity)] IDatabase application, [Transient(GlobalScope.Application)] int o) : global::System.IDisposable
     {
-        public IDatabase Database { get; } = db;
+        public IDatabase Database { get; } = application;
 
         public void Dispose()
         {
