@@ -1,0 +1,46 @@
+name: 'SourceCrafter.DependencyInjection: Build, Test & Deploy for .NET 8'
+
+on:
+  push:
+    branches: [ "**" ]
+
+jobs:
+  try-deliver:
+    name: '.NET 8 Build, Test & Deploy'
+    runs-on: 'ubuntu-latest'
+
+    steps:      
+    - name: Get source code
+      uses: actions/checkout@v3
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: 8.0.x
+
+    - name: Restore dependencies
+      run: dotnet restore
+
+    - name: Test
+      run: dotnet test SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj --verbosity normal -c Release
+
+    - name: Pack generator and endpoints
+      if: github.ref_name == 'dev'
+      run: |
+        without_comma=$(echo "${{ github.event.head_commit.message }}" | sed 's/,/\\u002C/g')
+        dotnet pack SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj --verbosity normal -c Pack /p:PackageReleaseNotes="$without_comma"
+        dotnet pack SourceCrafter.DependencyInjection.Interop/SourceCrafter.DependencyInjection.Interop.csproj --verbosity normal -c Pack /p:PackageReleaseNotes="$without_comma"
+        dotnet pack SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj --verbosity normal -c Pack /p:PackageReleaseNotes="$without_comma"
+        dotnet pack SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj --verbosity normal -c Pack /p:PackageReleaseNotes="$without_comma"
+    
+    - name: Publish generator and endpoints to Nuget
+      if: github.ref_name == 'dev'
+      run: |
+        package="$(find . -wholename '**/Pack/SourceCrafter.DependencyInjection.1*.nupkg' -exec echo "{}" \;)"
+        dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+        package="$(find . -wholename '**/Pack/SourceCrafter.DependencyInjection.Interop*.nupkg' -exec echo "{}" \;)"
+        dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+        package="$(find . -wholename '**/Pack/SourceCrafter.DependencyInjection.MsConfiguration*.nupkg' -exec echo "{}" \;)"
+        dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
+        package="$(find . -wholename '**/Pack/SourceCrafter.DependencyInjection.MsConfiguration.Metadata*.nupkg' -exec echo "{}" \;)"
+        dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
