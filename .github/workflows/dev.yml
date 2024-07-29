@@ -25,7 +25,7 @@ jobs:
       run: dotnet test SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj --verbosity normal -c Release
 
     - name: Pack generator and endpoints
-      if: github.ref_name == 'dev'
+      if: github.ref_name == 'main'
       run: |
         without_comma=$(echo "${{ github.event.head_commit.message }}" | sed 's/,/\\u002C/g')
         dotnet pack SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj --verbosity normal -c Pack /p:PackageReleaseNotes="$without_comma"
@@ -34,7 +34,7 @@ jobs:
         dotnet pack SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj --verbosity normal -c Pack /p:PackageReleaseNotes="$without_comma"
     
     - name: Publish generator and endpoints to Nuget
-      if: github.ref_name == 'dev'
+      if: github.ref_name == 'main'
       run: |
         package="$(find . -wholename '**/Pack/SourceCrafter.DependencyInjection.1*.nupkg' -exec echo "{}" \;)"
         dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
