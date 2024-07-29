@@ -22,10 +22,10 @@ jobs:
       run: dotnet restore
                            
     - name: Build
-      run: dotnet build SourceCrafter.DependencyInjection.Tests/ --verbosity m -c Release
+      run: dotnet build SourceCrafter.DependencyInjection.Tests/ -c Release
 
-    - name: Build
-      run: dotnet build SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj --no-build --verbosity m -c Release
+    - name: Test
+      run: dotnet test SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj --no-build -c Release
 
     - name: Pack generator and endpoints
       if: github.ref_name == 'dev'
