@@ -13,19 +13,31 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration;
 [Generator]
 public class Generator : IIncrementalGenerator
 {
-        internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
-        readonly static Guid generatorGuid = new("54B00B9C-7CF8-45B2-81FC-361B7F5026EB");
+    internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
+    readonly static Guid generatorGuid = new("54B00B9C-7CF8-45B2-81FC-361B7F5026EB");
     static volatile bool isSet = false;
     static volatile bool isMsConfigInstalled = false;
-
-    public void Initialize(IncrementalGeneratorInitializationContext context)
+    public Generator()
     {
-        //context.RegisterPostInitializationOutput(OnCompile);
         if (isSet) return;
 
         isSet = true;
 
-        DependencyInjectionPartsGenerator.OnResolveDependency += ResolveDependency;
+        DependencyInjectionPartsGenerator.RegisterDependencyResolvers(generatorGuid, ResolveDependency);
+    }
+
+    ~Generator()
+    {
+        if (!isSet) return;
+
+        isSet = false;
+
+        DependencyInjectionPartsGenerator.UnregisterDependencyResolvers(generatorGuid);
+    }
+
+    public void Initialize(IncrementalGeneratorInitializationContext context)
+    {
+        //context.RegisterPostInitializationOutput(OnCompile);
     }
 
     private static (string, string)? ResolveDependency(Compilation compilation, ITypeSymbol serviceContainer, Set<ServiceDescriptor> servicesDescriptors)
@@ -39,7 +51,7 @@ using global::Microsoft.Extensions.Configuration;
 
         string iConfigFullTypeName = iConfigTypeSymbol.ToGlobalNamespaced();
 
-        servicesDescriptors.TryAdd(new (iConfigTypeSymbol, iConfigFullTypeName, iConfigFullTypeName, null)
+        servicesDescriptors.TryAdd(new(iConfigTypeSymbol, iConfigFullTypeName, iConfigFullTypeName, null)
         {
             Resolved = true,
             NotRegistered = true
@@ -160,7 +172,7 @@ using global::Microsoft.Extensions.Configuration;
 ");
                 }
             }
-        });       
+        });
 
         extraCode.Append(@"
 }");

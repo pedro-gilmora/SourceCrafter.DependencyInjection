@@ -5,15 +5,6 @@ namespace SourceCrafter.DependencyInjection.Tests
 {
     public enum Main { Identity, App }
 
-    interface IAsyncDisposableServiceProvider<TKey> : IServiceProvider, IAsyncDisposable where TKey : struct, Enum
-    {
-        static IAsyncDisposableServiceProvider<TKey> Create() => (IAsyncDisposableServiceProvider<TKey>)new Server();
-        T GetService<T>(TKey key);
-        ValueTask<T> GetServiceAsync<T>(CancellationToken token = default);
-        ValueTask<T> GetServiceAsync<T>(TKey key, CancellationToken token = default);
-        IAsyncDisposableServiceProvider<TKey> CreateScope();
-    }
-
     [ServiceContainer]
     [Singleton<Configuration>(factoryOrInstance: nameof(BuildConfiguration))]
     [Singleton<IDatabase, Database>]
