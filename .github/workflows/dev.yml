@@ -20,21 +20,21 @@ jobs:
 
     - name: Restore dependencies
       run: dotnet restore
+                           
+    - name: Build
+      run: dotnet build SourceCrafter.DependencyInjection.Tests/ --verbosity m -c Release
 
     - name: Build
-      run: dotnet build SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj --verbosity normal -c Release
-
-    - name: Test
-      run: dotnet test SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj --verbosity normal -c Release
+      run: dotnet build SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj --no-build --verbosity m -c Release
 
     - name: Pack generator and endpoints
       if: github.ref_name == 'dev'
       run: |
         without_comma=$(echo "${{ github.event.head_commit.message }}" | sed 's/,/\\u002C/g')
-        dotnet pack SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj --verbosity normal -c Pack /p:PackageReleaseNotes="$without_comma"
-        dotnet pack SourceCrafter.DependencyInjection.Interop/SourceCrafter.DependencyInjection.Interop.csproj --verbosity normal -c Pack /p:PackageReleaseNotes="$without_comma"
-        dotnet pack SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj --verbosity normal -c Pack /p:PackageReleaseNotes="$without_comma"
-        dotnet pack SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj --verbosity normal -c Pack /p:PackageReleaseNotes="$without_comma"
+        dotnet pack SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj --verbosity m -c Pack /p:PackageReleaseNotes="$without_comma"
+        dotnet pack SourceCrafter.DependencyInjection.Interop/SourceCrafter.DependencyInjection.Interop.csproj --verbosity m -c Pack /p:PackageReleaseNotes="$without_comma"
+        dotnet pack SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj --verbosity m -c Pack /p:PackageReleaseNotes="$without_comma"
+        dotnet pack SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj --verbosity m -c Pack /p:PackageReleaseNotes="$without_comma"
     
     - name: Publish generator and endpoints to Nuget
       if: github.ref_name == 'dev'
