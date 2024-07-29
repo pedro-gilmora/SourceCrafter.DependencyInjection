@@ -21,6 +21,9 @@ jobs:
     - name: Restore dependencies
       run: dotnet restore
 
+    - name: Build
+      run: dotnet build SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj --verbosity normal -c Release
+
     - name: Test
       run: dotnet test SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj --verbosity normal -c Release
 
