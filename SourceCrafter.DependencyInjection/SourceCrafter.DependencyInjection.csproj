@@ -26,6 +26,7 @@
 		<PackageReadmeFile>ReadMe.md</PackageReadmeFile>
 		<Configurations>Debug;Release;DEBUG_SG</Configurations>
 		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
 	</PropertyGroup>
   <ItemGroup>
     <PackageReference Include="IndexRange" Version="1.0.3" />
@@ -37,6 +38,6 @@
     <PackageReference Include="System.Memory" Version="4.5.5" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj"  OutputItemType="Analyzer"/>
+    <ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" />
   </ItemGroup>
 </Project>

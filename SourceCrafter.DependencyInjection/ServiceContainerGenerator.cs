@@ -12,6 +12,8 @@ using SourceCrafter.DependencyInjection.Interop;
 using Microsoft.CodeAnalysis.CSharp;
 
 using static SourceCrafter.DependencyInjection.Interop.ServiceDescriptor;
+using System.Linq.Expressions;
+using System.Threading;
 
 namespace SourceCrafter.DependencyInjection;
 
@@ -34,11 +36,11 @@ class ServiceContainerGenerator
         propsRegistry = [],
         interfacesRegistry = [];
 
-    readonly Set<ServiceDescriptor> entries = new(Extensions.GenKey);
+    readonly Set<ServiceDescriptor> discoveredServices = new(Extensions.GenKey);
 
 
-    readonly Map<string, Action>
-        keyedMethods = new(StringComparer.Ordinal);
+    readonly Map<ServiceDescriptor, Action<StringBuilder>>
+        keyedMethods = new(new KeyedServiceComparer());
 
     CommaSeparateBuilder? interfaces = null;
 
@@ -53,11 +55,11 @@ class ServiceContainerGenerator
     bool useIComma = false,
         hasScopedService = false,
         requiresLocker = false,
-        requiresSemaphore = false;
+        requiresSemaphore = false,
+        hasAsyncService = false;
 
     readonly bool
-        hasService = false,
-        hasAsyncService = false;
+        hasService = false;
 
     readonly Disposability disposability = 0;
 
@@ -145,7 +147,7 @@ class ServiceContainerGenerator
 
             if (isAsync)
             {
-                UpdateSemaphoreUsage();
+                UpdateAsyncStatus();
 
                 if (factoryKind is SymbolKind.Method
                     && !((IMethodSymbol)factory!).Parameters.Any(p => p.Type.ToDisplayString() is CancelTokenFQMetaName))
@@ -162,7 +164,7 @@ class ServiceContainerGenerator
             var typeName = type.ToGlobalNamespaced();
             var exportTypeFullName = iface?.ToGlobalNamespaced() ?? typeName;
 
-            ref var existingOrNew = ref entries
+            ref var existingOrNew = ref discoveredServices
                 .GetOrAddDefault(
                     Extensions.GenKey(lifetime, exportTypeFullName, key),
                     out var exists)!;
@@ -192,6 +194,7 @@ class ServiceContainerGenerator
                     FactoryKind = factoryKind,
                     Disposability = thisDisposability,
                     Resolved = true,
+                    ResolvedBy = Generator.generatorGuid,
                     Attributes = type.GetAttributes(),
                     IsAsync = isAsync,
                     ShouldAddAsyncAwait = shouldAddAsyncAwait,
@@ -201,7 +204,7 @@ class ServiceContainerGenerator
 
                 if (existingOrNew.IsKeyed)
                 {
-                    enumKeysRegistry.Add((isAsync, existingOrNew.KeyEnumTypeName!));
+                    enumKeysRegistry.Add((isAsync, existingOrNew.EnumKeyTypeName!));
                 }
                 else
                 {
@@ -217,14 +220,14 @@ class ServiceContainerGenerator
             }
         }
 
-        entries.ForEach(RegisterService);
+        discoveredServices.ForEach(ResolveService);
     }
 
-    void RegisterService(ref ServiceDescriptor service)
+    void ResolveService(ref ServiceDescriptor service)
     {
         if (service.NotRegistered || service.IsCancelTokenParam) return;
 
-        if (interfacesRegistry.Add($"{service.KeyEnumTypeName}|{service.ExportTypeName}"))
+        if (interfacesRegistry.Add($"{service.EnumKeyTypeName}|{service.ExportTypeName}"))
         {
             interfaces += service.AddInterface;
         }
@@ -235,7 +238,7 @@ class ServiceContainerGenerator
         {
             if (service.IsAsync)
             {
-                UpdateSemaphoreUsage();
+                UpdateAsyncStatus();
             }
             else if (!requiresLocker)
             {
@@ -278,121 +281,23 @@ class ServiceContainerGenerator
                    ? service.UseFactoryResolver
                    : service.UseCachedMethodResolver;
 
-        service.CheckParamsDependencies(entries, UpdateSemaphoreUsage, _compilation);
+        service.CheckParamsDependencies(discoveredServices, UpdateAsyncStatus, _compilation);
 
         if (service.IsKeyed)
         {
             ref var builder = ref keyedMethods.GetOrAddDefault(
-                $"{service.IsAsync}|{service.ExportTypeName}|{service.KeyEnumTypeName}",
+                service,
                 out var existKeyedMethod);
 
-            if (!existKeyedMethod) builder += service.BuildSwitchBranch(code);
+            if (!existKeyedMethod) builder += service.BuildSwitchBranch;
         }
         else
         {
             methods += service.BuildMethod;
         }
-
-        /*switch (service.Lifetime)
-        {
-            case Lifetime.Singleton:
-
-                if (service.IsAsync)
-                {
-                    UpdateSemaphoreUsage();
-                }
-                else if (!requiresLocker)
-                {
-                    requiresLocker = true;
-                }
-
-                AppendDisposability(service.Disposability, service.CacheField, ref singletonDisposeStatments);
-
-                if (!isFactory || service.Cached) props += service.BuildCachedResolver;
-
-                service.GenerateValue = service is { IsFactory: true, Cached: false }
-                    ? service.UseFactoryResolver
-                    : service.UseCachedMethodResolver;
-
-                service.CheckParamsDependencies(entries, ref requiresSemaphore);
-
-                if (isNamed)
-                {
-                    ref var builder = ref keyedMethods.GetOrAddDefault(
-                        $"{service.IsAsync}|{service.ExportTypeName}",
-                        out var existKeyedMethod);
-
-                    builder += service.BuildSwitchBranch(code);
-                }
-                else
-                {
-                    methods += service.BuildMethod;
-                }
-
-                return;
-
-            case Lifetime.Scoped:
-
-                hasScopedService = true;
-
-                if (service.IsAsync)
-                {
-                    UpdateSemaphoreUsage();
-                }
-                else if (!requiresLocker)
-                {
-                    requiresLocker = true;
-                }
-
-                if (!isFactory || service.Cached) props += service.BuildCachedResolver;
-
-                AppendDisposability(service.Disposability, service.CacheField, ref disposeStatments);
-
-                service.GenerateValue = service is { IsFactory: true, Cached: false }
-                    ? service.UseFactoryResolver
-                    : service.UseCachedMethodResolver;
-
-                service.CheckParamsDependencies(entries, ref requiresSemaphore);
-
-                if (service.Name != null)
-                {
-                    ref var builder = ref keyedMethods.GetOrAddDefault(
-                        $"{service.IsAsync}|{service.ExportTypeName}",
-                        out var existKeyedMethod);
-
-                    builder += service.BuildSwitchBranch(code);
-                }
-                else
-                {
-                    methods += service.BuildMethod;
-                }
-
-                return;
-
-            case Lifetime.Transient:
-
-                service.GenerateValue = service.IsFactory ? service.UseFactoryResolver : service.UseInstance;
-
-                service.CheckParamsDependencies(entries, ref requiresSemaphore);
-
-                if (isNamed)
-                {
-                    ref var builder = ref keyedMethods.GetOrAddDefault(
-                        $"{service.IsAsync}|{service.ExportTypeName}",
-                        out var existKeyedMethod);
-
-                    builder += service.BuildSwitchBranch(code);
-                }
-                else
-                {
-                    methods += service.BuildMethod;
-                }
-
-                return;
-        }*/
     }
 
-    private void UpdateSemaphoreUsage()
+    private void UpdateAsyncStatus()
     {
         if (!requiresSemaphore)
         {
@@ -400,15 +305,17 @@ class ServiceContainerGenerator
             {
                 string cancelTypeName = cancelType.ToGlobalNamespaced();
 
-                entries.TryAdd(new ServiceDescriptor(cancelType, cancelTypeName, cancelTypeName, null)
+                discoveredServices.TryAdd(new ServiceDescriptor(cancelType, cancelTypeName, cancelTypeName, null)
                 {
                     Resolved = true,
+                    ResolvedBy = Generator.generatorGuid,
                     IsCancelTokenParam = true
                 });
             }
 
             requiresSemaphore = true;
         }
+        if (!hasAsyncService) hasAsyncService = hasAsyncService = true;
     }
 
     public void TryBuild(ImmutableArray<InvocationExpressionSyntax> usages, Map<string, byte> uniqueName, Action<string, string> addSource)
@@ -417,7 +324,8 @@ class ServiceContainerGenerator
 
         var fileName = _providerClass.ToMetadataLongName(uniqueName);
 
-        foreach (var (prefix, extraCode) in DependencyInjectionPartsGenerator.InvokeContainerRegistration(code, _compilation, _providerClass, entries))
+        //Key part as concept of external dependencies resolver
+        foreach (var (prefix, extraCode) in DependencyInjectionPartsGenerator.GetResolvedDependencies(code, _compilation, _providerClass, discoveredServices))
         {
             addSource(fileName + "." + prefix + ".generated", extraCode);
         }
@@ -554,10 +462,8 @@ class ServiceContainerGenerator
 
         methods?.Invoke(code, Generator.generatedCodeAttribute);
 
-        foreach (var tuple in keyedMethods.AsSpan())
+        foreach (var (service, keyBuilder) in keyedMethods.AsSpan())
         {
-            var parts = tuple.Key.Split('|');
-            (bool isAsync, string serviceName, string enumType) = (bool.Parse(parts[0]), parts[1], parts[2]);
 
             code
                 .Append(@"
@@ -565,26 +471,28 @@ class ServiceContainerGenerator
                 .AppendLine(Generator.generatedCodeAttribute)
                 .Append("    ");
 
-            if (isAsync)
+            if (service.IsAsync)
             {
                 code.Append("global::System.Threading.Tasks.ValueTask<")
-                    .Append(serviceName)
+                    .Append(service.ExportTypeName)
                     .Append(@"> global::SourceCrafter.DependencyInjection.IKeyedAsyncServiceProvider<")
-                    .Append(enumType)
+                    .Append(service.EnumKeyTypeName)
                     .Append(@", ")
-                    .Append(serviceName)
+                    .Append(service.ExportTypeName)
                     .Append(@">.GetServiceAsync(")
-                    .Append(enumType)
+                    .Append(service.EnumKeyTypeName)
                     .Append(" key, global::System.Threading.CancellationToken cancellationToken = default");
             }
             else
             {
-                code.Append(serviceName)
+                code.Append(service.ExportTypeName)
                     .Append(@" global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<")
-                    .Append(enumType)
+                    .Append(service.EnumKeyTypeName)
                     .Append(@", ")
-                    .Append(serviceName)
-                    .Append(@">.GetService(").Append(enumType).Append(" key");
+                    .Append(service.ExportTypeName)
+                    .Append(@">.GetService(")
+                    .Append(service.EnumKeyTypeName)
+                    .Append(" key");
             }
 
             code.Append(@")
@@ -593,13 +501,13 @@ class ServiceContainerGenerator
 		{");
 
 
-            tuple.Value();
+            keyBuilder(code);
 
             code.Append(@"
 			default: throw InvalidKeyedService(""")
-                .Append(serviceName)
+                .Append(service.EnumKeyTypeName)
                 .Append(@""", """)
-                .Append(enumType)
+                .Append(service.ExportTypeName)
                 .Append(@""", key);
 		}
 	}
@@ -683,7 +591,7 @@ class ServiceContainerGenerator
                 .Append(@"
     ")
                 .AppendLine(Generator.generatedCodeAttribute)
-                .Append(@"    public global::System.Threading.Tasks.ValueTask<T> GetServiceAsync(global::System.Threading.CancellationToken cancellationToken = default) => 
+                .Append(@"    public global::System.Threading.Tasks.ValueTask<T> GetServiceAsync<T>(global::System.Threading.CancellationToken cancellationToken = default) => 
         ((global::SourceCrafter.DependencyInjection.IAsyncServiceProvider<T>)
             (global::SourceCrafter.DependencyInjection.IAsyncServiceProvider)this)
                 .GetServiceAsync(cancellationToken == default ? __globalCancellationTokenSrc.Token : cancellationToken);
@@ -710,9 +618,9 @@ class ServiceContainerGenerator
 
                 continue;
 
-            var model = _compilation.GetSemanticModel(invExpr.SyntaxTree);
+            var contextModel = _compilation.GetSemanticModel(invExpr.SyntaxTree);
 
-            var refType = model.GetSymbolInfo(((MemberAccessExpressionSyntax)invExpr.Expression).Expression).Symbol switch
+            var refType = contextModel.GetSymbolInfo(((MemberAccessExpressionSyntax)invExpr.Expression).Expression).Symbol switch
             {
                 ILocalSymbol { Type: { } rType } => rType,
                 IFieldSymbol { Type: { } rType } => rType,
@@ -722,35 +630,41 @@ class ServiceContainerGenerator
 
             if (refType is null || !SymbolEqualityComparer.Default.Equals(refType, _providerClass)) continue;
 
-            var typeSymbol = model.GetTypeInfo(type).Type;
+            var typeSymbol = contextModel.GetTypeInfo(type).Type;
 
             if (typeSymbol is null) continue;
 
             var typeFullName = typeSymbol.ToGlobalNamespaced();
 
             IFieldSymbol? key = null;
+            ITypeSymbol? keyType = null;
 
             if (invExpr.ArgumentList.Arguments is [{ Expression: { } keyArg } arg])
             {
-                if (model.GetSymbolInfo(keyArg).Symbol is IFieldSymbol
-                {
-                    IsConst: true,
-                    Type: INamedTypeSymbol { TypeKind: TypeKind.Enum }
-                } f)
-                {
-                        key = f;
-                }
-                else
+                keyType = contextModel.GetTypeInfo(keyArg).Type;
+
+                if (keyType?.TypeKind is not TypeKind.Enum)
                 {
                     _diagnostics.TryAdd(
                         ServiceContainerGeneratorDiagnostics.InvalidKeyType(arg.Expression));
+
+                    continue;
+                }
+                else if (contextModel.GetSymbolInfo(keyArg).Symbol is IFieldSymbol { IsConst: true } fieldValue)
+                {
+                    key = fieldValue;
                 }
             }
 
-            entries.ForEach((ref ServiceDescriptor item) =>
+            discoveredServices.ForEach((ref ServiceDescriptor item) =>
             {
                 if (item.ExportTypeName == typeFullName
-                    && SymbolEqualityComparer.Default.Equals(item.Key, key) && item.Resolved)
+                    && ((item.Key, key) switch 
+                    {
+                        ({ } itemKey, { }) => SymbolEqualityComparer.Default.Equals(itemKey, key),
+                        (var itemKey, _) => itemKey is null || SymbolEqualityComparer.Default.Equals(itemKey.Type, keyType)
+                    })
+                    && item.Resolved)
                 {
                     found = true;
                 }
@@ -759,7 +673,7 @@ class ServiceContainerGenerator
             if (!found)
             {
                 _diagnostics.TryAdd(
-                    ServiceContainerGeneratorDiagnostics.UnresolvedDependency(invExpr, providerClassName, typeFullName, key));
+                    ServiceContainerGeneratorDiagnostics.UnresolvedDependency(invExpr, providerClassName, typeFullName, keyType, key));
             }
         }
     }
@@ -974,4 +888,21 @@ class ServiceContainerGenerator
         }
     }
 
+}
+
+internal class KeyedServiceComparer : IEqualityComparer<ServiceDescriptor>
+{
+    (bool isAsync, string serviceName, string enumType) GetKey(ServiceDescriptor key)
+    {
+        return (key.IsAsync, key.FullTypeName, key.EnumKeyTypeName!);
+    }
+    public bool Equals(ServiceDescriptor x, ServiceDescriptor y)
+    {
+        return GetKey(x) == GetKey(y);
+    }
+
+    public int GetHashCode(ServiceDescriptor obj)
+    {
+        return GetKey(obj).GetHashCode();
+    }
 }

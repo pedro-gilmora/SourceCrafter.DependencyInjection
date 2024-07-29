@@ -3,16 +3,25 @@ using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
 
 namespace SourceCrafter.DependencyInjection.Tests
 {
-    public enum GlobalScope { Identity, Application }
+    public enum Main { Identity, App }
+
+    interface IAsyncDisposableServiceProvider<TKey> : IServiceProvider, IAsyncDisposable where TKey : struct, Enum
+    {
+        static IAsyncDisposableServiceProvider<TKey> Create() => (IAsyncDisposableServiceProvider<TKey>)new Server();
+        T GetService<T>(TKey key);
+        ValueTask<T> GetServiceAsync<T>(CancellationToken token = default);
+        ValueTask<T> GetServiceAsync<T>(TKey key, CancellationToken token = default);
+        IAsyncDisposableServiceProvider<TKey> CreateScope();
+    }
 
     [ServiceContainer]
     [Singleton<Configuration>(factoryOrInstance: nameof(BuildConfiguration))]
-    [Singleton<IDatabase, Database>(GlobalScope.Identity)]
-    [Scoped<IDatabase, Database>(GlobalScope.Application)]
+    [Singleton<IDatabase, Database>]
+    [Scoped<IDatabase, Database>(Main.App)]
     [Scoped<AuthService>]
-    [Transient<int>(GlobalScope.Application, nameof(ResolveAsync))]
-    [Transient<string>(GlobalScope.Application, nameof(Name))]
-    public sealed partial class Server
+    [Transient<int>(Main.App, nameof(ResolveAsync))]
+    [Transient<string>(Main.App, nameof(Name))]
+    public partial class Server
     {
         const string Name = "Server::Name";
 
@@ -26,7 +35,7 @@ namespace SourceCrafter.DependencyInjection.Tests
         }
     }
 
-    public class AuthService([Singleton(GlobalScope.Identity)] IDatabase application, [Transient(GlobalScope.Application)] int o) : global::System.IDisposable
+    public class AuthService([Singleton] IDatabase application, [Transient(Main.App)] int o) : global::System.IDisposable
     {
         public IDatabase Database { get; } = application;
 
@@ -40,7 +49,7 @@ namespace SourceCrafter.DependencyInjection.Tests
     {
         AppSettings config = config;
 
-        public void SaveFrom(out string setting1)
+        public void TrySave(out string setting1)
         {
             setting1 = config.Setting1;
         }
@@ -53,7 +62,7 @@ namespace SourceCrafter.DependencyInjection.Tests
 
     public interface IDatabase
     {
-        void SaveFrom(out string setting1);
+        void TrySave(out string setting1);
     }
 
     public class Configuration

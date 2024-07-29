@@ -11,7 +11,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SourceCrafter.DependencyInj
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SourceCrafter.DependencyInjection.MsConfiguration", "SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj", "{10EF183F-C553-4521-BF26-6027D582789F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SourceCrafter.DependencyInjection.MsConfiguration.Metadata", "SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj", "{9FB634C3-693E-4734-8AF2-D2ABE68212F3}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SourceCrafter.DependencyInjection.MsConfiguration.Metadata", "SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj", "{9FB634C3-693E-4734-8AF2-D2ABE68212F3}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -32,8 +32,8 @@ Global
 		{CAB676DD-50BB-4724-B124-B462F9FCACBF}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CAB676DD-50BB-4724-B124-B462F9FCACBF}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CAB676DD-50BB-4724-B124-B462F9FCACBF}.Release|Any CPU.Build.0 = Release|Any CPU
-		{5A0649ED-0A17-49E1-B7A0-6200DE5B824A}.DEBUG_SG|Any CPU.ActiveCfg = Debug|Any CPU
-		{5A0649ED-0A17-49E1-B7A0-6200DE5B824A}.DEBUG_SG|Any CPU.Build.0 = Debug|Any CPU
+		{5A0649ED-0A17-49E1-B7A0-6200DE5B824A}.DEBUG_SG|Any CPU.ActiveCfg = DEBUG_SG|Any CPU
+		{5A0649ED-0A17-49E1-B7A0-6200DE5B824A}.DEBUG_SG|Any CPU.Build.0 = DEBUG_SG|Any CPU
 		{5A0649ED-0A17-49E1-B7A0-6200DE5B824A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{5A0649ED-0A17-49E1-B7A0-6200DE5B824A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5A0649ED-0A17-49E1-B7A0-6200DE5B824A}.Release|Any CPU.ActiveCfg = Release|Any CPU

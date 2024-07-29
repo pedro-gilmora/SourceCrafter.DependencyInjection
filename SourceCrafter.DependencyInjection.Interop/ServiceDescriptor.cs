@@ -12,6 +12,7 @@ namespace SourceCrafter.DependencyInjection.Interop
     {
         internal const string
             CancelTokenFQMetaName = "System.Threading.CancellationToken",
+            EnumFQMetaName = "global::System.Enum",
             KeyParamName = "key",
             FactoryOrInstanceParamName = "factoryOrInstance",
             ImplParamName = "impl",
@@ -39,18 +40,20 @@ namespace SourceCrafter.DependencyInjection.Interop
         public ImmutableArray<AttributeData> Attributes = [];
         public ITypeSymbol ContainerType = null!;
         public bool NotRegistered = false;
-        public readonly string ExportTypeName = exportTypeFullName;
         public bool IsAsync = false;
         internal bool ShouldAddAsyncAwait;
+        internal bool IsCancelTokenParam;
+        public bool ExternalGenerated;
+        public Guid ResolvedBy;
 
-        public readonly string? KeyEnumTypeName = key?.Type.ToGlobalNamespaced();
+        public readonly string ExportTypeName = exportTypeFullName;
+        public readonly string? EnumKeyTypeName = key?.Type.ToGlobalNamespaced();
 
         private bool? isFactory;
         internal bool IsFactory => isFactory ??= Factory is not null;
 
 
         private bool? isNamed;
-        internal bool IsCancelTokenParam;
 
         internal bool IsKeyed => isNamed ??= Key is not null;
 
@@ -74,21 +77,20 @@ namespace SourceCrafter.DependencyInjection.Interop
             }
         }
 
-        public Action BuildSwitchBranch(StringBuilder code)
+        public void BuildSwitchBranch(StringBuilder code)
         {
-            return () =>
-            {
-                code.Append(@"
+            code.Append(@"
 			case ")
-                    .Append(KeyEnumTypeName).Append(@" : return ");
+                .Append(EnumKeyTypeName ?? "UnknownEnumType")
+                .Append(".")
+                .Append(Key?.Name ?? "UknownValue")
+                .Append(@" : return ");
 
-                if (ShouldAddAsyncAwait) code.Append("await ");
+            if (ShouldAddAsyncAwait) code.Append("await ");
 
-                BuildValue(code);
+            BuildValue(code);
 
-                code.Append(";");
-            };
-
+            code.Append(";");
         }
 
         public override string ToString()
@@ -107,7 +109,7 @@ namespace SourceCrafter.DependencyInjection.Interop
 
             code.Append("ServiceProvider<");
 
-            if (IsKeyed) code.Append(KeyEnumTypeName).Append(", ");
+            if (IsKeyed) code.Append(EnumKeyTypeName).Append(", ");
 
             code.Append(ExportTypeName)
                 .Append(">");
@@ -247,16 +249,16 @@ namespace SourceCrafter.DependencyInjection.Interop
             if (IsAsync)
             {
                 code.Append("global::System.Threading.Tasks.ValueTask<")
-                    .Append(FullTypeName)
+                    .Append(ExportTypeName)
                     .Append(@"> global::SourceCrafter.DependencyInjection.IAsyncServiceProvider<")
                     .Append(ExportTypeName)
-                    .Append(@">.GetServiceAsync(global::System.Threading.CancellationToken cancellationToken = default)
+                    .Append(@">.GetServiceAsync(global::System.Threading.CancellationToken cancellationToken)
     {
         return ");
             }
             else
             {
-                code.Append(FullTypeName)
+                code.Append(ExportTypeName)
                     .Append(@" global::SourceCrafter.DependencyInjection.IServiceProvider<")
                     .Append(ExportTypeName);
                 code.Append(@">.GetService(");

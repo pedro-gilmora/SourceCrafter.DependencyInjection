@@ -29,8 +29,32 @@
 	<ItemGroup>
 		<ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" />
 		<ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+		<ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj"/>
 		<ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
 	</ItemGroup>
+
+	<!--<ItemGroup Condition=" $(Configuration) != 'DEBUG_SG' ">Condition=" $(Configuration) == 'DEBUG_SG' "
+		<Analyzer Include="..\SourceCrafter.DependencyInjection\bin\$(Configuration)\netstandard2.0\publish\SourceCrafter.DependencyInjection.dll" />
+		<Analyzer Include="..\SourceCrafter.DependencyInjection.MsConfiguration\bin\$(Configuration)\netstandard2.0\publish\SourceCrafter.DependencyInjection.MsConfiguration.dll" />
+	</ItemGroup>
+
+	<ItemGroup Condition=" $(Configuration) != 'DEBUG_SG' ">
+	  <Reference Include="SourceCrafter.DependencyInjection.Interop">
+	    <HintPath>..\SourceCrafter.DependencyInjection.Interop\bin\$(Configuration)\netstandard2.0\publish\SourceCrafter.DependencyInjection.Interop.dll</HintPath>
+	  </Reference>
+	  <Reference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata">
+	    <HintPath>..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\bin\$(Configuration)\netstandard2.0\publish\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.dll</HintPath>
+	  </Reference>
+	</ItemGroup>
+
+	<Target Condition=" $(Configuration) != 'DEBUG_SG' " Name="PreBuild" BeforeTargets="PreBuildEvent">
+		<Exec Command="dotnet publish ..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" />
+		<Exec Command="dotnet publish ..\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj" />
+		<Exec Command="dotnet publish ..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" />
+		<Exec Command="dotnet publish ..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" />
+		<Message Text="Publishing completed!" Importance="high" />
+	</Target>-->
+
 
 	<ItemGroup>
 		<Using Include="Xunit" />
@@ -41,5 +65,4 @@
 	    <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
 	  </None>
 	</ItemGroup>
-
 </Project>

@@ -26,14 +26,14 @@ namespace SourceCrafter.DependencyInjection.Interop
 
     public static class DependencyInjectionPartsGenerator
     {
-        public static event ContainerRegistrationHandler? OnContainerRegistered;
+        public static event ContainerRegistrationHandler? OnResolveDependency;
         public static event ValueGeneratorResolver? ResolveValueGenerator;
 
-        internal static List<(string, string)> InvokeContainerRegistration(StringBuilder code, Compilation compilation, ITypeSymbol serviceContainer, Set<ServiceDescriptor> servicesDescriptors)
+        internal static List<(string, string)> GetResolvedDependencies(StringBuilder code, Compilation compilation, ITypeSymbol serviceContainer, Set<ServiceDescriptor> servicesDescriptors)
         {
             List<(string, string)> list = [];
 
-            foreach (ContainerRegistrationHandler item in OnContainerRegistered?.GetInvocationList() ?? [])
+            foreach (ContainerRegistrationHandler item in OnResolveDependency?.GetInvocationList() ?? [])
             {
                 if (item(compilation, serviceContainer, servicesDescriptors) is { } itemToAdd)
                     list.Add(itemToAdd);

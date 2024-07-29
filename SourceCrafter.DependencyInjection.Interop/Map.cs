@@ -156,7 +156,7 @@ public class Map<TKey, TVal>
         return candidate == 2;
     }
 
-    public ref TVal? GetOrAddDefault(TKey key, out bool exists, Func<TVal>? valueCreator = null)
+    public virtual ref TVal? GetOrAddDefault(TKey key, out bool exists, Func<TVal>? valueCreator = null)
     {
         Entry<TKey, TVal>[]? entries = _entries!;
 
@@ -221,7 +221,7 @@ public class Map<TKey, TVal>
         return ref entry.Value!;
     }
 
-    public bool TryGetValue(TKey key, out TVal val)
+    public virtual bool TryGetValue(TKey key, out TVal val)
     {
         uint hashCode = (uint)_comparer.GetHashCode(key);
         int i = GetBucket(hashCode);
@@ -356,4 +356,6 @@ public struct Entry<TKey, TValue>
     public TValue Value;
     internal int next;
     internal uint id;
+
+    public void Deconstruct(out TKey outKey, out TValue outValue) => (outKey, outValue) = (Key, Value);
 }

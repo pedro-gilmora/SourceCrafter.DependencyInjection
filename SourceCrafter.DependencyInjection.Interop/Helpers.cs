@@ -200,7 +200,7 @@ namespace SourceCrafter.DependencyInjection
 
         public static string GenKey(ServiceDescriptor serviceDescriptor)
         {
-            return $"{serviceDescriptor.Lifetime}|{serviceDescriptor.ExportTypeName}|{serviceDescriptor.KeyEnumTypeName}";
+            return $"{serviceDescriptor.Lifetime}|{serviceDescriptor.ExportTypeName}|{serviceDescriptor.EnumKeyTypeName}";
         }
 
         public static string GenKey(Lifetime lifetime, string typeFullName, IFieldSymbol? name)

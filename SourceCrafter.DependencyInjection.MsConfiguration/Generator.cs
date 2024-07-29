@@ -13,7 +13,8 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration;
 [Generator]
 public class Generator : IIncrementalGenerator
 {
-    internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
+        internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
+        readonly static Guid generatorGuid = new("54B00B9C-7CF8-45B2-81FC-361B7F5026EB");
     static volatile bool isSet = false;
     static volatile bool isMsConfigInstalled = false;
 
@@ -24,18 +25,25 @@ public class Generator : IIncrementalGenerator
 
         isSet = true;
 
-        DependencyInjectionPartsGenerator.OnContainerRegistered += OnContainerCreated;
-
+        DependencyInjectionPartsGenerator.OnResolveDependency += ResolveDependency;
     }
 
-    private static (string, string)? OnContainerCreated(Compilation compilation, ITypeSymbol serviceContainer, Set<ServiceDescriptor> servicesDescriptors)
+    private static (string, string)? ResolveDependency(Compilation compilation, ITypeSymbol serviceContainer, Set<ServiceDescriptor> servicesDescriptors)
     {
-        if (!IsMsConfigInstalled(compilation)) return null;
+        if (!IsMsConfigInstalled(compilation, out var iConfigTypeSymbol)) return null;
 
         StringBuilder extraCode = new(@"#nullable enable
-using Microsoft.Extensions.Configuration;
+using global::Microsoft.Extensions.Configuration;
 
 ");
+
+        string iConfigFullTypeName = iConfigTypeSymbol.ToGlobalNamespaced();
+
+        servicesDescriptors.TryAdd(new (iConfigTypeSymbol, iConfigFullTypeName, iConfigFullTypeName, null)
+        {
+            Resolved = true,
+            NotRegistered = true
+        });
 
         var providerClassName = serviceContainer.ToNameOnly();
 
@@ -55,19 +63,16 @@ using Microsoft.Extensions.Configuration;
     private static global::Microsoft.Extensions.Configuration.IConfiguration? __appConfig__;
 
     ").Append(generatedCodeAttribute).Append(@"
-    private static global::Microsoft.Extensions.Configuration.IConfiguration? __APPCONFIG__
+    private static global::Microsoft.Extensions.Configuration.IConfiguration __APPCONFIG__()
     {
-        get 
-        {
-            if (__appConfig__ is null)
-			    lock (__lock)
-				    return __appConfig__ ??= new ConfigurationBuilder()
-                        .SetBasePath(global::System.IO.Directory.GetCurrentDirectory())
-                        .AddJsonFile(""appsettings.json"", optional: true, reloadOnChange: true)
-                        .Build();
+        if (__appConfig__ is null)
+			lock (__lock)
+				return __appConfig__ ??= new ConfigurationBuilder()
+                    .SetBasePath(global::System.IO.Directory.GetCurrentDirectory())
+                    .AddJsonFile(""appsettings.json"", optional: true, reloadOnChange: true)
+                    .Build();
 
-            return __appConfig__;
-        }
+        return __appConfig__;
     }
 
     ").Append(generatedCodeAttribute).Append(@"
@@ -75,7 +80,7 @@ using Microsoft.Extensions.Configuration;
 		    global::SourceCrafter.DependencyInjection.IServiceProvider<global::Microsoft.Extensions.Configuration.IConfiguration>
 			    .GetService()
     {
-		return __APPCONFIG__;
+		return __APPCONFIG__();
 	}
 ");
         Map<string, VarNameBuilder> keys = new(StringComparer.Ordinal);
@@ -89,6 +94,7 @@ using Microsoft.Extensions.Configuration;
                 if (attr.AttributeClass?.ToNameOnly() == "SettingAttribute")
                 {
                     item.Resolved = true;
+                    item.ResolvedBy = generatorGuid;
 
                     var key = attr.ConstructorArguments.FirstOrDefault().Value as string ?? "";
 
@@ -109,7 +115,7 @@ using Microsoft.Extensions.Configuration;
 
                     var identifier = item.CacheMethodName = @"__APPCONFIG__" + suffix;
 
-                    item.GenerateValue = existingOrNew = code => code.Append(identifier);
+                    item.GenerateValue = existingOrNew = code => code.Append(identifier).Append("()");
 
                     extraCode.Append(@"
     ").Append(generatedCodeAttribute).Append(@"
@@ -124,34 +130,31 @@ using Microsoft.Extensions.Configuration;
                         .Append(item.FullTypeName)
                         .AddSpace()
                         .Append(identifier)
-                        .Append(@"
+                        .Append(@"()
     {
-        get 
-        {
-            if (__appConfig__")
+        if (__appConfig__")
                         .Append(suffix)
                         .Append(@" is null)
-			    lock (__lock)     
-				    return __appConfig__")
+			lock (__lock)     
+				return __appConfig__")
                         .Append(suffix)
                         .Append(@" ??= BuildSetting();
 
-            return __appConfig__")
+        return __appConfig__")
                         .Append(suffix)
                         .Append(@";
                 
-            ")
+        ")
                         .Append(item.FullTypeName)
                         .Append(@" BuildSetting()
-            {
-                var setting = new ")
+        {
+            var setting = new ")
                         .Append(item.FullTypeName)
                         .Append(@"();
                 
-                __APPCONFIG__.GetSection(""").Append(key).Append(@""").Bind(setting);
+            __APPCONFIG__().GetSection(""").Append(key).Append(@""").Bind(setting);
 
-                return setting;            
-            }
+            return setting;            
         }
     }
 ");
@@ -166,12 +169,11 @@ using Microsoft.Extensions.Configuration;
         return ("msConfig", extraCode.ToString());
     }
 
-    private static bool IsMsConfigInstalled(Compilation compilation)
+    private static bool IsMsConfigInstalled(Compilation compilation, out INamedTypeSymbol type)
     {
-        return isMsConfigInstalled
-            || (isMsConfigInstalled = 
-            compilation.GetTypeByMetadataName("Microsoft.Extensions.Configuration.IConfiguration") is not null);
+        type = compilation.GetTypeByMetadataName("Microsoft.Extensions.Configuration.IConfiguration")!;
 
+        return isMsConfigInstalled || (isMsConfigInstalled = type is not null);
     }
 
     private static string ParseToolAndVersion()

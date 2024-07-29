@@ -285,8 +285,7 @@ public class Set<T>
         exists = false;
 
         return ref entry.Value!;
-    }
-    
+    }    
 
     public ref T GetValueOrInsertor(string key, out Action<T> insertor)
     {
@@ -420,6 +419,7 @@ public class Set<T>
     }
     public static ulong GetFastModMultiplier(uint divisor) =>
             ulong.MaxValue / divisor + 1;
+
     public const int MaxPrimeArrayLength = 0x7FFFFFC3;
     public static int ExpandPrime(int oldSize)
     {
@@ -461,6 +461,7 @@ public class Set<T>
         Debug.Assert(highbits == value % divisor);
         return highbits;
     }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public void ForEach(RefItemResolver<T> action)
     {
@@ -470,6 +471,7 @@ public class Set<T>
             action(ref item.Value);
         }
     }
+
     public void ForEach(Action<T> action)
     {
         for (int i = 0; i < _count; i++)
@@ -478,6 +480,7 @@ public class Set<T>
             action(item.Value);
         }
     }
+
     public void Clear()
     {
         int count = _count;

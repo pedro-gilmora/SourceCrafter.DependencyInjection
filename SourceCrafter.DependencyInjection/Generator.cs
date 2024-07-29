@@ -16,6 +16,7 @@ namespace SourceCrafter.DependencyInjection;
 public class Generator : IIncrementalGenerator
 {
     internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
+    internal readonly static Guid generatorGuid = new("31C54896-DE65-4FDC-8EBA-5A169A6E3CBB");
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
