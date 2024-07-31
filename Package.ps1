@@ -107,8 +107,6 @@ PACKER: Test project references where updated
             dotnet pack .\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:n
             dotnet pack .\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:n
             dotnet pack .\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:n
-
-            dotnet restore
         }
         catch
         {
@@ -125,11 +123,15 @@ PACKER: Testin projects
 "
     if($pack -ne 'true')
     {
-        dotnet restore
+        dotnet restore .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj
     }
-
-    dotnet msbuild .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj /t:Clean /p:Configuration=Release
-    dotnet msbuild .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj /t:Build /p:Configuration=Release
-    dotnet msbuild .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj /t:VSTest /p:Configuration=Release /v:detailed > log
+    
+    if($clean -eq 'true')
+    {
+        dotnet clean .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj -c Release
+    }
+    
+    dotnet msbuild .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj -c Release
+    dotnet msbuild .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj -c Release /v:diag
 
 }
