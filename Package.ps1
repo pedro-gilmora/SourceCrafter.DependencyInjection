@@ -99,12 +99,14 @@ PACKER: Test project references where updated
     {
         try
         {
+            dotnet restore
+
             Write-Host "PACKER: Packaging projects
 "
-            dotnet pack .\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:d
-            dotnet pack .\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:d
-            dotnet pack .\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:d
-            dotnet pack .\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:d
+            dotnet pack .\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:n
+            dotnet pack .\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:n
+            dotnet pack .\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:n
+            dotnet pack .\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:n
 
             dotnet restore
         }
