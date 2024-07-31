@@ -12,6 +12,7 @@
     <EnforceCodeStyleInBuild>False</EnforceCodeStyleInBuild>
     <AnalysisLevel>6.0-all</AnalysisLevel>
     <RunAnalyzersDuringBuild>False</RunAnalyzersDuringBuild>
+		<RestoreSources>$(RestoreSources);../packages</RestoreSources>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
@@ -33,9 +34,10 @@
     <PackageReference Include="SourceCrafter.DependencyInjection.Interop" Version="0.24.213.50" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup Condition=" $(Configuration) == 'DEBUG_SG' ">
-    <!--<ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" />
-    <ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />-->
-    <ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <!--<ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" />
+    <ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" />
+    <ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />-->
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
