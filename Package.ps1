@@ -89,7 +89,13 @@ PACKER: Updating package: $($_.GetAttribute('Include')) from version $version"
     Write-Output "
 PACKER: Test project references where updated
 "
-    if($clean -eq "true" -and (Test-Path '.\packaging\'))
+    if(-not (Test-Path '.\packaging\'))
+    {
+        Write-Host "PACKER: Created packaging output folder
+"
+        New-Item -ItemType Directory -Path '.\packaging\'
+    }
+    if($clean -eq "true")
     {
         Write-Information "PACKER: Removing packages"
         Remove-Item -Path ".\packaging\*.*" -recurse
@@ -103,10 +109,10 @@ PACKER: Test project references where updated
 
             Write-Host "PACKER: Packaging projects
 "
-            dotnet pack .\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:n
-            dotnet pack .\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:n
-            dotnet pack .\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:n
-            dotnet pack .\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -o .\packaging -p:PackageVersion=$version -v:n
+            dotnet pack .\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj -c Release -o .\packaging -p:PackageVersion=$version
+            dotnet pack .\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj -c Release -o .\packaging -p:PackageVersion=$version
+            dotnet pack .\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -o .\packaging -p:PackageVersion=$version
+            dotnet pack .\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -o .\packaging -p:PackageVersion=$version
         }
         catch
         {
