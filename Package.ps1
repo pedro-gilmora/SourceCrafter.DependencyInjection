@@ -89,7 +89,7 @@ PACKER: Updating package: $($_.GetAttribute('Include')) from version $version"
     Write-Output "
 PACKER: Test project references where updated
 "
-    if($clean = "true")
+    if($clean -eq "true")
     {
         Write-Information "PACKER: Removing packages"
         Remove-Item -Path ".\packaging\*.*" -recurse
