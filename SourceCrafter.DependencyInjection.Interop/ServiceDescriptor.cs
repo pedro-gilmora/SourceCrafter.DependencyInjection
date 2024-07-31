@@ -122,7 +122,7 @@ namespace SourceCrafter.DependencyInjection.Interop
                 .Append(")");
         }
 
-        internal void BuildMethod(StringBuilder code, string generatedCodeAttribute)
+        internal void BuildCachedResolver(StringBuilder code, string generatedCodeAttribute)
         {
             //TODO: Mix with old BuildMethod
 
@@ -238,93 +238,93 @@ namespace SourceCrafter.DependencyInjection.Interop
 ");
         }
 
-//        internal void BuildMethod(StringBuilder code, string generatedCodeAttribute)
-//        {
-//            code
-//                .Append(@"
-//    ")
-//                .AppendLine(generatedCodeAttribute)
-//                .Append("    ");
+        internal void BuildMethod(StringBuilder code, string generatedCodeAttribute)
+        {
+            code
+                .Append(@"
+    ")
+                .AppendLine(generatedCodeAttribute)
+                .Append("    ");
 
-//            if (IsAsync)
-//            {
-//                code.Append("global::System.Threading.Tasks.ValueTask<")
-//                    .Append(ExportTypeName)
-//                    .Append(@"> global::SourceCrafter.DependencyInjection.IAsyncServiceProvider<")
-//                    .Append(ExportTypeName)
-//                    .Append(@">.GetServiceAsync(global::System.Threading.CancellationToken cancellationToken)
-//    {
-//        return ");
-//            }
-//            else
-//            {
-//                code.Append(ExportTypeName)
-//                    .Append(@" global::SourceCrafter.DependencyInjection.IServiceProvider<")
-//                    .Append(ExportTypeName);
-//                code.Append(@">.GetService(");
+            if (IsAsync)
+            {
+                code.Append("global::System.Threading.Tasks.ValueTask<")
+                    .Append(ExportTypeName)
+                    .Append(@"> global::SourceCrafter.DependencyInjection.IAsyncServiceProvider<")
+                    .Append(ExportTypeName)
+                    .Append(@">.GetServiceAsync(global::System.Threading.CancellationToken cancellationToken)
+    {
+        return ");
+            }
+            else
+            {
+                code.Append(ExportTypeName)
+                    .Append(@" global::SourceCrafter.DependencyInjection.IServiceProvider<")
+                    .Append(ExportTypeName);
+                code.Append(@">.GetService(");
 
-//                code.Append(@")
-//    {
-//        return ");
-//            }
+                code.Append(@")
+    {
+        return ");
+            }
 
-//            switch (Lifetime)
-//            {
-//                case Lifetime.Singleton:
+            switch (Lifetime)
+            {
+                case Lifetime.Singleton:
 
-//                    if (IsFactory && !Cached)
-//                    {
-//                        UseFactoryResolver(code);
-//                    }
-//                    else
-//                    {
-//                        UseCachedMethodResolver(code);
-//                    }
+                    if (IsFactory && !Cached)
+                    {
+                        UseFactoryResolver(code);
+                    }
+                    else
+                    {
+                        UseCachedMethodResolver(code);
+                    }
 
-//                    code.Append(@";
-//    }
-//");
-//                    break;
-//                case Lifetime.Scoped:
+                    code.Append(@";
+    }
+");
+                    break;
+                case Lifetime.Scoped:
 
-//                    code
-//                    .Append(@"isScoped 
-//			? ");
+                    code
+                    .Append(@"isScoped 
+			? ");
 
-//                    if (IsFactory && !Cached)
-//                    {
-//                        UseFactoryResolver(code);
-//                    }
-//                    else
-//                    {
-//                        UseCachedMethodResolver(code);
-//                    }
+                    if (IsFactory && !Cached)
+                    {
+                        UseFactoryResolver(code);
+                    }
+                    else
+                    {
+                        UseCachedMethodResolver(code);
+                    }
 
-//                    code.Append(@" 
-//			: throw InvalidCallOutOfScope(""")
-//                                .Append(FullTypeName).Append(@""");
-//    }
-//");
-//                    break;
+                    code.Append(@" 
+			: throw InvalidCallOutOfScope(""")
+                                .Append(FullTypeName).Append(@""");
+    }
+");
+                    break;
 
 
-//                default:
+                default:
 
-//                    if (IsFactory && !Cached)
-//                    {
-//                        UseFactoryResolver(code);
-//                    }
-//                    else
-//                    {
-//                        UseInstance(code);
-//                    }
+                    if (IsFactory && !Cached)
+                    {
+                        UseFactoryResolver(code);
+                    }
+                    else
+                    {
+                        UseInstance(code);
+                    }
 
-//                    code.Append(@";
-//    }
-//");
-//                    break;
-//            }
-//        }
+                    code.Append(@";
+    }
+");
+                    break;
+            }
+        }
 
         internal void UseFactoryResolver(StringBuilder code)
         {

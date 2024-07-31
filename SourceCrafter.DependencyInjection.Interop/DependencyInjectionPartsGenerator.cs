@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading;
 
 [assembly: InternalsVisibleTo("SourceCrafter.DependencyInjection")]
 
@@ -57,7 +58,7 @@ namespace SourceCrafter.DependencyInjection.Interop
             ExternalResolvers.TryRemove(key, out _);
         }
 
-        internal static List<string> ResolveExternalDependencies(Compilation compilation, ITypeSymbol serviceContainer, DependencyMap servicesDescriptors)
+        internal static List<string> ResolveExternalDependencies(SynchronizationContext context, Compilation compilation, ITypeSymbol serviceContainer, DependencyMap servicesDescriptors)
         {
             List<string> list = [];
 
@@ -65,7 +66,10 @@ namespace SourceCrafter.DependencyInjection.Interop
 
             foreach (var item in ExternalResolvers.Values)
             {
-                item(compilation, serviceContainer, servicesDescriptors);
+                lock (_lock)
+                {
+                    context.Send(_ => item(compilation, serviceContainer, servicesDescriptors), null);
+                }
             }
 
             return list;

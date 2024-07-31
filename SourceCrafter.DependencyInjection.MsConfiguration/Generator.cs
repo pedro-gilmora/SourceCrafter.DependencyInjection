@@ -8,6 +8,7 @@ using System.Text;
 using System.Collections.Generic;
 using SourceCrafter.DependencyInjection.Interop;
 
+
 [Generator]
 public class Generator : IIncrementalGenerator
 {
@@ -56,21 +57,21 @@ public class Generator : IIncrementalGenerator
 
         Map<string, ValueBuilder> resolvedTypes = new (StringComparer.Ordinal);
 
-        //DependencyInjectionPartsGenerator.RegisterDependencyResolvers(generatorGuid, Resolve);
+        DependencyInjectionPartsGenerator.RegisterDependencyResolvers(generatorGuid, Resolve);
 
-        //void Resolve(Compilation compilation, ITypeSymbol serviceContainer, DependencyMap servicesDescriptors)
-        //{
-        //    servicesDescriptors.ForEach((DependencyKey key, ref ServiceDescriptor item) =>
-        //    {
-        //        if (resolvedTypes.TryGetValue(item.ExportTypeName, out var existing) && !item.Resolved)
-        //        {
-        //            item.Resolved = true;
-        //            item.ResolvedBy = generatorGuid;
-        //            item.GenerateValue = existing!;
-        //            return;
-        //        }
-        //    });
-        //}
+        void Resolve(Compilation compilation, ITypeSymbol serviceContainer, DependencyMap servicesDescriptors)
+        {
+            servicesDescriptors.ForEach((DependencyKey key, ref ServiceDescriptor item) =>
+            {
+                if (resolvedTypes.TryGetValue(item.ExportTypeName, out var existing) && !item.Resolved)
+                {
+                    item.Resolved = true;
+                    item.ResolvedBy = generatorGuid;
+                    item.GenerateValue = existing!;
+                    return;
+                }
+            });
+        }
 
         if (!IsMsConfigInstalled(compilation, out var iConfigTypeSymbol)) return;
 

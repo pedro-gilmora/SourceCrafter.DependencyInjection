@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -27,10 +27,10 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
   </ItemGroup>
   <ItemGroup Condition=" $(Configuration) != 'DEBUG_SG' ">
-    <PackageReference Include="SourceCrafter.DependencyInjection" Version="0.24.213.38" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="0.24.213.38" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="0.24.213.38" ReferenceOutputAssembly="false" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.Interop" Version="0.24.213.38" ReferenceOutputAssembly="false" />
+    <PackageReference Include="SourceCrafter.DependencyInjection" Version="0.24.213.50" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="0.24.213.50" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="0.24.213.50" ReferenceOutputAssembly="false" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.Interop" Version="0.24.213.50" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup Condition=" $(Configuration) == 'DEBUG_SG' ">
     <!--<ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" />

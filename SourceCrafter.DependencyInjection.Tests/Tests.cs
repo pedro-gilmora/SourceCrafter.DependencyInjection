@@ -24,8 +24,11 @@ namespace SourceCrafter.DependencyInjection.Tests
             //                .Get<AppSettings>()!
 
             //.Setting1.Should().Be("Value1");
+
             serverContainer.GetService<IDatabase>(Main.App).TrySave(out var setting1);
+            
             setting1.Should().Be("Value1");
+            
             // Checking non-static enum values ​​based on provided key
             serverContainer.GetService<string>(GetApplication()).Should().Be("Server::Name");
 

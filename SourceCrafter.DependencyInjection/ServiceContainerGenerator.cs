@@ -229,7 +229,7 @@ class ServiceContainerGenerator
         discoveredServices.ForEach(ResolveService);
     }
 
-    void ResolveService((Lifetime, string, IFieldSymbol?) dependencyKey, ref ServiceDescriptor service)
+    void ResolveService(DependecyKey dependencyKey, ref ServiceDescriptor service)
     {
         if (service.NotRegistered || service.IsCancelTokenParam) return;
 
@@ -333,7 +333,11 @@ class ServiceContainerGenerator
 
         var fileName = _providerClass.ToMetadataLongName(uniqueName);
 
-        //DependencyInjectionPartsGenerator.ResolveExternalDependencies(_compilation, _providerClass, discoveredServices);
+        DependencyInjectionPartsGenerator.ResolveExternalDependencies(
+            System.Threading.SynchronizationContext.Current, 
+            _compilation, 
+            _providerClass, 
+            discoveredServices);
 
         if (_providerClass.ContainingNamespace is { IsGlobalNamespace: false } ns)
         {
