@@ -13,6 +13,11 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SourceCrafter.DependencyInj
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SourceCrafter.DependencyInjection.MsConfiguration.Metadata", "SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj", "{9FB634C3-693E-4734-8AF2-D2ABE68212F3}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution helpers", "Solution helpers", "{7C22E861-995A-48DD-949C-601EA97E4F83}"
+	ProjectSection(SolutionItems) = preProject
+		Package.ps1 = Package.ps1
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		DEBUG_SG|Any CPU = DEBUG_SG|Any CPU
@@ -20,8 +25,8 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{A69EDF6F-D6EB-4855-938B-9D7E39D1AD33}.DEBUG_SG|Any CPU.ActiveCfg = DEBUG_SG|Any CPU
-		{A69EDF6F-D6EB-4855-938B-9D7E39D1AD33}.DEBUG_SG|Any CPU.Build.0 = DEBUG_SG|Any CPU
+		{A69EDF6F-D6EB-4855-938B-9D7E39D1AD33}.DEBUG_SG|Any CPU.ActiveCfg = Debug SG|Any CPU
+		{A69EDF6F-D6EB-4855-938B-9D7E39D1AD33}.DEBUG_SG|Any CPU.Build.0 = Debug SG|Any CPU
 		{A69EDF6F-D6EB-4855-938B-9D7E39D1AD33}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{A69EDF6F-D6EB-4855-938B-9D7E39D1AD33}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A69EDF6F-D6EB-4855-938B-9D7E39D1AD33}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -38,14 +43,14 @@ Global
 		{5A0649ED-0A17-49E1-B7A0-6200DE5B824A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5A0649ED-0A17-49E1-B7A0-6200DE5B824A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5A0649ED-0A17-49E1-B7A0-6200DE5B824A}.Release|Any CPU.Build.0 = Release|Any CPU
-		{10EF183F-C553-4521-BF26-6027D582789F}.DEBUG_SG|Any CPU.ActiveCfg = DEBUG_SG|Any CPU
-		{10EF183F-C553-4521-BF26-6027D582789F}.DEBUG_SG|Any CPU.Build.0 = DEBUG_SG|Any CPU
+		{10EF183F-C553-4521-BF26-6027D582789F}.DEBUG_SG|Any CPU.ActiveCfg = Debug SG|Any CPU
+		{10EF183F-C553-4521-BF26-6027D582789F}.DEBUG_SG|Any CPU.Build.0 = Debug SG|Any CPU
 		{10EF183F-C553-4521-BF26-6027D582789F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{10EF183F-C553-4521-BF26-6027D582789F}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{10EF183F-C553-4521-BF26-6027D582789F}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{10EF183F-C553-4521-BF26-6027D582789F}.Release|Any CPU.Build.0 = Release|Any CPU
-		{9FB634C3-693E-4734-8AF2-D2ABE68212F3}.DEBUG_SG|Any CPU.ActiveCfg = Debug|Any CPU
-		{9FB634C3-693E-4734-8AF2-D2ABE68212F3}.DEBUG_SG|Any CPU.Build.0 = Debug|Any CPU
+		{9FB634C3-693E-4734-8AF2-D2ABE68212F3}.DEBUG_SG|Any CPU.ActiveCfg = DEBUG_SG|Any CPU
+		{9FB634C3-693E-4734-8AF2-D2ABE68212F3}.DEBUG_SG|Any CPU.Build.0 = DEBUG_SG|Any CPU
 		{9FB634C3-693E-4734-8AF2-D2ABE68212F3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{9FB634C3-693E-4734-8AF2-D2ABE68212F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9FB634C3-693E-4734-8AF2-D2ABE68212F3}.Release|Any CPU.ActiveCfg = Release|Any CPU

@@ -1,14 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
-		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
-		<LangVersion>latest</LangVersion>
-		<Nullable>enable</Nullable>
+
+	<PropertyGroup>
+		<TargetFramework>netstandard2.0</TargetFramework>
+		<LangVersion>preview</LangVersion>	
 		<PackageVersion>
 			$([System.Convert]::ToUInt16(
 				$([MSBuild]::Add(
 					$([System.DateTime]::Now.Year),
-					-2023
+					-2024
 				))
 			)).
 			$([System.DateTime]::Now.ToString('yy')).
@@ -20,24 +19,42 @@
 				))
 			))
 		</PackageVersion>
-		<Version>$(PackageVersion)</Version>
 		<Company>AsereHighDev</Company>
-		<Description>Compile-Time Dependency Injection generator</Description>
-		<PackageReadmeFile>ReadMe.md</PackageReadmeFile>
-		<Configurations>Debug;Release;DEBUG_SG</Configurations>
-		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
-		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<Nullable>enable</Nullable>
+		<IsRoslynComponent>true</IsRoslynComponent>
+		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+		<Configurations>Debug;Release;Pack;Debug SG</Configurations>
+		<PackageOutputPath>$(SolutionDir)\packaging</PackageOutputPath>
 	</PropertyGroup>
-  <ItemGroup>
-    <PackageReference Include="IndexRange" Version="1.0.3" />
-    <PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4">
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-      <PrivateAssets>all</PrivateAssets>
-    </PackageReference>
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.9.2" />
-    <PackageReference Include="System.Memory" Version="4.5.5" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" />
-  </ItemGroup>
+
+	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+	  <Optimize>True</Optimize>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="IndexRange" Version="1.0.3" PrivateAssets="all" GeneratePathProperty="true" />
+		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4">
+		  <PrivateAssets>all</PrivateAssets>
+		  <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		</PackageReference>
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" PrivateAssets="all" GeneratePathProperty="true" />
+		<PackageReference Include="System.Diagnostics.Tools" Version="4.3.0" />
+		<PackageReference Include="System.Memory" Version="4.5.5" PrivateAssets="all" GeneratePathProperty="true" />
+		<PackageReference Include="System.Runtime.InteropServices" Version="4.3.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" PrivateAssets="all" />
+	</ItemGroup>
+
+	<ItemGroup Condition=" '$(Configuration)' == 'Release'">
+		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+		<None Include="$(OutputPath)\$(AssemblyName).Interop.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+	</ItemGroup>
+
+	<Target Name="RemoveLibOutput" AfterTargets="Pack">
+		<Delete Files="$(OutputPath)\$(AssemblyName).dll" />
+	</Target>
+	
 </Project>

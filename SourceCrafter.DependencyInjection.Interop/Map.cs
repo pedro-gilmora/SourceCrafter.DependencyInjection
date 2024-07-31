@@ -6,6 +6,7 @@ using System;
 
 namespace SourceCrafter.DependencyInjection;
 
+public delegate void RefItemResolver<TKey, TVal>(TKey _, ref TVal item);
 public class Map<TKey, TVal>
 {
     private int[]? _buckets;
@@ -155,8 +156,8 @@ public class Map<TKey, TVal>
         }
         return candidate == 2;
     }
-
-    public virtual ref TVal? GetOrAddDefault(TKey key, out bool exists, Func<TVal>? valueCreator = null)
+    // TODO: apply nullability attributes
+    public virtual ref TVal? GetValueOrAddDefault(TKey key, out bool exists, Func<TVal>? valueCreator = null)
     {
         Entry<TKey, TVal>[]? entries = _entries!;
 
@@ -256,13 +257,73 @@ public class Map<TKey, TVal>
         return false;
     }
 
+    public bool TryAdd(TKey key, TVal value)
+    {
+        Entry<TKey, TVal>[]? entries = _entries!;
+
+        uint hashCode = (uint)_comparer.GetHashCode(key);
+
+        uint collisionCount = 0;
+        ref int bucket = ref GetBucket(hashCode);
+        int i = bucket - 1; // Value in _buckets is 1-based
+
+
+        while ((uint)i < (uint)entries.Length)
+        {
+            if (entries[i].id == hashCode && _comparer.Equals(key, entries[i].Key))
+            {
+                return false;
+            }
+
+            i = entries[i].next;
+
+            collisionCount++;
+            if (collisionCount > (uint)entries.Length)
+            {
+                // The chain of entries forms a loop; which means a concurrent update has happened.
+                // Break out of the loop and throw, rather than looping forever.
+                throw new NotSupportedException("Concurrent operations are not allowed");
+            }
+        }
+
+        int index;
+        if (_freeCount > 0)
+        {
+            index = _freeList;
+            Debug.Assert((StartOfFreeList - entries[_freeList].next) >= -1, "shouldn't overflow because `next` cannot underflow");
+            _freeList = StartOfFreeList - entries[_freeList].next;
+            _freeCount--;
+        }
+        else
+        {
+            int count = _count;
+            if (count == entries.Length)
+            {
+                Resize();
+                bucket = ref GetBucket(hashCode);
+            }
+            index = count;
+            _count = count + 1;
+            entries = _entries;
+        }
+
+        ref Entry<TKey, TVal> entry = ref entries![index];
+        entry.id = hashCode;
+        entry.next = bucket - 1; // Value in _buckets is 1-based
+        entry.Key = key;
+        entry.Value = value;
+        bucket = index + 1; // Value in _buckets is 1-based
+        _version++;
+
+        return true;
+    }
+
     private void Resize() => Resize(ExpandPrime(_count), false);
 
     private void Resize(int newSize, bool forceNewHashCodes)
     {
         // Value types never rehash
         Debug.Assert(!forceNewHashCodes || !typeof(TKey).IsValueType);
-        Debug.Assert(_entries != null, "_entries should be non-null");
         Debug.Assert(newSize >= _entries!.Length);
 
         var entries = new Entry<TKey, TVal>[newSize];
@@ -289,6 +350,7 @@ public class Map<TKey, TVal>
     }
     public static ulong GetFastModMultiplier(uint divisor) =>
             ulong.MaxValue / divisor + 1;
+
     public const int MaxPrimeArrayLength = 0x7FFFFFC3;
     public static int ExpandPrime(int oldSize)
     {
@@ -348,6 +410,82 @@ public class Map<TKey, TVal>
             Array.Clear(_entries, 0, count);
         }
     }
+
+    public void ForEach(RefItemResolver<TKey, TVal> iterator)
+    {
+        for (int i = 0; i < _count; i++)
+        {
+            iterator(_entries![i].Key, ref _entries[i].Value);
+        }
+    }
+    public ref TVal GetValueOrInsertor(TKey key, out Action<TVal> insertor)
+    {
+        Entry<TKey, TVal>[]? entries = _entries!;
+
+        uint hashCode = (uint)_comparer.GetHashCode(key);
+
+        uint collisionCount = 0;
+        ref int bucket = ref GetBucket(hashCode);
+        int i = bucket - 1; // Value in _buckets is 1-based
+
+
+        while ((uint)i < (uint)entries.Length)
+        {
+            if (entries[i].id == hashCode && _comparer.Equals(key, entries[i].Key))
+            {
+                insertor = null!;
+                return ref entries[i].Value;
+            }
+
+            i = entries[i].next;
+
+            collisionCount++;
+            if (collisionCount > (uint)entries.Length)
+            {
+                // The chain of entries forms a loop; which means a concurrent update has happened.
+                // Break out of the loop and throw, rather than looping forever.
+                throw new NotSupportedException("Concurrent operations are not allowed");
+            }
+        }
+
+        insertor = item =>
+        {
+            hashCode = (uint)_comparer.GetHashCode(key);
+            var entries = _entries!;
+            ref int bucket = ref GetBucket(hashCode);
+            int index;
+            if (_freeCount > 0)
+            {
+                index = _freeList;
+                Debug.Assert((StartOfFreeList - entries[_freeList].next) >= -1, "shouldn't overflow because `next` cannot underflow");
+                _freeList = StartOfFreeList - entries[_freeList].next;
+                _freeCount--;
+            }
+            else
+            {
+                int count = _count;
+                if (count == entries.Length)
+                {
+                    Resize();
+                    bucket = ref GetBucket(hashCode);
+                }
+                index = count;
+                _count = count + 1;
+                entries = _entries;
+            }
+
+            ref Entry<TKey, TVal> entry = ref entries![index];
+            entry.id = hashCode;
+            entry.next = bucket - 1; // Value in _buckets is 1-based
+            entry.Key = key;
+            entry.Value = item;
+            bucket = index + 1; // Value in _buckets is 1-based
+            _version++;
+        };
+
+        return ref (new TVal[1] { default! })[0];
+    }
+
 }
 
 public struct Entry<TKey, TValue>

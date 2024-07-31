@@ -33,7 +33,7 @@ namespace SourceCrafter.DependencyInjection.Interop
         public bool Cached = true;
         public IFieldSymbol? Key = key;
         public Disposability Disposability;
-        public VarNameBuilder GenerateValue = null!;
+        public ValueBuilder GenerateValue = null!;
         public CommaSeparateBuilder? BuildParams = null!;
         public SemanticModel TypeModel = null!;
         public bool Resolved;
@@ -117,15 +117,15 @@ namespace SourceCrafter.DependencyInjection.Interop
 
         internal void UseCachedMethodResolver(StringBuilder code)
         {
-            code.Append(CacheMethodName).Append("(");
-
-            if (IsAsync) code.Append("cancellationToken");
-
-            code.Append(")");
+            code.Append(CacheMethodName)
+                .Append(IsAsync ? "Async(cancellationToken" : "(")
+                .Append(")");
         }
 
-        internal void BuildCachedResolver(StringBuilder code, string generatedCodeAttribute)
+        internal void BuildMethod(StringBuilder code, string generatedCodeAttribute)
         {
+            //TODO: Mix with old BuildMethod
+
             code.Append(@"
     ")
                 .AppendLine(generatedCodeAttribute)
@@ -142,7 +142,7 @@ namespace SourceCrafter.DependencyInjection.Interop
 
     ")
                 .AppendLine(generatedCodeAttribute)
-                .Append("    private ");
+                .Append("    public ");
 
             if (Lifetime is Lifetime.Singleton)
                 code.Append("static ");
@@ -153,7 +153,7 @@ namespace SourceCrafter.DependencyInjection.Interop
                     .Append(FullTypeName)
                     .Append("> ")
                     .Append(CacheMethodName)
-                    .Append(@"(global::System.Threading.CancellationToken cancellationToken)
+                    .Append(@"Async(global::System.Threading.CancellationToken cancellationToken)
 	{
 		if (")
                     .Append(CacheField)
@@ -238,93 +238,93 @@ namespace SourceCrafter.DependencyInjection.Interop
 ");
         }
 
-        internal void BuildMethod(StringBuilder code, string generatedCodeAttribute)
-        {
-            code
-                .Append(@"
-    ")
-                .AppendLine(generatedCodeAttribute)
-                .Append("    ");
+//        internal void BuildMethod(StringBuilder code, string generatedCodeAttribute)
+//        {
+//            code
+//                .Append(@"
+//    ")
+//                .AppendLine(generatedCodeAttribute)
+//                .Append("    ");
 
-            if (IsAsync)
-            {
-                code.Append("global::System.Threading.Tasks.ValueTask<")
-                    .Append(ExportTypeName)
-                    .Append(@"> global::SourceCrafter.DependencyInjection.IAsyncServiceProvider<")
-                    .Append(ExportTypeName)
-                    .Append(@">.GetServiceAsync(global::System.Threading.CancellationToken cancellationToken)
-    {
-        return ");
-            }
-            else
-            {
-                code.Append(ExportTypeName)
-                    .Append(@" global::SourceCrafter.DependencyInjection.IServiceProvider<")
-                    .Append(ExportTypeName);
-                code.Append(@">.GetService(");
+//            if (IsAsync)
+//            {
+//                code.Append("global::System.Threading.Tasks.ValueTask<")
+//                    .Append(ExportTypeName)
+//                    .Append(@"> global::SourceCrafter.DependencyInjection.IAsyncServiceProvider<")
+//                    .Append(ExportTypeName)
+//                    .Append(@">.GetServiceAsync(global::System.Threading.CancellationToken cancellationToken)
+//    {
+//        return ");
+//            }
+//            else
+//            {
+//                code.Append(ExportTypeName)
+//                    .Append(@" global::SourceCrafter.DependencyInjection.IServiceProvider<")
+//                    .Append(ExportTypeName);
+//                code.Append(@">.GetService(");
 
-                code.Append(@")
-    {
-        return ");
-            }
+//                code.Append(@")
+//    {
+//        return ");
+//            }
 
-            switch (Lifetime)
-            {
-                case Lifetime.Singleton:
+//            switch (Lifetime)
+//            {
+//                case Lifetime.Singleton:
 
-                    if (IsFactory && !Cached)
-                    {
-                        UseFactoryResolver(code);
-                    }
-                    else
-                    {
-                        UseCachedMethodResolver(code);
-                    }
+//                    if (IsFactory && !Cached)
+//                    {
+//                        UseFactoryResolver(code);
+//                    }
+//                    else
+//                    {
+//                        UseCachedMethodResolver(code);
+//                    }
 
-                    code.Append(@";
-    }
-");
-                    break;
-                case Lifetime.Scoped:
+//                    code.Append(@";
+//    }
+//");
+//                    break;
+//                case Lifetime.Scoped:
 
-                    code
-                    .Append(@"isScoped 
-			? ");
+//                    code
+//                    .Append(@"isScoped 
+//			? ");
 
-                    if (IsFactory && !Cached)
-                    {
-                        UseFactoryResolver(code);
-                    }
-                    else
-                    {
-                        UseCachedMethodResolver(code);
-                    }
+//                    if (IsFactory && !Cached)
+//                    {
+//                        UseFactoryResolver(code);
+//                    }
+//                    else
+//                    {
+//                        UseCachedMethodResolver(code);
+//                    }
 
-                    code.Append(@" 
-			: throw InvalidCallOutOfScope(""")
-                                .Append(FullTypeName).Append(@""");
-    }
-");
-                    break;
+//                    code.Append(@" 
+//			: throw InvalidCallOutOfScope(""")
+//                                .Append(FullTypeName).Append(@""");
+//    }
+//");
+//                    break;
 
 
-                default:
+//                default:
 
-                    if (IsFactory && !Cached)
-                    {
-                        UseFactoryResolver(code);
-                    }
-                    else
-                    {
-                        UseInstance(code);
-                    }
+//                    if (IsFactory && !Cached)
+//                    {
+//                        UseFactoryResolver(code);
+//                    }
+//                    else
+//                    {
+//                        UseInstance(code);
+//                    }
 
-                    code.Append(@";
-    }
-");
-                    break;
-            }
-        }
+//                    code.Append(@";
+//    }
+//");
+//                    break;
+//            }
+//        }
 
         internal void UseFactoryResolver(StringBuilder code)
         {
@@ -401,7 +401,7 @@ namespace SourceCrafter.DependencyInjection.Interop
             }
         }
 
-        internal void CheckParamsDependencies(Set<ServiceDescriptor> entries, Action updateAsyncContainerStatus, Compilation compilation)
+        internal void CheckParamsDependencies(DependencyMap entries, Action updateAsyncContainerStatus, Compilation compilation)
         {
             var parameters = Factory switch
             {
@@ -427,7 +427,7 @@ namespace SourceCrafter.DependencyInjection.Interop
                 var paramTypeName = _param.Type.ToGlobalNamespaced();
 
                 ref var found = ref entries.GetValueOrInsertor(
-                    Extensions.GenKey(lifetime, paramTypeName, serviceKey),
+                    (lifetime, paramTypeName, serviceKey),
                     out Action<ServiceDescriptor>? insert);
 
                 if (found != null)

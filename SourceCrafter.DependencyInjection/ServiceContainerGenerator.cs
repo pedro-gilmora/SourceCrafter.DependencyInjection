@@ -1,4 +1,6 @@
-﻿using Microsoft.CodeAnalysis;
+﻿global using DependecyKey = (SourceCrafter.DependencyInjection.Interop.Lifetime LifeTime, string ExportFullTypeName, Microsoft.CodeAnalysis.IFieldSymbol? Key);
+
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -12,8 +14,8 @@ using SourceCrafter.DependencyInjection.Interop;
 using Microsoft.CodeAnalysis.CSharp;
 
 using static SourceCrafter.DependencyInjection.Interop.ServiceDescriptor;
-using System.Linq.Expressions;
-using System.Threading;
+
+using DependencyMap = SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Interop.Lifetime, string, Microsoft.CodeAnalysis.IFieldSymbol?), SourceCrafter.DependencyInjection.Interop.ServiceDescriptor>;
 
 namespace SourceCrafter.DependencyInjection;
 
@@ -32,12 +34,15 @@ class ServiceContainerGenerator
 ");
 
     readonly HashSet<(bool, string)> enumKeysRegistry = [];
-    readonly HashSet<string>
-        propsRegistry = [],
-        interfacesRegistry = [];
 
-    readonly Set<ServiceDescriptor> discoveredServices = new(Extensions.GenKey);
+    readonly HashSet<string> 
+        methodsRegistry = new(StringComparer.Ordinal);
 
+    readonly HashSet<(string?, string)> interfacesRegistry = [];
+
+    readonly Map<(int, Lifetime, string?), string> dependencyRegistry = new(EqualityComparer<(int, Lifetime, string?)>.Default);
+
+    readonly DependencyMap discoveredServices = new (new DependencyComparer());
 
     readonly Map<ServiceDescriptor, Action<StringBuilder>>
         keyedMethods = new(new KeyedServiceComparer());
@@ -46,7 +51,7 @@ class ServiceContainerGenerator
 
     MemberBuilder?
         methods = null,
-        props = null;
+        cachedResolvers = null;
 
     Action<StringBuilder>?
         singletonDisposeStatments = null,
@@ -79,7 +84,7 @@ class ServiceContainerGenerator
             {4, CacheParamName }
         };
 
-    public ServiceContainerGenerator(INamedTypeSymbol providerClass, Compilation compilation, SemanticModel model, Set<Diagnostic> diagnostics)
+    public ServiceContainerGenerator(Compilation compilation, SemanticModel model, INamedTypeSymbol providerClass, Set<Diagnostic> diagnostics)
     {
         _providerClass = providerClass;
         _compilation = compilation;
@@ -160,14 +165,15 @@ class ServiceContainerGenerator
 
             if (thisDisposability > disposability) disposability = thisDisposability;
 
-            var identifier = SanitizeTypeName(type, key);
             var typeName = type.ToGlobalNamespaced();
             var exportTypeFullName = iface?.ToGlobalNamespaced() ?? typeName;
 
             ref var existingOrNew = ref discoveredServices
-                .GetOrAddDefault(
-                    Extensions.GenKey(lifetime, exportTypeFullName, key),
+                .GetValueOrAddDefault(
+                    (lifetime, exportTypeFullName, key),
                     out var exists)!;
+
+            var identifier = Extensions.SanitizeTypeName(type, methodsRegistry, dependencyRegistry, lifetime, key?.Type.Name, key?.Name);
 
             if (exists)
             {
@@ -188,7 +194,7 @@ class ServiceContainerGenerator
                 {
                     Lifetime = lifetime,
                     Key = key,
-                    CacheMethodName = identifier,
+                    CacheMethodName = "Get" + identifier,
                     CacheField = identifier.Camelize(),
                     Factory = factory,
                     FactoryKind = factoryKind,
@@ -223,11 +229,11 @@ class ServiceContainerGenerator
         discoveredServices.ForEach(ResolveService);
     }
 
-    void ResolveService(ref ServiceDescriptor service)
+    void ResolveService((Lifetime, string, IFieldSymbol?) dependencyKey, ref ServiceDescriptor service)
     {
         if (service.NotRegistered || service.IsCancelTokenParam) return;
 
-        if (interfacesRegistry.Add($"{service.EnumKeyTypeName}|{service.ExportTypeName}"))
+        if (interfacesRegistry.Add((service.EnumKeyTypeName, service.ExportTypeName)))
         {
             interfaces += service.AddInterface;
         }
@@ -272,7 +278,7 @@ class ServiceContainerGenerator
                     break;
             }
 
-            if (!service.IsFactory || service.Cached) props += service.BuildCachedResolver;
+            if (!service.IsFactory || service.Cached) cachedResolvers += service.BuildCachedResolver;
         }
 
         service.GenerateValue = service.Lifetime is Lifetime.Transient
@@ -285,7 +291,7 @@ class ServiceContainerGenerator
 
         if (service.IsKeyed)
         {
-            ref var builder = ref keyedMethods.GetOrAddDefault(
+            ref var builder = ref keyedMethods.GetValueOrAddDefault(
                 service,
                 out var existKeyedMethod);
 
@@ -305,12 +311,15 @@ class ServiceContainerGenerator
             {
                 string cancelTypeName = cancelType.ToGlobalNamespaced();
 
-                discoveredServices.TryAdd(new ServiceDescriptor(cancelType, cancelTypeName, cancelTypeName, null)
-                {
-                    Resolved = true,
-                    ResolvedBy = Generator.generatorGuid,
-                    IsCancelTokenParam = true
-                });
+                discoveredServices.GetValueOrAddDefault(
+                    (Lifetime.Singleton, cancelTypeName, null), 
+                    out _, 
+                    () => new(cancelType, cancelTypeName, cancelTypeName, null)
+                    {
+                        Resolved = true,
+                        ResolvedBy = Generator.generatorGuid,
+                        IsCancelTokenParam = true
+                    });
             }
 
             requiresSemaphore = true;
@@ -324,11 +333,7 @@ class ServiceContainerGenerator
 
         var fileName = _providerClass.ToMetadataLongName(uniqueName);
 
-        //Key part as concept of external dependencies resolver
-        foreach (var (prefix, extraCode) in DependencyInjectionPartsGenerator.GetResolvedDependencies(code, _compilation, _providerClass, discoveredServices))
-        {
-            addSource(fileName + "." + prefix + ".generated", extraCode);
-        }
+        //DependencyInjectionPartsGenerator.ResolveExternalDependencies(_compilation, _providerClass, discoveredServices);
 
         if (_providerClass.ContainingNamespace is { IsGlobalNamespace: false } ns)
         {
@@ -430,7 +435,7 @@ class ServiceContainerGenerator
 {");
         }
 
-        props?.Invoke(code, Generator.generatedCodeAttribute);
+        cachedResolvers?.Invoke(code, Generator.generatedCodeAttribute);
 
         if (requiresLocker)
         {
@@ -656,12 +661,12 @@ class ServiceContainerGenerator
                 }
             }
 
-            discoveredServices.ForEach((ref ServiceDescriptor item) =>
+            discoveredServices.ForEach((DependecyKey itemK, ref ServiceDescriptor item) =>
             {
                 if (item.ExportTypeName == typeFullName
                     && ((item.Key, key) switch 
                     {
-                        ({ } itemKey, { }) => SymbolEqualityComparer.Default.Equals(itemKey, key),
+                        ({ } itemKey, { }) => SymbolEqualityComparer.Default.Equals(itemK.Key, key),
                         (var itemKey, _) => itemKey is null || SymbolEqualityComparer.Default.Equals(itemKey.Type, keyType)
                     })
                     && item.Resolved)
@@ -689,45 +694,6 @@ class ServiceContainerGenerator
 
                 _ => (default!, default)
             };
-
-    string SanitizeTypeName(ITypeSymbol type, IFieldSymbol? prefix = null)
-    {
-        string varName = (prefix is { ContainingType.Name: { } enumType, Name: { } name } ? $"{enumType}_{name}_" : null) + Sanitize(type).Capitalize();
-
-        string varName1 = varName;
-
-        var i = 0;
-
-        while (!propsRegistry.Add(varName1))
-        {
-            varName1 = varName + (++i);
-        }
-
-        return varName1;
-
-        string Sanitize(ITypeSymbol type)
-        {
-            switch (type)
-            {
-                case INamedTypeSymbol { IsTupleType: true, TupleElements: { Length: > 0 } els }:
-
-                    return "TupleOf" + string.Join("", els.Select(f => SanitizeTypeName(f.Type)));
-
-                case INamedTypeSymbol { IsGenericType: true, TypeArguments: { } args }:
-
-                    return type.Name + "Of" + string.Join("", args.Select(Sanitize));
-
-                default:
-
-                    string typeName = type.ToTypeNameFormat();
-
-                    if (type is IArrayTypeSymbol { ElementType: { } elType })
-                        typeName = Sanitize(elType) + "Array";
-
-                    return char.ToUpperInvariant(typeName[0]) + typeName[1..].TrimEnd('?', '_');
-            };
-        }
-    }
 
     Disposability UpdateDisposability(ITypeSymbol type)
     {

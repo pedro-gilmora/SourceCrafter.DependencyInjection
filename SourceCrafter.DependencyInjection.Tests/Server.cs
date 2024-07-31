@@ -36,13 +36,13 @@ namespace SourceCrafter.DependencyInjection.Tests
         }
     }
 
-    public class Database([Setting("AppSettings")] AppSettings config) : IDatabase, global::System.IAsyncDisposable
+    public class Database([JsonSetting("AppSettings")] AppSettings config) : IDatabase, global::System.IAsyncDisposable
     {
-        AppSettings config = config;
+        //AppSettings config = config;
 
         public void TrySave(out string setting1)
         {
-            setting1 = config.Setting1;
+            setting1 = config?.Setting1 ?? "Value3"/*config.Setting1*/;
         }
 
         public ValueTask DisposeAsync()
@@ -59,5 +59,11 @@ namespace SourceCrafter.DependencyInjection.Tests
     public class Configuration
     {
 
+    }
+
+    public class AppSettings
+    {
+        public string Setting1 { get; set; }
+        public string Setting2 { get; set; }
     }
 }

@@ -3,7 +3,6 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 using SourceCrafter.DependencyInjection.Interop;
 
-using System.Collections.Generic;
 using System.Linq;
 
 namespace SourceCrafter.DependencyInjection

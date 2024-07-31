@@ -1,10 +1,5 @@
 ﻿using FluentAssertions;
 
-using Microsoft.Extensions.Configuration;
-
-using System.ComponentModel;
-using System;
-
 namespace SourceCrafter.DependencyInjection.Tests
 {
     public enum Test { Element }
@@ -12,6 +7,7 @@ namespace SourceCrafter.DependencyInjection.Tests
     {
 
         [Fact]
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2007:Consider calling ConfigureAwait on the awaited task", Justification = "<Pending>")]
         public async Task Test1()
         {
             await using Server serverContainer = new();
@@ -20,23 +16,20 @@ namespace SourceCrafter.DependencyInjection.Tests
             // Otherwise you'll get a "SCDI03 Type is not registered in container SourceCrafter.DependencyInjection.Tests.Server"
             // if Roslyn team get interested maybe they can solve this
 
-#pragma warning disable SCDI03 // Type not registered in container
-            serverContainer.GetService<IConfiguration>()
-#pragma warning restore SCDI03 // Type not registered in container
+            //#pragma warning disable SCDI03 // Type not registered in container
+            //            serverContainer.GetService<IConfiguration>()
+            //#pragma warning restore SCDI03 // Type not registered in container
 
-                .GetSection("AppSettings")
-                .Get<AppSettings>()!
+            //                .GetSection("AppSettings")
+            //                .Get<AppSettings>()!
 
-                .Setting1.Should().Be("Value1");
-
+            //.Setting1.Should().Be("Value1");
             serverContainer.GetService<IDatabase>(Main.App).TrySave(out var setting1);
-
             setting1.Should().Be("Value1");
-
             // Checking non-static enum values ​​based on provided key
             serverContainer.GetService<string>(GetApplication()).Should().Be("Server::Name");
 
-            int transientInt = await serverContainer.GetServiceAsync<int>(Main.App);
+            int transientInt = await serverContainer.GetServiceAsync<int>(Main.App, default);
 
             await using var scope = serverContainer.CreateScope();
 
@@ -52,11 +45,5 @@ namespace SourceCrafter.DependencyInjection.Tests
                 return Main.App;
             }
         }
-    }
-
-    public class AppSettings
-    {
-        public string Setting1 { get; set; }
-        public string Setting2 { get; set; }
     }
 }

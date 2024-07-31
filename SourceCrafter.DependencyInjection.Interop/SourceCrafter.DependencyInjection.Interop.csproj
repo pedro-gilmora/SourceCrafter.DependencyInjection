@@ -1,15 +1,14 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFrameworks>netstandard2.0</TargetFrameworks>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<LangVersion>latest</LangVersion>
 		<Nullable>enable</Nullable>
-		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<PackageVersion>
 			$([System.Convert]::ToUInt16(
 				$([MSBuild]::Add(
 					$([System.DateTime]::Now.Year),
-					-2023
+					-2024
 				))
 			)).
 			$([System.DateTime]::Now.ToString('yy')).
@@ -24,9 +23,10 @@
 		<Version>$(PackageVersion)</Version>
 		<Company>AsereHighDev</Company>
 		<Description>Compile-Time Dependency Injection generator</Description>
-		<PackageReadmeFile>ReadMe.md</PackageReadmeFile>
+		<!--<PackageReadmeFile>ReadMe.md</PackageReadmeFile>-->
 		<Configurations>Debug;Release;DEBUG_SG</Configurations>
 		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
+		<PackageOutputPath>$(SolutionDir)\packaging</PackageOutputPath>
 	</PropertyGroup>
   <ItemGroup>
     <PackageReference Include="IndexRange" Version="1.0.3" />

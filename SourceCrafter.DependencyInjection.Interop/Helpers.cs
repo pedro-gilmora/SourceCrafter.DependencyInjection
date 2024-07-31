@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
@@ -13,7 +14,7 @@ using SourceCrafter.DependencyInjection.Interop;
 [assembly: InternalsVisibleTo("SourceCrafter.Bindings.UnitTests")]
 namespace SourceCrafter.DependencyInjection
 {
-    internal static class Extensions
+    public static class Extensions
     {
         internal readonly static SymbolDisplayFormat
             _globalizedNamespace = new(
@@ -85,7 +86,7 @@ namespace SourceCrafter.DependencyInjection
         {
             var e = ToMetadataLongName(symbol);
 
-            ref var count = ref uniqueName.GetOrAddDefault(e, out var exists);
+            ref var count = ref uniqueName.GetValueOrAddDefault(e, out var exists);
 
             if (exists)
             {
@@ -95,12 +96,12 @@ namespace SourceCrafter.DependencyInjection
             return e;
         }
 
-        internal static string Capitalize(this string str)
+        public static string Capitalize(this string str)
         {
             return str is [{ } f, .. { } rest] ? char.ToUpper(f) + rest : str;
         }
 
-        internal static string Camelize(this string str)
+        public static string Camelize(this string str)
         {
             return str is [{ } f, .. { } rest] ? char.ToLower(f) + rest : str;
         }
@@ -209,8 +210,64 @@ namespace SourceCrafter.DependencyInjection
         }
 
 
-        public static T Exchange<T>(ref this T oldVal, T newVal) where T : struct => 
-            oldVal.Equals(newVal) ? oldVal :((oldVal, _) = (newVal, oldVal)).Item2;
+        public static string SanitizeTypeName(
+            ITypeSymbol type,
+            HashSet<string> methodsRegistry,
+            Map<(int, Lifetime, string?), string> dependencyRegistry,
+            Lifetime lifeTime,
+            string? enumTypeName,
+            string? enumValue)
+        {
+            int hashCode = SymbolEqualityComparer.Default.GetHashCode(type);
+           
+            string id = Sanitize(type).Capitalize();
+
+            ref var idOut = ref dependencyRegistry.GetValueOrAddDefault((hashCode, lifeTime, enumTypeName + "." + enumValue), out var exists);
+
+            if (exists)
+            {
+                return idOut!;
+            }
+            Dictionary<(int, Lifetime, string?), string> _dic = [];
+   
+            _ = methodsRegistry.Add(idOut = id)
+                || (enumValue != null &&
+                        (methodsRegistry.Add(idOut = $"{id}For{enumValue}")
+                            || methodsRegistry.Add(idOut = $"{id}For{enumValue}")
+                            || methodsRegistry.Add(idOut = $"{id}{enumValue}For{enumTypeName}")
+                            || methodsRegistry.Add(idOut = $"{lifeTime}{id}")
+                            || methodsRegistry.Add(idOut = $"{lifeTime}{id}For{enumValue}")
+                            || methodsRegistry.Add(idOut = $"{lifeTime}{id}For{enumValue}{enumTypeName}")))
+                || methodsRegistry.Add(idOut = $"{lifeTime}{id}");
+
+            return idOut;
+
+            static string Sanitize(ITypeSymbol type)
+            {
+                switch (type)
+                {
+                    case INamedTypeSymbol { IsTupleType: true, TupleElements: { Length: > 0 } els }:
+
+                        return "TupleOf" + string.Join("", els.Select(f => Sanitize(f.Type)));
+
+                    case INamedTypeSymbol { IsGenericType: true, TypeParameters: { } args }:
+
+                        return type.Name + "Of" + string.Join("", args.Select(Sanitize));
+
+                    default:
+
+                        string typeName = type.ToTypeNameFormat();
+
+                        if (type is IArrayTypeSymbol { ElementType: { } elType })
+                            typeName = Sanitize(elType) + "Array";
+
+                        return char.ToUpperInvariant(typeName[0]) + typeName[1..].TrimEnd('?', '_');
+                };
+            }
+        }
+
+        public static T Exchange<T>(ref this T oldVal, T newVal) where T : struct =>
+                    oldVal.Equals(newVal) ? oldVal : ((oldVal, _) = (newVal, oldVal)).Item2;
     }
 }
 
