@@ -36,7 +36,7 @@ function Get-Version {
 function Get-Env-Vars
 {
     # Define your environment variable string
-    $envFile = Get-Content ".\msbuildProps"
+    $envFile = Get-Content "./msbuildProps"
 
     # Convert the string into an array of lines
     $envVarsArray = $envVarsString -split "`n"
@@ -60,7 +60,7 @@ function Get-Env-Vars
 
 Get-Env-Vars
 
-$testProjPath = ".\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj"
+$testProjPath = "./SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj"
 
 $testProjContent = [xml]$(Get-Content $testProjPath)
 
@@ -89,16 +89,16 @@ PACKER: Updating package: $($_.GetAttribute('Include')) from version $version"
     Write-Output "
 PACKER: Test project references where updated
 "
-    if(-not (Test-Path '.\packaging\'))
+    if(-not (Test-Path './packaging/'))
     {
         Write-Host "PACKER: Created packaging output folder
 "
-        New-Item -ItemType Directory -Path '.\packaging\'
+        New-Item -ItemType Directory -Path './packaging/'
     }
     if($clean -eq "true")
     {
         Write-Information "PACKER: Removing packages"
-        Remove-Item -Path ".\packaging\*.*" -recurse
+        Remove-Item -Path "./packaging/*.*" -recurse
     }
 
     if($pack -eq 'true')
@@ -109,10 +109,10 @@ PACKER: Test project references where updated
 
             Write-Host "PACKER: Packaging projects
 "
-            dotnet pack .\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj -c Release -o .\packaging -p:PackageVersion=$version
-            dotnet pack .\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj -c Release -o .\packaging -p:PackageVersion=$version
-            dotnet pack .\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -o .\packaging -p:PackageVersion=$version
-            dotnet pack .\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -o .\packaging -p:PackageVersion=$version
+            dotnet pack ./SourceCrafter.DependencyInjection.Interop/SourceCrafter.DependencyInjection.Interop.csproj -c Release -o ./packaging -p:PackageVersion=$version
+            dotnet pack ./SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj -c Release -o ./packaging -p:PackageVersion=$version
+            dotnet pack ./SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -o ./packaging -p:PackageVersion=$version
+            dotnet pack ./SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -o ./packaging -p:PackageVersion=$version
         }
         catch
         {
@@ -129,15 +129,15 @@ PACKER: Testin projects
 "
     if($pack -ne 'true')
     {
-        dotnet restore .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj
+        dotnet restore ./SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj
     }
     
     if($clean -eq 'true')
     {
-        dotnet clean .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj -c Release
+        dotnet clean ./SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
     }
     
-    dotnet build .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj -c Release
-    dotnet test .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj -c Release /v:diag
+    dotnet build ./SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
+    dotnet test ./SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release /v:diag
 
 }
