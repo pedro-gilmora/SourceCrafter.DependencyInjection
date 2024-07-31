@@ -131,7 +131,7 @@ PACKER: Testin projects
         dotnet clean .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj -c Release
     }
     
-    dotnet msbuild .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj -c Release
-    dotnet msbuild .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj -c Release /v:diag
+    dotnet build .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj -c Release
+    dotnet test .\SourceCrafter.DependencyInjection.Tests\SourceCrafter.DependencyInjection.Tests.csproj -c Release /v:diag
 
 }
