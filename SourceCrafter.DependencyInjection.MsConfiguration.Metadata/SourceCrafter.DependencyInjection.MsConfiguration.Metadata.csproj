@@ -21,7 +21,7 @@
 			))
 		</PackageVersion>
 		<Configurations>Debug;Release;DEBUG_SG</Configurations>
-		<PackageOutputPath>$(SolutionDir)\packaging</PackageOutputPath>
+		<PackageOutputPath>../packaging</PackageOutputPath>
   </PropertyGroup>
 
 	<ItemGroup>

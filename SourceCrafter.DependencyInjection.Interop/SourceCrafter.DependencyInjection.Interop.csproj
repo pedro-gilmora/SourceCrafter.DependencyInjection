@@ -26,7 +26,7 @@
 		<!--<PackageReadmeFile>ReadMe.md</PackageReadmeFile>-->
 		<Configurations>Debug;Release;DEBUG_SG</Configurations>
 		<AllowUnsafeBlocks>True</AllowUnsafeBlocks>
-		<PackageOutputPath>$(SolutionDir)\packaging</PackageOutputPath>
+		<PackageOutputPath>../packaging</PackageOutputPath>
 	</PropertyGroup>
   <ItemGroup>
     <PackageReference Include="IndexRange" Version="1.0.3" />

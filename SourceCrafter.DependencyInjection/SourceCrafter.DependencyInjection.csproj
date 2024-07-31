@@ -24,7 +24,7 @@
 		<IsRoslynComponent>true</IsRoslynComponent>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<Configurations>Debug;Release;Pack;Debug SG</Configurations>
-		<PackageOutputPath>$(SolutionDir)\packaging</PackageOutputPath>
+		<PackageOutputPath>../packaging</PackageOutputPath>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
