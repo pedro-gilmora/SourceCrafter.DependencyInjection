@@ -7,7 +7,6 @@ namespace SourceCrafter.DependencyInjection.Tests
     {
 
         [Fact]
-        [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2007:Consider calling ConfigureAwait on the awaited task", Justification = "<Pending>")]
         public async Task Test1()
         {
             await using Server serverContainer = new();
@@ -26,9 +25,9 @@ namespace SourceCrafter.DependencyInjection.Tests
             //.Setting1.Should().Be("Value1");
 
             serverContainer.GetService<IDatabase>(Main.App).TrySave(out var setting1);
-            
+
             setting1.Should().Be("Value1");
-            
+
             // Checking non-static enum values ​​based on provided key
             serverContainer.GetService<string>(GetApplication()).Should().Be("Server::Name");
 

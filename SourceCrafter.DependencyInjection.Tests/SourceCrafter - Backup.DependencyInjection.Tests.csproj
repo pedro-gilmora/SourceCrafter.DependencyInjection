@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -22,10 +22,12 @@
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
-    <PackageReference Include="SourceCrafter.DependencyInjection" Version="0.24.213.84" OutputType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.Interop" Version="0.24.213.84" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="0.24.213.84" OutputType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="0.24.213.84" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="SourceCrafter.DependencyInjection" Version="0.24.213.84" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="0.24.213.84" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="0.24.213.84" ReferenceOutputAssembly="false" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.Interop" Version="0.24.213.84" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />

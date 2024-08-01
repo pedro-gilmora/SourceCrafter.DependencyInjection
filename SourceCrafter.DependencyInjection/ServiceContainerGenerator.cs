@@ -333,7 +333,7 @@ class ServiceContainerGenerator
 
         var fileName = _providerClass.ToMetadataLongName(uniqueName);
 
-        DependencyInjectionPartsGenerator.ResolveExternalDependencies(
+        InteropServices.ResolveExternalDependencies(
             System.Threading.SynchronizationContext.Current, 
             _compilation, 
             _providerClass, 

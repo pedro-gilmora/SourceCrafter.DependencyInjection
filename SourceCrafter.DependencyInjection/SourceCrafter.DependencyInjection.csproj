@@ -45,16 +45,13 @@
 	</ItemGroup>
 
 	<ItemGroup>
-	  <ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" PrivateAssets="all" />
+	  <ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" />
 	</ItemGroup>
 
-	<ItemGroup Condition=" '$(Configuration)' == 'Release'">
-		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-		<None Include="$(OutputPath)\$(AssemblyName).Interop.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+	<ItemGroup>
+		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
+		<None Include="$(OutputPath)\$(AssemblyName).Interop.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
+		<None Include="$(OutputPath)\$(AssemblyName).Interop.dll" Pack="true" PackagePath="lib\netstandard2.0" Visible="true" />
 	</ItemGroup>
-
-	<Target Name="RemoveLibOutput" AfterTargets="Pack">
-		<Delete Files="$(OutputPath)\$(AssemblyName).dll" />
-	</Target>
 	
 </Project>

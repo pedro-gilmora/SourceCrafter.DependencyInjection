@@ -22,12 +22,12 @@ namespace SourceCrafter.DependencyInjection.Interop
     public delegate void MemberBuilder(StringBuilder code, string generatedCodeAttribute);
     public delegate void ParamsBuilder(StringBuilder code);
 
-    public static class DependencyInjectionPartsGenerator
+    public static class InteropServices
     {
         static readonly object _lock = new();
         static ConcurrentDictionary<Guid, ContainerRegistrationHandler>? ExternalResolvers;
 
-        static DependencyInjectionPartsGenerator()
+        static InteropServices()
         {
             InitializeBag();
         }

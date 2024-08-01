@@ -13,7 +13,6 @@ param(
     [string]$startingYear = "2024"
 )
 
-
 function Get-Version {
     # Calculate the first part of the version
     $part1 = [System.Convert]::ToUInt16([System.DateTime]::Now.Year - [System.Int32]::Parse($startingYear))
@@ -33,34 +32,9 @@ function Get-Version {
     return $version
 }
 
-function Get-Env-Vars
-{
-    # Define your environment variable string
-    $envFile = Get-Content "./msbuildProps"
+Set-Location $PSScriptRoot
 
-    # Convert the string into an array of lines
-    $envVarsArray = $envVarsString -split "`n"
-
-    # Iterate over each line and set the environment variables
-    foreach ($line in $envVarsArray) {
-        # Trim any extra whitespace from the line
-        $line = $line.Trim()
-    
-        # Skip empty lines and lines that don't contain an equals sign
-        if ($line -match '^(.+)=(.+)$') {
-            # Extract the variable name and value
-            $name = $matches[1].Trim()
-            $value = $matches[2].Trim()
-        
-            # Set the environment variable in the current PowerShell session
-            [System.Environment]::SetEnvironmentVariable($name, $value, [System.EnvironmentVariableTarget]::Process)
-        }
-    }
-}
-
-Get-Env-Vars
-
-$testProjPath = "./SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj"
+$testProjPath = "$PSScriptRoot/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj"
 
 $testProjContent = [xml]$(Get-Content $testProjPath)
 
@@ -89,30 +63,35 @@ PACKER: Updating package: $($_.GetAttribute('Include')) from version $version"
     Write-Output "
 PACKER: Test project references where updated
 "
-    if(-not (Test-Path './packaging/'))
+    if(-not (Test-Path "$PSScriptRoot/packaging/"))
     {
         Write-Host "PACKER: Created packaging output folder
 "
-        New-Item -ItemType Directory -Path './packaging/'
+        New-Item -ItemType Directory -Path "$PSScriptRoot/packaging/"
     }
     if($clean -eq "true")
     {
         Write-Information "PACKER: Removing packages"
-        Remove-Item -Path "./packaging/*.*" -recurse
+        Remove-Item -Path "$PSScriptRoot/packaging/*.*" -recurse
     }
 
     if($pack -eq 'true')
     {
         try
         {
+            if(dotnet nuget list source | Select-String -Pattern 'DILocalPackages')
+            {
+                dotnet nuget add source $PSScriptRoot/packaging -n DILocalPackages
+            }
+        
             dotnet restore
 
             Write-Host "PACKER: Packaging projects
 "
-            dotnet pack ./SourceCrafter.DependencyInjection.Interop/SourceCrafter.DependencyInjection.Interop.csproj -c Release -o ./packaging -p:PackageVersion=$version
-            dotnet pack ./SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj -c Release -o ./packaging -p:PackageVersion=$version
-            dotnet pack ./SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -o ./packaging -p:PackageVersion=$version
-            dotnet pack ./SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -o ./packaging -p:PackageVersion=$version
+            dotnet pack $PSScriptRoot/SourceCrafter.DependencyInjection.Interop/SourceCrafter.DependencyInjection.Interop.csproj -c Release -p:PackageVersion=$version
+            dotnet pack $PSScriptRoot/SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj -c Release -p:PackageVersion=$version
+            dotnet pack $PSScriptRoot/SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -p:PackageVersion=$version
+            dotnet pack $PSScriptRoot/SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -p:PackageVersion=$version
         }
         catch
         {
@@ -129,15 +108,20 @@ PACKER: Testin projects
 "
     if($pack -ne 'true')
     {
-        dotnet restore ./SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj
+        if(dotnet nuget list source | Select-String -Pattern 'LocalPackages')
+        {
+            dotnet nuget add source $PSScriptRoot/packaging -n DILocalPackages
+        }        
+        
+        dotnet restore $PSScriptRoot/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj
     }
     
     if($clean -eq 'true')
     {
-        dotnet clean ./SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
+        dotnet clean $PSScriptRoot/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
     }
     
-    dotnet build ./SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
-    dotnet test ./SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release /v:diag
+    dotnet build $PSScriptRoot/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
+    dotnet test $PSScriptRoot/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release /v:d
 
 }

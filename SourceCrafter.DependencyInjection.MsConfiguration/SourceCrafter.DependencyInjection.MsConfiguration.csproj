@@ -51,15 +51,17 @@
 		<PackageReference Include="System.Runtime.InteropServices" Version="4.3.0" />
 	</ItemGroup>
 
-	<ItemGroup Condition=" '$(Configuration)' == 'Release'">
+	<ItemGroup>
 		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
 		<None Include="$(OutputPath)\SourceCrafter.DependencyInjection.Interop.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
 		<None Include="$(OutputPath)\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
+		<None Include="$(OutputPath)\SourceCrafter.DependencyInjection.Interop.dll" Pack="true" PackagePath="lib/netstandard2.0" Visible="true" />
+		<None Include="$(OutputPath)\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.dll" Pack="true" PackagePath="lib/netstandard2.0" Visible="true" />
 	</ItemGroup>
 	
 	<ItemGroup>
-	  <ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" PrivateAssets="all" />
-	  <ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" />
+		<ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" />
+		<ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" />
 	</ItemGroup>
 
 </Project>

@@ -57,7 +57,7 @@ public class Generator : IIncrementalGenerator
 
         Map<string, ValueBuilder> resolvedTypes = new (StringComparer.Ordinal);
 
-        DependencyInjectionPartsGenerator.RegisterDependencyResolvers(generatorGuid, Resolve);
+        InteropServices.RegisterDependencyResolvers(generatorGuid, Resolve);
 
         void Resolve(Compilation compilation, ITypeSymbol serviceContainer, DependencyMap servicesDescriptors)
         {
