@@ -6,29 +6,29 @@ Some addressings  of those possible issued would be making the delegate executio
 
 Theis would be my case:
 
-Introducing of `CompilationInteropProvider` type and property to `IncrementalGeneratorInitializationContext`
+Introducing of `AnalyzerExtensibilityProvider` type and property to `IncrementalGeneratorInitializationContext`
 
 ```cs
 public sealed class AnalyzerExtensibilityProvider
 {
-    static IncrementalValueProvider<T> SubscribeTo<T>(Func<T, CancellationToken ,bool> exchangedData)
+    static IncrementalValueProvider<T> SubscribeTo<T>(Func<T, CancellationToken ,bool> exchangedData);
+    static IncrementalValueProvider<AnalyzerSubscription<T>> SubscribeTo<T>(Func<T, CancellationToken ,bool> exchangedData);
 }
 ```
 
 ```cs
-public static class AnalyzerExtensibilityProviderExtensions
+public sealed class AnalyzerSubscription<T>
 {
-    // Generic is with the purpose of keying posible handlers by type hash code (T.GetHashCode)
-    // Constrains for T it'll be up to the Roslyn team
-    // A ver lazy name, also it'll up to the Roslyn team
-    void Publish<T>(T dataToExchange, CancellationToken token);;
+    public T State { get; }
+    // Report back to the publisher the current state changes
+    public void Return(CancelationToken token);
 }
 ```
 
-Core SGen author
+Third party SGen author
 ```cs
-
 var compilationProvider = incrementalGeneratorInitializationContext.CompilationProvider;
+
 //Usage of [AnalyzerExtensibilityProvider] as a property
 var extensibilityProvider = incrementalGeneratorInitializationContext.AnalyzerExtensibilityProvider;
 
@@ -55,8 +55,8 @@ incrementalGeneratorInitializationContext.RegisterSourceOutput(
                     semanticModel,
                     serviceContainerSymbol,
                     unresolvedDependencyHandler: (ServiceMetadata serviceDesc) =>
-                                                /*^ Service metadata is hosted in a core-intermediary
-                                                    maybe called {SGenNamespace}.{GenType}Metadata 
+                                                /*^ Service metadata is hosted in a core-author assembly 
+                                                    to exchange custome metadata info with other interested SGen writers
                                                     assembly reachable by other interested authors */
                     {
                         // Will publish to third-party consumers of this SGen
@@ -64,15 +64,37 @@ incrementalGeneratorInitializationContext.RegisterSourceOutput(
                     })
                 .TryBuild(out string fileName, out string code);
         }
-
     });
+```
 
+Third party SGen author, (should have same core package interop reference)
+```cs
+var compilationProvider = incrementalGeneratorInitializationContext.CompilationProvider;
+
+//Usage of [AnalyzerExtensibilityProvider] as a property
+var emitedLoggerServices = incrementalGeneratorInitializationContext.AnalyzerExtensibilityProvider
+    .SubscribeTo<ServiceMetadata>((serviceMetadata, cancelToken) => 
+    {
+        if(IsLogger(serviceMetadataSubscription.State))
+        {
+            serviceMetadataSubscription.State.Resolved = true;
+            serviceMetadataSubscription.Return(); //Share the state changes with originator context 
+        }
+    }).Collect();
+
+incrementalGeneratorInitializationContext.RegisterPostInitializtionOutput(CreateLoggerFactory);
+    
+incrementalGeneratorInitializationContext.RegisterSourceOutput(
+    compilationProvider .Combine( coreServiceContainer ), 
+    (sourceProducer, info, cancellationToken) => {
+                         //^ Introduced token from core extension
+        
+        var (compilation, emitedLoggerServices) = info;
+
+        // Proceed to generate third-party code, with the help of current Compilation context 
+    });
 ```
 
 I dont't know if it's something owning an already design sepc, or if it's a good enough API implementation, but it would be good to start, thinking as an average source generator author
-
-
-
-
 
 (1) guessing there's something like that
