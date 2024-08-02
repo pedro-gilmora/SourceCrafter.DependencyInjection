@@ -11,6 +11,9 @@
     <RestoreAdditionalProjectSources>..\packaging</RestoreAdditionalProjectSources>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="Tests.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.1" />
@@ -22,13 +25,23 @@
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
-    <PackageReference Include="SourceCrafter.DependencyInjection" Version="0.24.213.84" OutputType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.Interop" Version="0.24.213.84" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="0.24.213.84" OutputType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="0.24.213.84" />
+  </ItemGroup>
+  <ItemGroup Condition="$(Configuration) == 'DEBUG_SG'">
+    <Analyzer Include="..\SourceCrafter.DependencyInjection\bin\$(Configuration)\netstandard2.0\SourceCrafter.DependencyInjection.dll" />
+    <Analyzer Include="..\SourceCrafter.DependencyInjection.MsConfiguration\bin\$(Configuration)\netstandard2.0\SourceCrafter.DependencyInjection.MsConfiguration.dll" />
+		<Analyzer Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\bin\$(Configuration)\netstandard2.0\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.dll" />
+		<Analyzer Include="..\SourceCrafter.DependencyInjection.Interop\bin\$(Configuration)\netstandard2.0\SourceCrafter.DependencyInjection.Interop.dll" />
+		<Reference Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\bin\$(Configuration)\netstandard2.0\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.dll" />
+		<Reference Include="..\SourceCrafter.DependencyInjection.Interop\bin\$(Configuration)\netstandard2.0\SourceCrafter.DependencyInjection.Interop.dll" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
+  </ItemGroup>
+  <ItemGroup Condition="$(Configuration) != 'DEBUG_SG'">
+    <PackageReference Include="SourceCrafter.DependencyInjection" Version="0.24.214.87" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.Interop" Version="0.24.214.87" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="0.24.214.87" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="0.24.214.87" />
   </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.json">

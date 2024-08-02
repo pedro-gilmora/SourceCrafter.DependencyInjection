@@ -23,7 +23,7 @@ namespace SourceCrafter.DependencyInjection.Interop
             TransientAttr = "global::SourceCrafter.DependencyInjection.Attributes.TransientAttribute";
 
         public string FullTypeName = typeName;
-        public string CacheMethodName = null!;
+        public string ResolverMethodName = null!;
         public string CacheField = null!;
         public ITypeSymbol Type = type;
         public ITypeSymbol? Interface = _interface;
@@ -36,7 +36,7 @@ namespace SourceCrafter.DependencyInjection.Interop
         public ValueBuilder GenerateValue = null!;
         public CommaSeparateBuilder? BuildParams = null!;
         public SemanticModel TypeModel = null!;
-        public bool Resolved;
+        public bool IsResolved;
         public ImmutableArray<AttributeData> Attributes = [];
         public ITypeSymbol ContainerType = null!;
         public bool NotRegistered = false;
@@ -69,7 +69,7 @@ namespace SourceCrafter.DependencyInjection.Interop
             }
         }
 
-        void AppendFactoryOriginType(StringBuilder code)
+        void AppendFactoryContainingType(StringBuilder code)
         {
             if (!SymbolEqualityComparer.Default.Equals(Factory!.ContainingType, ContainerType))
             {
@@ -81,16 +81,16 @@ namespace SourceCrafter.DependencyInjection.Interop
         {
             code.Append(@"
 			case ")
-                .Append(EnumKeyTypeName ?? "UnknownEnumType")
-                .Append(".")
-                .Append(Key?.Name ?? "UknownValue")
-                .Append(@" : return ");
+                .Append(EnumKeyTypeName)
+                .Append('.')
+                .Append(Key!.Name)
+                .Append(@" :
+");
 
-            if (ShouldAddAsyncAwait) code.Append("await ");
+            BuildResolverBody(code, 2);
 
-            BuildValue(code);
-
-            code.Append(";");
+            code.Append(@"
+");
         }
 
         public override string ToString()
@@ -105,6 +105,7 @@ namespace SourceCrafter.DependencyInjection.Interop
 	global::SourceCrafter.DependencyInjection.I");
 
             if (IsKeyed) code.Append("Keyed");
+
             if (IsAsync) code.Append("Async");
 
             code.Append("ServiceProvider<");
@@ -112,221 +113,203 @@ namespace SourceCrafter.DependencyInjection.Interop
             if (IsKeyed) code.Append(EnumKeyTypeName).Append(", ");
 
             code.Append(ExportTypeName)
-                .Append(">");
+                .Append('>');
         }
 
-        internal void UseCachedMethodResolver(StringBuilder code)
+        internal void UseCachedValueResolver(StringBuilder code)
         {
-            code.Append(CacheMethodName)
+            code.Append(ResolverMethodName)
                 .Append(IsAsync ? "Async(cancellationToken" : "(")
-                .Append(")");
+                .Append(')');
         }
 
-        internal void BuildCachedResolver(StringBuilder code, string generatedCodeAttribute)
+        internal void BuildResolver(StringBuilder code, bool isImplementation, string generatedCodeAttribute)
         {
             //TODO: Mix with old BuildMethod
-
-            code.Append(@"
+            if (isImplementation)
+            {
+                code.Append(@"
     ")
-                .AppendLine(generatedCodeAttribute)
-                .Append(@"
+                    .Append(generatedCodeAttribute)
+                    .Append(@"
     private ");
 
-            if (Lifetime is Lifetime.Singleton) code.Append("static ");
+                if (Lifetime is Lifetime.Singleton) code.Append("static ");
 
-            code
-                .Append(FullTypeName)
-                .Append("? ")
-                .Append(CacheField)
-                .Append(@";
+                code
+                    .Append(FullTypeName)
+                    .Append("? ")
+                    .Append(CacheField)
+                    .Append(@";
 
     ")
-                .AppendLine(generatedCodeAttribute)
-                .Append("    public ");
+                    .AppendLine(generatedCodeAttribute);
 
-            if (Lifetime is Lifetime.Singleton)
-                code.Append("static ");
+                code.Append("    ");
+
+                code.Append("public ");
+            }
+            else
+            {
+                code.Append(@"
+    ")
+                    .Append(generatedCodeAttribute)
+                    .Append(@"
+    ");
+            }
 
             if (IsAsync)
             {
-                code.Append("async global::System.Threading.Tasks.ValueTask<")
+                if (isImplementation) code.Append("async ");
+
+                code.Append("global::System.Threading.Tasks.ValueTask<")
                     .Append(FullTypeName)
                     .Append("> ")
-                    .Append(CacheMethodName)
-                    .Append(@"Async(global::System.Threading.CancellationToken cancellationToken)
-	{
-		if (")
-                    .Append(CacheField)
-                    .Append(@" is not null)
-        {
-            return ")
-                    .Append(CacheField)
-                    .Append(@";
-        }
-
-        await __globalSemaphore.WaitAsync(cancellationToken);
-
-        try
-        {
-            return ")
-                    .Append(CacheField)
-                    .Append(@" ??= ");
-
-                if (IsFactory)
-                {
-                    UseFactoryResolver(code);
-                }
-                else
-                {
-                    code.Append("new ")
-                        .Append(FullTypeName)
-                        .Append("(");
-
-                    bool comma = false;
-                    BuildParams?.Invoke(ref comma, code);
-
-                    code.Append(")");
-                }
-
-                code.Append(@";
-        }
-        finally
-        {
-            __globalSemaphore.Release();
-        }");
-
+                    .Append(ResolverMethodName)
+                    .Append(@"Async(global::System.Threading.CancellationToken cancellationToken = default)");
             }
             else
             {
                 code.Append(FullTypeName)
-                    .Append(" ")
-                    .Append(CacheMethodName)
-                    .Append(@"()
-	{
-		if (")
-                    .Append(CacheField)
-                    .Append(@" is null)
-			lock (__lock)
-				return ")
-                    .Append(CacheField)
-                    .Append(@" ??= ");
+                    .Append(' ')
+                    .Append(ResolverMethodName)
+                    .Append(@"()");
+            }
 
-                if (IsFactory)
+            if (!isImplementation)
+            {
+                if (!IsResolved)
                 {
-                    UseFactoryResolver(code);
-                }
-                else
-                {
-                    code.Append("new ")
-                        .Append(FullTypeName)
-                        .Append("(");
+                    code.Append(" => default");
 
-                    bool comma = false;
-                    BuildParams?.Invoke(ref comma, code);
-
-                    code.Append(")");
+                    if (Type?.IsNullable() is false) code.Append('!');
                 }
 
                 code.Append(@";
-		return ")
-                    .Append(CacheField)
-                    .Append(@";");
+");
+                return;
             }
 
             code.Append(@"
-	}
+    {");
+
+            BuildResolverBody(code);
+
+            code.Append(@"
+    }
 ");
         }
 
-        internal void BuildMethod(StringBuilder code, string generatedCodeAttribute)
+        void BuildResolverBody(StringBuilder code, int indentSeeding = 0)
         {
-            code
-                .Append(@"
-    ")
-                .AppendLine(generatedCodeAttribute)
-                .Append("    ");
+            string? indentSeed = indentSeeding == 0 ? null : new(' ', indentSeeding * 4);
 
-            if (IsAsync)
+            if (Cached)
             {
-                code.Append("global::System.Threading.Tasks.ValueTask<")
-                    .Append(ExportTypeName)
-                    .Append(@"> global::SourceCrafter.DependencyInjection.IAsyncServiceProvider<")
-                    .Append(ExportTypeName)
-                    .Append(@">.GetServiceAsync(global::System.Threading.CancellationToken cancellationToken)
-    {
-        return ");
+                var checkNullOnValueType = (Interface ?? Type) is { IsValueType: true, NullableAnnotation: not NullableAnnotation.Annotated };
+
+                code.AppendFormat(@"
+{0}		if (", indentSeed)
+                    .Append(CacheField);
+
+                if (checkNullOnValueType)
+                {
+                    code
+                        .Append(@".HasValue");
+                }
+                else
+                {
+                    code
+                        .Append(@" is not null");
+                }
+
+                code.Append(@") return ")
+                    .Append(CacheField);
+
+                if (checkNullOnValueType)
+                {
+                    code.Append(@".Value;");
+                }
+                else
+                {
+                    code.Append(';');
+                }
+
+                if (IsAsync)
+                {
+                    code.AppendFormat(@"
+
+{0}        await __globalSemaphore.WaitAsync(cancellationToken);
+
+{0}        try
+{0}        {{
+{0}            return ", indentSeed);
+
+                    code.Append(CacheField)
+                        .Append(@" ??= ");
+
+                    BuildValueResolver(code);
+
+                    code.AppendFormat(@";
+{0}        }}
+{0}        finally
+{0}        {{
+{0}            __globalSemaphore.Release();
+{0}        }}", indentSeed);
+
+                }
+                else
+                {
+                    code.AppendFormat(@"
+
+{0}        lock(__lock) return ", indentSeed)
+                        .Append(CacheField)
+                        .Append(@" ??= ");
+
+                    BuildValueResolver(code);
+
+                    code.Append(@";");
+                }
             }
             else
             {
-                code.Append(ExportTypeName)
-                    .Append(@" global::SourceCrafter.DependencyInjection.IServiceProvider<")
-                    .Append(ExportTypeName);
-                code.Append(@">.GetService(");
+                code.AppendFormat(@"
+{0}        return ", indentSeed);
 
-                code.Append(@")
-    {
-        return ");
+                BuildValueResolver(code);
+
+                code.Append(@";");
             }
 
-            switch (Lifetime)
+            void BuildValueResolver(StringBuilder code)
             {
-                case Lifetime.Singleton:
+                if (Lifetime is Lifetime.Scoped)
+                {
+                    code
+                        .AppendFormat(@"isScoped 
+ {0}               ? ", indentSeed);
 
-                    if (IsFactory && !Cached)
-                    {
-                        UseFactoryResolver(code);
-                    }
-                    else
-                    {
-                        UseCachedMethodResolver(code);
-                    }
+                    if (IsAsync && IsFactory) code.Append("await ");
 
-                    code.Append(@";
-    }
-");
-                    break;
-                case Lifetime.Scoped:
+                    GenerateValue(code);
 
                     code
-                    .Append(@"isScoped 
-			? ");
+                        .AppendFormat(@"
+ {0}               : throw InvalidCallOutOfScope(""", indentSeed)
+                        .Append(FullTypeName)
+                        .Append(@""");");
 
-                    if (IsFactory && !Cached)
-                    {
-                        UseFactoryResolver(code);
-                    }
-                    else
-                    {
-                        UseCachedMethodResolver(code);
-                    }
+                }
+                else
+                {
+                    if (IsAsync && IsFactory) code.Append("await ");
 
-                    code.Append(@" 
-			: throw InvalidCallOutOfScope(""")
-                                .Append(FullTypeName).Append(@""");
-    }
-");
-                    break;
-
-
-                default:
-
-                    if (IsFactory && !Cached)
-                    {
-                        UseFactoryResolver(code);
-                    }
-                    else
-                    {
-                        UseInstance(code);
-                    }
-
-                    code.Append(@";
-    }
-");
-                    break;
+                    GenerateValue(code);
+                }
             }
         }
 
-        internal void UseFactoryResolver(StringBuilder code)
+        internal void UseFactoryValueResolver(StringBuilder code)
         {
             bool comma = false;
 
@@ -334,30 +317,30 @@ namespace SourceCrafter.DependencyInjection.Interop
             {
                 case IMethodSymbol method:
 
-                    AppendFactoryOriginType(code);
+                    AppendFactoryContainingType(code);
 
                     if (method.TypeArguments is { IsDefaultOrEmpty: false } and [{ } argType]
                         && SymbolEqualityComparer.Default.Equals(argType, Type)
                         && SymbolEqualityComparer.Default.Equals(method.ReturnType, Type))
                     {
                         code.Append(method.Name);
-                        code.Append("<")
+                        code.Append('<')
                             .Append(ExportTypeName)
                             .Append(">(");
 
                         BuildParams?.Invoke(ref comma, code);
 
-                        code.Append(")");
+                        code.Append(')');
                     }
                     else
                     {
                         code.Append(method.Name);
-                        code.Append("(");
+                        code.Append('(');
 
                         comma = false;
                         BuildParams?.Invoke(ref comma, code);
 
-                        code.Append(")");
+                        code.Append(')');
                     }
 
                     break;
@@ -365,17 +348,17 @@ namespace SourceCrafter.DependencyInjection.Interop
 
                 case IPropertySymbol { IsIndexer: bool isIndexer } prop:
 
-                    AppendFactoryOriginType(code);
+                    AppendFactoryContainingType(code);
 
                     if (isIndexer)
                     {
                         code.Append(prop.Name);
-                        code.Append("[");
+                        code.Append('[');
 
                         comma = false;
                         BuildParams?.Invoke(ref comma, code);
 
-                        code.Append("]");
+                        code.Append(']');
                     }
                     else
                     {
@@ -387,7 +370,7 @@ namespace SourceCrafter.DependencyInjection.Interop
 
                 case IFieldSymbol field:
 
-                    AppendFactoryOriginType(code);
+                    AppendFactoryContainingType(code);
 
                     code.Append(field.Name);
 
@@ -396,6 +379,8 @@ namespace SourceCrafter.DependencyInjection.Interop
                 default:
 
                     code.Append("default");
+
+                    if (Type?.IsNullable() is false) code.Append('!');
 
                     break;
             }
@@ -414,7 +399,7 @@ namespace SourceCrafter.DependencyInjection.Interop
                     ?.Parameters ?? default!
             };
 
-            if (parameters.IsDefaultOrEmpty) return;    
+            if (parameters.IsDefaultOrEmpty) return;
 
             IFieldSymbol? serviceKey = null;
 
@@ -422,13 +407,15 @@ namespace SourceCrafter.DependencyInjection.Interop
 
             foreach (var _param in parameters)
             {
-                lifetime = GetParamMetadata(_param.GetAttributes(), out serviceKey);
-                 
+                var paramAttrs = _param.GetAttributes();
+
+                lifetime = GetParamMetadata(paramAttrs, out serviceKey);
+
                 var paramTypeName = _param.Type.ToGlobalNamespaced();
 
                 ref var found = ref entries.GetValueOrInsertor(
                     (lifetime, paramTypeName, serviceKey),
-                    out Action<ServiceDescriptor>? insert);
+                    out var insert);
 
                 if (found != null)
                 {
@@ -441,7 +428,7 @@ namespace SourceCrafter.DependencyInjection.Interop
 
                     BuildParams += found.BuildAsParam;
                 }
-                else if(paramTypeName.EndsWith(CancelTokenFQMetaName))
+                else if (paramTypeName.EndsWith(CancelTokenFQMetaName))
                 {
                     BuildParams += AppendCancelToken;
                 }
@@ -449,7 +436,7 @@ namespace SourceCrafter.DependencyInjection.Interop
                 {
                     ServiceDescriptor item = new(_param.Type, paramTypeName, paramTypeName, serviceKey)
                     {
-                        Attributes = _param.GetAttributes(),
+                        Attributes = paramAttrs,
                         ContainerType = ContainerType,
                         NotRegistered = true,
                         Lifetime = lifetime,
@@ -514,8 +501,8 @@ namespace SourceCrafter.DependencyInjection.Interop
 
         private void AppendCancelToken(ref bool useIComma, StringBuilder code)
         {
-            if (useIComma.Exchange(true)) code.Append(", "); 
-            
+            if (useIComma.Exchange(true)) code.Append(", ");
+
             code.Append("cancellationToken");
         }
 
@@ -528,35 +515,35 @@ namespace SourceCrafter.DependencyInjection.Interop
             BuildValue(code);
         }
 
-        internal void UseInstance(StringBuilder code)
+        internal void BuildValueInstance(StringBuilder code)
         {
-            if (IsFactory && Cached && Factory is IFieldSymbol { Name: { } name })
-            {
-                code.Append(name);
-            }
-            else
-            {
-                code.Append("new ")
-                    .Append(FullTypeName)
-                    .Append("(");
+            code.Append("new ")
+                .Append(FullTypeName)
+                .Append('(');
 
-                bool comma = false;
-                BuildParams?.Invoke(ref comma, code);
+            bool comma = false;
 
-                code.Append(")");
-            }
+            BuildParams?.Invoke(ref comma, code);
+
+            code.Append(')');
         }
 
         internal void BuildDisposeAsyncStatment(StringBuilder code)
         {
             code.Append(@"
-		if(").Append(CacheField).Append(" is not null) await ").Append(CacheField).Append(".DisposeAsync();");
+		if(")
+                .Append(CacheField)
+                .Append(" is not null) await ")
+                .Append(CacheField)
+                .Append(".DisposeAsync();");
         }
 
         internal void BuildDisposeStatment(StringBuilder code)
         {
             code.Append(@"
-		").Append(CacheField).Append("?.Dispose();");
+		")
+                .Append(CacheField)
+                .Append("?.Dispose();");
         }
     }
 }

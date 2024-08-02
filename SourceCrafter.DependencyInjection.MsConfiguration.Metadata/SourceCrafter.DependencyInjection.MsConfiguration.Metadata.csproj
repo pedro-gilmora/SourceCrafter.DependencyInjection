@@ -22,6 +22,7 @@
 		</PackageVersion>
 		<Configurations>Debug;Release;DEBUG_SG</Configurations>
 		<PackageOutputPath>../packaging</PackageOutputPath>
+		<Version>$(PackageVersion)</Version>
   </PropertyGroup>
 
 	<ItemGroup>

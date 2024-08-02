@@ -99,6 +99,8 @@ public class Map<TKey, TVal>
 
     public int Count => _count;
 
+    public bool IsEmpty => _count == 0;
+
     public Map(IEqualityComparer<TKey> comparer)
     {
         _comparer = comparer;
@@ -392,10 +394,36 @@ public class Map<TKey, TVal>
         Debug.Assert(highbits == value % divisor);
         return highbits;
     }
+
     public Span<Entry<TKey, TVal>> AsSpan()
     {
         return _entries.AsSpan(0, _count);
     }
+
+    public Span<TKey> KeysAsSpan()
+    {
+        Span<TKey> _keys = new TKey[_count];
+
+        for (int i = 0; i < _count; i++)
+        {
+            _keys[i] = _entries![i].Key;
+        }
+
+        return _keys;
+    }
+
+    public Span<TVal> ValuesAsSpan()
+    {
+        Span<TVal> _values = new TVal[_count];
+
+        for (int i = 0; i < _count; i++)
+        {
+            _values[i] = _entries![i].Value;
+        }
+
+        return _values;
+    }
+
     public void Clear()
     {
         int count = _count;

@@ -16,6 +16,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using static SourceCrafter.DependencyInjection.Interop.ServiceDescriptor;
 
 using DependencyMap = SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Interop.Lifetime, string, Microsoft.CodeAnalysis.IFieldSymbol?), SourceCrafter.DependencyInjection.Interop.ServiceDescriptor>;
+using System.CodeDom.Compiler;
 
 namespace SourceCrafter.DependencyInjection;
 
@@ -30,19 +31,17 @@ class ServiceContainerGenerator
     private readonly Set<Diagnostic> _diagnostics;
     readonly INamedTypeSymbol _providerClass;
     private readonly Compilation _compilation;
-    readonly StringBuilder code = new(@"#nullable enable
-");
 
     readonly HashSet<(bool, string)> enumKeysRegistry = [];
 
-    readonly HashSet<string> 
+    readonly HashSet<string>
         methodsRegistry = new(StringComparer.Ordinal);
 
     readonly HashSet<(string?, string)> interfacesRegistry = [];
 
     readonly Map<(int, Lifetime, string?), string> dependencyRegistry = new(EqualityComparer<(int, Lifetime, string?)>.Default);
 
-    readonly DependencyMap discoveredServices = new (new DependencyComparer());
+    readonly DependencyMap discoveredServices = new(new DependencyComparer());
 
     readonly Map<ServiceDescriptor, Action<StringBuilder>>
         keyedMethods = new(new KeyedServiceComparer());
@@ -50,21 +49,17 @@ class ServiceContainerGenerator
     CommaSeparateBuilder? interfaces = null;
 
     MemberBuilder?
-        methods = null,
-        cachedResolvers = null;
+        methods = null;
 
     Action<StringBuilder>?
         singletonDisposeStatments = null,
         disposeStatments = null;
 
-    bool useIComma = false,
+    bool //useIComma = false,
         hasScopedService = false,
         requiresLocker = false,
-        requiresSemaphore = false,
-        hasAsyncService = false;
-
-    readonly bool
-        hasService = false;
+        requiresSemaphore = false/*,
+        hasAsyncService = false*/;
 
     readonly Disposability disposability = 0;
 
@@ -178,7 +173,8 @@ class ServiceContainerGenerator
             if (exists)
             {
                 _diagnostics.TryAdd(
-                    ServiceContainerGeneratorDiagnostics.DuplicateService(lifetime, key, attrSyntax, typeName, exportTypeFullName));
+                    ServiceContainerGeneratorDiagnostics
+                        .DuplicateService(lifetime, key, attrSyntax, typeName, exportTypeFullName));
 
                 continue;
             }
@@ -187,19 +183,20 @@ class ServiceContainerGenerator
                 if (type.IsPrimitive() && key is null)
                 {
                     _diagnostics.TryAdd(
-                        ServiceContainerGeneratorDiagnostics.PrimitiveDependencyShouldBeKeyed(lifetime, attrSyntax, typeName, exportTypeFullName));
+                        ServiceContainerGeneratorDiagnostics
+                            .PrimitiveDependencyShouldBeKeyed(lifetime, attrSyntax, typeName, exportTypeFullName));
                 }
 
                 existingOrNew = new(type, typeName, exportTypeFullName, key, iface)
                 {
                     Lifetime = lifetime,
                     Key = key,
-                    CacheMethodName = "Get" + identifier,
-                    CacheField = identifier.Camelize(),
+                    ResolverMethodName = "Get" + identifier,
+                    CacheField = "_" + identifier.Camelize(),
                     Factory = factory,
                     FactoryKind = factoryKind,
                     Disposability = thisDisposability,
-                    Resolved = true,
+                    IsResolved = true,
                     ResolvedBy = Generator.generatorGuid,
                     Attributes = type.GetAttributes(),
                     IsAsync = isAsync,
@@ -208,21 +205,14 @@ class ServiceContainerGenerator
                     Cached = cache ?? factory is null
                 };
 
-                if (existingOrNew.IsKeyed)
-                {
-                    enumKeysRegistry.Add((isAsync, existingOrNew.EnumKeyTypeName!));
-                }
-                else
-                {
-                    if (isAsync)
-                    {
-                        if (!hasAsyncService) hasAsyncService = true;
-                    }
-                    else if (!hasService)
-                    {
-                        hasService = true;
-                    }
-                }
+                //if (isAsync)
+                //{
+                //    if (!hasAsyncService) hasAsyncService = true;
+                //}
+                //else if (!hasService)
+                //{
+                //    hasService = true;
+                //}
             }
         }
 
@@ -265,7 +255,7 @@ class ServiceContainerGenerator
                     }
 
                     break;
-                case Disposability.Diposable:
+                case Disposability.Disposable:
 
                     if (service.Lifetime is Lifetime.Scoped)
                     {
@@ -277,29 +267,19 @@ class ServiceContainerGenerator
                     }
                     break;
             }
-
-            if (!service.IsFactory || service.Cached) cachedResolvers += service.BuildCachedResolver;
         }
 
-        service.GenerateValue = service.Lifetime is Lifetime.Transient
-            ? service.IsFactory ? service.UseFactoryResolver : service.UseInstance
-            : service is { IsFactory: true, Cached: false }
-                   ? service.UseFactoryResolver
-                   : service.UseCachedMethodResolver;
+        service.GenerateValue = service.IsFactory ? service.UseFactoryValueResolver : service.BuildValueInstance;
 
         service.CheckParamsDependencies(discoveredServices, UpdateAsyncStatus, _compilation);
 
         if (service.IsKeyed)
         {
-            ref var builder = ref keyedMethods.GetValueOrAddDefault(
-                service,
-                out var existKeyedMethod);
-
-            if (!existKeyedMethod) builder += service.BuildSwitchBranch;
+            keyedMethods.TryAdd(service, service.BuildSwitchBranch);
         }
         else
         {
-            methods += service.BuildMethod;
+            methods += service.BuildResolver;
         }
     }
 
@@ -312,11 +292,11 @@ class ServiceContainerGenerator
                 string cancelTypeName = cancelType.ToGlobalNamespaced();
 
                 discoveredServices.GetValueOrAddDefault(
-                    (Lifetime.Singleton, cancelTypeName, null), 
-                    out _, 
+                    (Lifetime.Singleton, cancelTypeName, null),
+                    out _,
                     () => new(cancelType, cancelTypeName, cancelTypeName, null)
                     {
-                        Resolved = true,
+                        IsResolved = true,
                         ResolvedBy = Generator.generatorGuid,
                         IsCancelTokenParam = true
                     });
@@ -324,20 +304,24 @@ class ServiceContainerGenerator
 
             requiresSemaphore = true;
         }
-        if (!hasAsyncService) hasAsyncService = hasAsyncService = true;
+        //if (!hasAsyncService) hasAsyncService = hasAsyncService = true;
     }
 
     public void TryBuild(ImmutableArray<InvocationExpressionSyntax> usages, Map<string, byte> uniqueName, Action<string, string> addSource)
     {
-        if (interfaces == null) return;
+        if (discoveredServices.IsEmpty /*interfaces == null*/) return;
 
+        StringBuilder code = new(@"#nullable enable
+");
+        StringBuilder icode = new(@"#nullable enable
+");
         var fileName = _providerClass.ToMetadataLongName(uniqueName);
 
-        InteropServices.ResolveExternalDependencies(
-            System.Threading.SynchronizationContext.Current, 
-            _compilation, 
-            _providerClass, 
-            discoveredServices);
+        //InteropServices.ResolveExternalDependencies(
+        //    System.Threading.SynchronizationContext.Current,
+        //    _compilation,
+        //    _providerClass,
+        //    discoveredServices);
 
         if (_providerClass.ContainingNamespace is { IsGlobalNamespace: false } ns)
         {
@@ -346,100 +330,72 @@ class ServiceContainerGenerator
                 .Append(@";
 
 ");
+            icode.Append("namespace ")
+                .Append(ns.ToDisplayString()!)
+                .Append(@";
+
+");
         }
 
-        var initialization = _providerClass.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() switch
+        var (modifiers, typeName) = _providerClass.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() switch
         {
-            ClassDeclarationSyntax { Modifiers: { } modifiers, Identifier: { } identifier, TypeParameterList: { } argList } iFaceDeclaration =>
-                $"{modifiers} {identifier}{argList}",
-            _ => "partial class "
+            ClassDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var argList } =>
+                ($"{mods} {keyword}".TrimStart(), $"{identifier}{argList}"),
+            _ => ("partial class ", "")
         };
 
+        #region Generate Container Interface
+
+        icode.AppendLine(Generator.generatedCodeAttribute)
+            .Append("public interface I")
+            .Append(typeName);
+
+        BuildDisposability(icode, true);
+
+        methods?.Invoke(icode, false, Generator.generatedCodeAttribute);
+
+        foreach (var service in keyedMethods.KeysAsSpan())
+        {
+            icode
+                .Append(@"
+	")
+                .AppendLine(Generator.generatedCodeAttribute)
+                .Append("    ");
+
+            BuildKeyedResolverMethodSignature(icode, service);
+
+            icode.Append(@";
+");
+        }
+
+        if (hasScopedService)
+        {
+            icode.Append(@"
+    ")
+                .AppendLine(Generator.generatedCodeAttribute)
+                .Append("    ")
+                .Append(_providerClass.ContainingNamespace.ToGlobalNamespaced())
+                .Append(".I")
+                .Append(typeName)
+                .Append(@" CreateScope();");
+        }
+
+        icode.Append(@"
+}");
+
+        addSource("I" + fileName + ".generated", icode.ToString());
+
+        #endregion
+
         code.AppendLine(Generator.generatedCodeAttribute)
-            .Append(initialization)
-            .Append(providerClassName)
-            .Append(@" : ");
-
-        interfaces(ref useIComma, code);
-
-        if (hasService)
-        {
-            code.Append(@",
-	global::SourceCrafter.DependencyInjection.IServiceProvider");
-        }
-
-        if (hasAsyncService)
-        {
-            code.Append(@",
-	global::SourceCrafter.DependencyInjection.IAsyncServiceProvider");
-        }
-
-        foreach (var (isAsync, enumFullType) in enumKeysRegistry)
-        {
-            code.Append(@",
-	global::SourceCrafter.DependencyInjection.IKeyed");
-
-            if (isAsync) code.Append("Async");
-
-            code.Append("ServiceProvider<")
-                .Append(enumFullType)
-                .Append(">");
-        }
-
-        if (disposability > 0)
-        {
-            switch (disposability)
-            {
-                case Disposability.Diposable:
-
-                    code.Append(@",
-	global::System.IDisposable	
-{
-    ")
-                    .AppendLine(Generator.generatedCodeAttribute)
-                    .Append(@"    public void Dispose()
-	{");
-
-                    break;
-                case Disposability.AsyncDisposable:
-                    code.Append(@",
-	global::System.IAsyncDisposable	
-{
-    ")
-                    .AppendLine(Generator.generatedCodeAttribute)
-                    .Append(@"    public async global::System.Threading.Tasks.ValueTask DisposeAsync()
-	{");
-
-                    break;
-            }
-
-            disposeStatments?.Invoke(code);
-
-            if (hasScopedService)
-            {
-                if (disposeStatments != null)
-                {
-                    code.AppendLine();
-                }
-
-                code.Append(@"
-		if(isScoped) return;
-");
-            }
-
-            singletonDisposeStatments?.Invoke(code);
-
-            code.Append(@"
-	}
-");
-        }
-        else
-        {
-            code.Append(@"	
+            .Append(modifiers)
+            .AddSpace()
+            .Append(typeName)
+            .Append(@" : ")
+            .Append('I')
+            .Append(typeName)
+            .Append(@"
 {");
-        }
-
-        cachedResolvers?.Invoke(code, Generator.generatedCodeAttribute);
 
         if (requiresLocker)
         {
@@ -464,59 +420,58 @@ class ServiceContainerGenerator
 
     ")
                 .AppendLine(Generator.generatedCodeAttribute)
-                .Append(@"    public ").Append(providerTypeName).Append(@" CreateScope() =>
+                .Append(@"    public ")
+                .Append(_providerClass.ContainingNamespace.ToGlobalNamespaced())
+                .Append(".I")
+                .Append(typeName)
+                .Append(@" CreateScope() =>
 		new ").Append(providerTypeName).Append(@" { isScoped = true };
 ");
         }
 
-        methods?.Invoke(code, Generator.generatedCodeAttribute);
+        methods?.Invoke(code, true, Generator.generatedCodeAttribute);
 
-        foreach (var (service, keyBuilder) in keyedMethods.AsSpan())
+        foreach (var (service, keyedValueResolverBuilder) in keyedMethods.AsSpan())
         {
+            if(service.Cached)
+            {
+                code.Append(@"
+    ")
+                    .Append(Generator.generatedCodeAttribute)
+                    .Append(@"
+    private ");
+
+                if (service.Lifetime is Lifetime.Singleton) code.Append("static ");
+
+                code
+                    .Append(service.FullTypeName)
+                    .Append("? ")
+                    .Append(service.CacheField)
+                    .Append(@";");
+            }
 
             code
                 .Append(@"
 	")
                 .AppendLine(Generator.generatedCodeAttribute)
-                .Append("    ");
+                .Append("    public ");
 
-            if (service.IsAsync)
-            {
-                code.Append("global::System.Threading.Tasks.ValueTask<")
-                    .Append(service.ExportTypeName)
-                    .Append(@"> global::SourceCrafter.DependencyInjection.IKeyedAsyncServiceProvider<")
-                    .Append(service.EnumKeyTypeName)
-                    .Append(@", ")
-                    .Append(service.ExportTypeName)
-                    .Append(@">.GetServiceAsync(")
-                    .Append(service.EnumKeyTypeName)
-                    .Append(" key, global::System.Threading.CancellationToken cancellationToken = default");
-            }
-            else
-            {
-                code.Append(service.ExportTypeName)
-                    .Append(@" global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<")
-                    .Append(service.EnumKeyTypeName)
-                    .Append(@", ")
-                    .Append(service.ExportTypeName)
-                    .Append(@">.GetService(")
-                    .Append(service.EnumKeyTypeName)
-                    .Append(" key");
-            }
+            if (service.IsAsync) code.Append("async ");
 
-            code.Append(@")
+            BuildKeyedResolverMethodSignature(code, service);
+
+            code.Append(@"
 	{
 		switch(key)
 		{");
 
-
-            keyBuilder(code);
+            keyedValueResolverBuilder(code);
 
             code.Append(@"
 			default: throw InvalidKeyedService(""")
-                .Append(service.EnumKeyTypeName)
-                .Append(@""", """)
                 .Append(service.ExportTypeName)
+                .Append(@""", """)
+                .Append(service.EnumKeyTypeName)
                 .Append(@""", key);
 		}
 	}
@@ -541,77 +496,105 @@ class ServiceContainerGenerator
 ");
         }
 
-        foreach (var (isAsync, enumFullType) in enumKeysRegistry)
-        {
-            if (isAsync)
-            {
-                code
-                    .Append(@"
-    ")
-                    .AppendLine(Generator.generatedCodeAttribute)
-                    .Append(@"    public global::System.Threading.Tasks.ValueTask<T> GetServiceAsync<T>(")
-                    .Append(enumFullType)
-                    .Append(@" key, global::System.Threading.CancellationToken cancellationToken = default) => 
-        ((global::SourceCrafter.DependencyInjection.IKeyedAsyncServiceProvider<")
-                    .Append(enumFullType)
-                    .Append(@", T>)
-            (global::SourceCrafter.DependencyInjection.IKeyedAsyncServiceProvider<")
-                    .Append(enumFullType)
-                    .Append(@">)this)
-                .GetServiceAsync(key, cancellationToken == default ? __globalCancellationTokenSrc.Token : cancellationToken);
-");
-            }
-            else
-            {
-                code
-                    .Append(@"
-    ")
-                    .AppendLine(Generator.generatedCodeAttribute)
-                    .Append(@"    public T GetService<T>(")
-                    .Append(enumFullType)
-                    .Append(@" key) => 
-        ((global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<")
-                    .Append(enumFullType)
-                    .Append(@", T>)
-            (global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<")
-                    .Append(enumFullType)
-                    .Append(@">)this)
-                .GetService(key);
-");
+        BuildDisposability(code, false);
 
-            }
-        }
-
-        if (hasService)
-        {
-            code
-                .Append(@"
-    ")
-                .AppendLine(Generator.generatedCodeAttribute)
-                .Append(@"    public T GetService<T>() => 
-        ((global::SourceCrafter.DependencyInjection.IServiceProvider<T>)
-            (global::SourceCrafter.DependencyInjection.IServiceProvider)this).GetService();
-");
-        }
-
-        if (hasAsyncService)
-        {
-            code
-                .Append(@"
-    ")
-                .AppendLine(Generator.generatedCodeAttribute)
-                .Append(@"    public global::System.Threading.Tasks.ValueTask<T> GetServiceAsync<T>(global::System.Threading.CancellationToken cancellationToken = default) => 
-        ((global::SourceCrafter.DependencyInjection.IAsyncServiceProvider<T>)
-            (global::SourceCrafter.DependencyInjection.IAsyncServiceProvider)this)
-                .GetServiceAsync(cancellationToken == default ? __globalCancellationTokenSrc.Token : cancellationToken);
-");
-        }
-
-        var codeStr = code.Append("}").ToString();
+        var codeStr = code.Append('}').ToString();
 
         addSource(fileName + ".generated", codeStr);
 
-        CheckUsages(usages);
+        //CheckUsages(usages);
+    }
+
+    private void BuildDisposability(StringBuilder code, bool buildingInterface)
+    {
+        if (disposability > 0)
+        {
+            switch(disposability, buildingInterface)
+            {
+                case (Disposability.Disposable, true):
+
+                    code.Append(@" : global::System.IDisposable	
+{");
+
+                    break;
+
+                case (Disposability.AsyncDisposable, true):
+
+                    code.Append(@" : global::System.IAsyncDisposable	
+{");
+
+                    break;
+
+                case (Disposability.Disposable, false):
+
+                    code.Append(@"
+    ").AppendLine(Generator.generatedCodeAttribute)
+                        .Append(@"    public void Dispose()
+	{");
+
+                    break;
+
+                case (Disposability.AsyncDisposable, false):
+
+                    code.Append(@"
+    ").AppendLine(Generator.generatedCodeAttribute)
+                        .Append(@"    public async global::System.Threading.Tasks.ValueTask DisposeAsync()
+    {");
+
+                    break;
+            }
+
+            if (!buildingInterface)
+            {
+                disposeStatments?.Invoke(code);
+
+                if (hasScopedService)
+                {
+                    if (disposeStatments != null)
+                    {
+                        code.AppendLine();
+                    }
+
+                    code.Append(@"
+		if(isScoped) return;
+");
+                }
+
+                singletonDisposeStatments?.Invoke(code);
+
+                code.Append(@"
+	}
+");
+            }
+        }
+        else if(buildingInterface) 
+        {
+            code.Append(@"	
+{");
+        }
+    }
+
+    private static void BuildKeyedResolverMethodSignature(StringBuilder code, ServiceDescriptor service)
+    {
+        if (service.IsAsync)
+        {
+            code.Append("global::System.Threading.Tasks.ValueTask<")
+                .Append(service.ExportTypeName)
+                .Append(@"> ")
+                .Append(service.ResolverMethodName)
+                .Append(@"Async(")
+                .Append(service.EnumKeyTypeName)
+                .Append(" key, global::System.Threading.CancellationToken cancellationToken = default)");
+        }
+        else
+        {
+            code.Append(service.ExportTypeName)
+                .Append(@" ")
+                .Append(service.ResolverMethodName)
+                .Append(@"(")
+                .Append(service.EnumKeyTypeName)
+                .Append(" key)");
+        }
     }
 
     private void CheckUsages(ImmutableArray<InvocationExpressionSyntax> usages)
@@ -668,12 +651,12 @@ class ServiceContainerGenerator
             discoveredServices.ForEach((DependecyKey itemK, ref ServiceDescriptor item) =>
             {
                 if (item.ExportTypeName == typeFullName
-                    && ((item.Key, key) switch 
+                    && ((item.Key, key) switch
                     {
                         ({ } itemKey, { }) => SymbolEqualityComparer.Default.Equals(itemK.Key, key),
                         (var itemKey, _) => itemKey is null || SymbolEqualityComparer.Default.Equals(itemKey.Type, keyType)
                     })
-                    && item.Resolved)
+                    && item.IsResolved)
                 {
                     found = true;
                 }
@@ -708,7 +691,7 @@ class ServiceContainerGenerator
             switch (iFace.ToGlobalNonGenericNamespace())
             {
                 case "global::System.IDisposable" when disposability is Disposability.None:
-                    disposability = Disposability.Diposable;
+                    disposability = Disposability.Disposable;
                     break;
                 case "global::System.IAsyncDisposable" when disposability < Disposability.AsyncDisposable:
                     return Disposability.AsyncDisposable;

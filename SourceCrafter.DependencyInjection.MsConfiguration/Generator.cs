@@ -14,25 +14,8 @@ public class Generator : IIncrementalGenerator
 {
     internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
     readonly static Guid generatorGuid = new("54B00B9C-7CF8-45B2-81FC-361B7F5026EB");
-    //static volatile bool isSet = false;
+
     static volatile bool isMsConfigInstalled = false;
-    //public Generator()
-    //{
-    //    if (isSet) return;
-
-    //    isSet = true;
-
-    //    DependencyInjectionPartsGenerator.RegisterDependencyResolvers(generatorGuid, ResolveDependency);
-    //}
-
-    //~Generator()
-    //{
-    //    if (!isSet) return;
-
-    //    isSet = false;
-
-    //    //DependencyInjectionPartsGenerator.UnregisterDependencyResolvers(generatorGuid);
-    //}
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -48,30 +31,33 @@ public class Generator : IIncrementalGenerator
                     (t, c) => (t.Attributes[0], (IParameterSymbol)t.TargetSymbol))
                 .Collect();
 
-        context.RegisterSourceOutput(context.CompilationProvider.Combine(servicesContainers.Combine(settings)), OnCompile);
+        context.RegisterSourceOutput(
+            context.CompilationProvider
+                .Combine(servicesContainers)
+                .Combine(settings), OnCompile);
     }
 
-    private void OnCompile(SourceProductionContext context, (Compilation, (ImmutableArray<(SemanticModel, INamedTypeSymbol)>, ImmutableArray<(AttributeData, IParameterSymbol)>)) collectedInfo)
+    private void OnCompile(SourceProductionContext context, ((Compilation, ImmutableArray<(SemanticModel, INamedTypeSymbol)>), ImmutableArray<(AttributeData, IParameterSymbol)>) collectedInfo)
     {
-        var (compilation, (containers, settings)) = collectedInfo;
+        var ((compilation, containers), settings) = collectedInfo;
 
         Map<string, ValueBuilder> resolvedTypes = new (StringComparer.Ordinal);
 
-        InteropServices.RegisterDependencyResolvers(generatorGuid, Resolve);
+        //InteropServices.RegisterDependencyResolvers(generatorGuid, Resolve);
 
-        void Resolve(Compilation compilation, ITypeSymbol serviceContainer, DependencyMap servicesDescriptors)
-        {
-            servicesDescriptors.ForEach((DependencyKey key, ref ServiceDescriptor item) =>
-            {
-                if (resolvedTypes.TryGetValue(item.ExportTypeName, out var existing) && !item.Resolved)
-                {
-                    item.Resolved = true;
-                    item.ResolvedBy = generatorGuid;
-                    item.GenerateValue = existing!;
-                    return;
-                }
-            });
-        }
+        //void Resolve(Compilation compilation, ITypeSymbol serviceContainer, DependencyMap servicesDescriptors)
+        //{
+        //    servicesDescriptors.ForEach((DependencyKey key, ref ServiceDescriptor item) =>
+        //    {
+        //        if (resolvedTypes.TryGetValue(item.ExportTypeName, out var existing) && !item.Resolved)
+        //        {
+        //            item.Resolved = true;
+        //            item.ResolvedBy = generatorGuid;
+        //            item.GenerateValue = existing!;
+        //            return;
+        //        }
+        //    });
+        //}
 
         if (!IsMsConfigInstalled(compilation, out var iConfigTypeSymbol)) return;
 

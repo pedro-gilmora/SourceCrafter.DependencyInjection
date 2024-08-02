@@ -12,14 +12,14 @@ using System.Threading;
 
 namespace SourceCrafter.DependencyInjection.Interop
 {
-    [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Method)]
+    [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Method, AllowMultiple = true)]
     public class DependencyResolverAttribute<IDependencyResolver> : Attribute;
 
     public delegate void ContainerRegistrationHandler(Compilation compilation, ITypeSymbol serviceContainer, DependencyMap servicesDescriptors);
 
     public delegate void CommaSeparateBuilder(ref bool useIComma, StringBuilder code);
     public delegate void ValueBuilder(StringBuilder code);
-    public delegate void MemberBuilder(StringBuilder code, string generatedCodeAttribute);
+    public delegate void MemberBuilder(StringBuilder code, bool isImplementation, string generatedCodeAttribute);
     public delegate void ParamsBuilder(StringBuilder code);
 
     public static class InteropServices

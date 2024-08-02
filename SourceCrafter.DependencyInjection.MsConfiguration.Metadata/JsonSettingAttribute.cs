@@ -1,21 +1,23 @@
 ﻿using Microsoft.Extensions.Configuration;
 
+using SourceCrafter.DependencyInjection.Attributes;
 using SourceCrafter.DependencyInjection.Interop;
 
 using System;
 using System.IO;
 
 [assembly: DependencyResolver<SourceCrafter.DependencyInjection.MsConfiguration.Metadata.ConfigurationResolver>]
+[assembly: DependencyResolver<SourceCrafter.DependencyInjection.MsConfiguration.Metadata.JsonSettingAttribute>]
 
 namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
 {
     [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false)]
 #pragma warning disable CS9113 // Parameter is unread.
     public sealed class JsonSettingAttribute(
-        string key, 
+        string key,
         string filePath = "appsettings.json",
         bool optional = true,
-        bool reloadOnChange = true) : Attribute;
+        bool reloadOnChange = true) : DependencyAttribute(Lifetime.Singleton);
 #pragma warning restore CS9113 // Parameter is unread.
 
     public class ConfigurationResolver

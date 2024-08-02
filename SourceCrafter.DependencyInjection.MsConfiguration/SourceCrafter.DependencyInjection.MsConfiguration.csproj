@@ -23,8 +23,9 @@
 		<Nullable>enable</Nullable>
 		<IsRoslynComponent>true</IsRoslynComponent>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
-		<Configurations>Debug;Release;Pack;Debug SG</Configurations>
+		<Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>
 		<PackageOutputPath>../packaging</PackageOutputPath>
+		<Version>$(PackageVersion)</Version>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
@@ -52,16 +53,25 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" ReferenceOutputAssembly="true" />
+		<ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" ReferenceOutputAssembly="true" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
 		<None Include="$(OutputPath)\SourceCrafter.DependencyInjection.Interop.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
 		<None Include="$(OutputPath)\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
-		<None Include="$(OutputPath)\SourceCrafter.DependencyInjection.Interop.dll" Pack="true" PackagePath="lib/netstandard2.0" Visible="true" />
-		<None Include="$(OutputPath)\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.dll" Pack="true" PackagePath="lib/netstandard2.0" Visible="true" />
 	</ItemGroup>
-	
-	<ItemGroup>
-		<ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" />
-		<ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" />
-	</ItemGroup>
+
+	<!--<PropertyGroup>
+		<GetTargetPathDependsOn>$(GetTargetPathDependsOn);GetDependencyTargetPaths</GetTargetPathDependsOn>
+	</PropertyGroup>
+
+	<Target Name="GetDependencyTargetPaths">
+		<ItemGroup>
+			<TargetPathWithTargetPlatformMoniker Include="$(OutputPath)\SourceCrafter.DependencyInjection.Interop.dll" IncludeRuntimeDependency="true" />
+			<TargetPathWithTargetPlatformMoniker Include="$(OutputPath)\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.dll" IncludeRuntimeDependency="true" />
+		</ItemGroup>
+	</Target>-->
 
 </Project>
