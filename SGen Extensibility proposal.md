@@ -2,9 +2,7 @@ So, I'm thinking of a possible scenarios where the SGen initialization context c
 I think that approach might lead to create an execution, sort of tree-queue :grimacing:.
 
 I know in advantage it would be a performance concern due to possible deadlocks and relying on extension SGen writers implementations.
-Some addressings  of those possible issued would be making the delegate execution read-only as it it right now.
-
-Theis would be my case:
+Some addressings for those possible issues would be making a broadcast of desired types to be shared.
 
 Introducing of `AnalyzerExtensibilityProvider` type and property to `IncrementalGeneratorInitializationContext`
 
@@ -24,6 +22,10 @@ public sealed class AnalyzerSubscription<T>
     public void Return(CancelationToken token);
 }
 ```
+
+
+> # This would be my case:
+
 
 Third party SGen author
 ```cs
@@ -55,7 +57,7 @@ incrementalGeneratorInitializationContext.RegisterSourceOutput(
                     semanticModel,
                     serviceContainerSymbol,
                     unresolvedDependencyHandler: (ServiceMetadata serviceDesc) =>
-                                                /*^ Service metadata is hosted in a core-author assembly 
+                                                /*^ ServiceMetadata type is hosted at some core-author assembly 
                                                     to exchange custome metadata info with other interested SGen writers
                                                     assembly reachable by other interested authors */
                     {
