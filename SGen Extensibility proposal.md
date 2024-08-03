@@ -80,9 +80,12 @@ var emitedLoggerServices = incrementalGeneratorInitializationContext.AnalyzerExt
         if(IsLogger(serviceMetadataSubscription.State))
         {
             serviceMetadataSubscription.State.Resolved = true;
-            serviceMetadataSubscription.Return(); //Share the state changes with originator context 
+            serviceMetadataSubscription.Return(); //Share the state changes with originator context
+            return true;
         }
-    }).Collect();
+        return false;
+    })
+    .Collect();
 
 incrementalGeneratorInitializationContext.RegisterPostInitializtionOutput(CreateLoggerFactory);
     
