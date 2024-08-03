@@ -11,7 +11,7 @@ Introducing of `AnalyzerExtensibilityProvider` type and property to `Incremental
 ```cs
 public sealed class AnalyzerExtensibilityProvider
 {
-    static IncrementalValueProvider<T> SubscribeTo<T>(Func<T, CancellationToken ,bool> exchangedData);
+    static IncrementalValueProvider<T> Publish(T exchangedData, CancellationToken cancelToken);
     static IncrementalValueProvider<AnalyzerSubscription<T>> SubscribeTo<T>(Func<T, CancellationToken ,bool> exchangedData);
 }
 ```
