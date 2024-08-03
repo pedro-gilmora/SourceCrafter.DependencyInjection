@@ -90,11 +90,11 @@ var emitedLoggerServices = incrementalGeneratorInitializationContext.AnalyzerExt
 incrementalGeneratorInitializationContext.RegisterPostInitializtionOutput(CreateLoggerFactory);
     
 incrementalGeneratorInitializationContext.RegisterSourceOutput(
-    compilationProvider .Combine( coreServiceContainer ), 
+    compilationProvider .Combine( emitedLoggerServices ), 
     (sourceProducer, info, cancellationToken) => {
                          //^ Introduced token from core extension
         
-        var (compilation, emitedLoggerServices) = info;
+        var (compilation, emitedLoggerServicesData) = info;
 
         // Proceed to generate third-party code, with the help of current Compilation context 
     });
