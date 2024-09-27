@@ -6,45 +6,35 @@ using System;
 
 namespace SourceCrafter.DependencyInjection.Attributes
 {
-    [global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface | global::System.AttributeTargets.Parameter, AllowMultiple = true)]
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Parameter, AllowMultiple = true)]
     public class ServiceContainerAttribute : Attribute;
 
-    [global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface, AllowMultiple = true)]
-    public class SingletonAttribute<TImplementation>(object? key = null, string? factoryOrInstance = null, bool cache = true) : SingletonAttribute(key, typeof(TImplementation), null, factoryOrInstance, cache);
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface, AllowMultiple = true)]
+    public class SingletonAttribute<TImplementation>(string? key = null, string? factoryOrInstance = null, bool cache = true, string? nameFormat = null) : SingletonAttribute(key, typeof(TImplementation), null, factoryOrInstance, cache, nameFormat);
 
-    [global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface, AllowMultiple = true)]
-    public class SingletonAttribute<T, TImplementation>(object? key = null, string? factoryOrInstance = null, bool cache = true) : SingletonAttribute(key, typeof(TImplementation), typeof(T), factoryOrInstance, cache);
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface, AllowMultiple = true)]
+    public class SingletonAttribute<T, TImplementation>(string? key = null, string? factoryOrInstance = null, bool cache = true, string? nameFormat = null) : SingletonAttribute(key, typeof(TImplementation), typeof(T), factoryOrInstance, cache, nameFormat);
 
-    [global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface | global::System.AttributeTargets.Parameter, AllowMultiple = true)]
-    public class SingletonAttribute(object? key = null, global::System.Type? impl = null, global::System.Type? iface = null, string? factoryOrInstance = null, bool cache = true) : Attribute;
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Parameter, AllowMultiple = true)]
+    public class SingletonAttribute(string? key = null, Type? impl = null, Type? iface = null, string? factoryOrInstance = null, bool cache = true, string? nameFormat = null) : Attribute;
 
-    [global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface, AllowMultiple = true)]
-    public class ScopedAttribute<TImplementation>(object? key = null, string? factoryOrInstance = null, bool cache = true) : SingletonAttribute(key, typeof(TImplementation), null, factoryOrInstance, cache);
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface, AllowMultiple = true)]
+    public class ScopedAttribute<TImplementation>(string? key = null, string? factoryOrInstance = null, bool cache = true, string? nameFormat = null) : ScopedAttribute(key, typeof(TImplementation), null, factoryOrInstance, cache, nameFormat);
 
-    [global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface, AllowMultiple = true)]
-    public class ScopedAttribute<T, TImplementation>(object? key = null, string? factoryOrInstance = null, bool cache = true) : SingletonAttribute(key, typeof(TImplementation), typeof(T), factoryOrInstance, cache);
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface, AllowMultiple = true)]
+    public class ScopedAttribute<T, TImplementation>(string? key = null, string? factoryOrInstance = null, bool cache = true, string? nameFormat = null) : ScopedAttribute(key, typeof(TImplementation), typeof(T), factoryOrInstance, cache, nameFormat);
 
-    [global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface | global::System.AttributeTargets.Parameter, AllowMultiple = true)]
-    public class ScopedAttribute(object? key = null, global::System.Type? impl = null, global::System.Type? iface = null, string? factoryOrInstance = null, bool cache = true) : Attribute;
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Parameter, AllowMultiple = true)]
+    public class ScopedAttribute(string? key = null, Type? impl = null, Type? iface = null, string? factoryOrInstance = null, bool cache = true, string? nameFormat = null) : Attribute;
 
-    [global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface, AllowMultiple = true)]
-    public class TransientAttribute<TImplementation>(object? key = null, string? factoryOrInstance = null, bool cache = true) : SingletonAttribute(key, typeof(TImplementation), null, factoryOrInstance, cache);
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface, AllowMultiple = true)]
+    public class TransientAttribute<TImplementation>(string? key = null, string? factoryOrInstance = null, bool cache = true, string? nameFormat = null) : TransientAttribute(key, typeof(TImplementation), null, factoryOrInstance, cache, nameFormat);
 
-    [global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface, AllowMultiple = true)]
-    public class TransientAttribute<T, TImplementation>(object? key = null, string? factoryOrInstance = null, bool cache = true) : SingletonAttribute(key, typeof(TImplementation), typeof(T), factoryOrInstance, cache);
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface, AllowMultiple = true)]
+    public class TransientAttribute<T, TImplementation>(string? key = null, string? factoryOrInstance = null, bool cache = true, string? nameFormat = null) : TransientAttribute(key, typeof(TImplementation), typeof(T), factoryOrInstance, cache, nameFormat);
 
-    [global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface | global::System.AttributeTargets.Parameter, AllowMultiple = true)]
-    public class TransientAttribute(object? key = null, global::System.Type? impl = null, global::System.Type? iface = null, string? factoryOrInstance = null, bool cache = true) : Attribute;
-
-    [global::System.AttributeUsage(global::System.AttributeTargets.Class | global::System.AttributeTargets.Interface | global::System.AttributeTargets.Parameter, AllowMultiple = true)]
-    public class DependencyAttribute(Lifetime lifetime, object? key = null, global::System.Type? impl = null, global::System.Type? iface = null, string? factoryOrInstance = null, bool cache = true) : Attribute;
-}
-
-namespace SourceCrafter.DependencyInjection
-{
-    public interface IDependencyResolver
-    {
-
-    }
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Parameter, AllowMultiple = true)]
+    public class TransientAttribute(string? key = null, Type? impl = null, Type? iface = null, string? factoryOrInstance = null, bool cache = true, string? nameFormat = null) : Attribute;
+    public abstract class DependencyAttribute(Lifetime lifetime, string? key = null, string? factoryOrInstance = null, bool cache = true, string? nameFormat = null) : Attribute;
 }
 

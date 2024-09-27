@@ -6,6 +6,8 @@ using System.Text;
 using Microsoft.CodeAnalysis.Text;
 using System.Collections.Generic;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.CSharp;
+using SourceCrafter.DependencyInjection.Attributes;
 
 //[assembly: InternalsVisibleTo("SourceCrafter.MappingGenerator.UnitTests")]
 namespace SourceCrafter.DependencyInjection;
@@ -33,11 +35,11 @@ public class Generator : IIncrementalGenerator
                     (gsc, _) => (InvocationExpressionSyntax)gsc.Node)
                 .Collect();
 
-        var generatedResolvers = context.SyntaxProvider
-                .CreateSyntaxProvider(
-                    (syntax, _) => syntax is AttributeSyntax {Name : GenericNameSyntax { Identifier.ValueText: { } id} } && id.StartsWith("DependencyResolver"),
-                    (gsc, _) => (AttributeSyntax)gsc.Node)
-                .Collect();
+        //var getExternal = context.SyntaxProvider
+        //        .CreateSyntaxProvider(
+        //            (syntax, _) => syntax is  BaseTypeDeclarationSyntax { Identifier.ValueText: "SingletonAttribute" or "ScopedAttribute" or "TransientAttribute" } ,
+        //            (gsc, _) => gsc.SemanticModel.GetTypeInfo(((ClassDeclarationSyntax)gsc.Node.Parent!)).Type!)
+        //        .Collect();
 
         var servicesContainers = context.SyntaxProvider
                 .ForAttributeWithMetadataName("SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute",
@@ -46,37 +48,36 @@ public class Generator : IIncrementalGenerator
                 .Collect();
 
         context.RegisterSourceOutput(context.CompilationProvider
-            .Combine(servicesContainers)
-            .Combine(getServiceCheck)
-            .Combine(resolvers), static (p, info) =>
+            .Combine(servicesContainers),
+            //.Combine(getExternal), 
+            static (p, info) =>
         {
-            var (((compilation, servicesContainers), serviceCheck), resolvers) = info;
+            var (compilation, servicesContainers) = info;
 
             Map<string, byte> uniqueName = new(StringComparer.Ordinal);
 
             var sb = new StringBuilder("/*").AppendLine();
             int start = sb.Length;
 
-            Set<Diagnostic> diagnostics = new(e => e.Location.ToString());
+            Set<Diagnostic> diagnostics = Set<Diagnostic>.Create(e => e.Location.GetHashCode());
 
             try
             {
                 foreach (var item in servicesContainers)
                 {
                     new ServiceContainerGenerator(compilation, item.SemanticModel, item.Class, diagnostics)
-                        .TryBuild(serviceCheck, uniqueName, p.AddSource);
+                        .TryBuild([], uniqueName, p.AddSource);
                 }
+
+                foreach(var item in diagnostics) p.ReportDiagnostic(item);
             }
             catch (Exception e)
             {
                 sb.AppendLine(e.ToString());
             }
-
-            diagnostics.ForEach(item => p.ReportDiagnostic(item));
-
             if (sb.Length > start)
             {
-                p.AddSource("errors", sb.ToString());
+                p.AddSource("errors", sb.Append("*/").ToString());
             }
         });
     }
@@ -89,7 +90,7 @@ public class Generator : IIncrementalGenerator
 
             foreach (var attribute in assemblySymbol.GetAttributes())
             {
-                if (attribute.AttributeClass is INamedTypeSymbol cls && cls?.ToGlobalNonGenericNamespace() is "global::SourceCrafter.DependencyInjection.Interop.DependencyResolverAttribute")
+                if (attribute.AttributeClass is INamedTypeSymbol cls && cls?.ToGlobalNonGenericNamespace() is "global::SourceCrafter.DependencyInjection.Interop.UseAttribute")
                 {
                     yield return cls;
                 }

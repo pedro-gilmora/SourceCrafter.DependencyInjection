@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
@@ -98,34 +99,77 @@ namespace SourceCrafter.DependencyInjection
 
         public static string Capitalize(this string str)
         {
-            return str is [{ } f, .. { } rest] ? char.ToUpper(f) + rest : str;
+            return (str is [{ } f, .. { } rest] ? char.ToUpper(f) + rest : str);
         }
 
         public static string Camelize(this string str)
         {
-            return str is [{ } f, .. { } rest] ? char.ToLower(f) + rest : str;
+            return (str is [{ } f, .. { } rest] ? char.ToLower(f) + rest : str);
+        }
+
+        public static string? Pascalize(this string str)
+        {
+            if (string.IsNullOrEmpty(str))
+                return str;
+
+            ReadOnlySpan<char> span = str.AsSpan();
+            Span<char> result = stackalloc char[span.Length];
+            int resultIndex = 0;
+            bool newWord = true;
+
+            foreach (char c in span)
+            {
+                if (char.IsWhiteSpace(c) || c == '-' || c == '_')
+                {
+                    newWord = true;
+                }
+                else
+                {
+                    if (newWord)
+                    {
+                        result[resultIndex++] = char.ToUpperInvariant(c);
+                        newWord = false;
+                    }
+                    else
+                    {
+                        result[resultIndex++] = c;
+                    }
+                }
+            }
+
+            return result[0..resultIndex].ToString();
+        }
+
+        public static ImmutableArray<IParameterSymbol>? GetParameters(DependencySlimInfo depInfo)
+        {
+            return depInfo.ImplType is INamedTypeSymbol { Constructors: var ctor, InstanceConstructors: var insCtor }
+                ? ctor.OrderBy(d => !d.Parameters.IsDefaultOrEmpty).FirstOrDefault()?.Parameters
+                    ?? insCtor.OrderBy(d => !d.Parameters.IsDefaultOrEmpty).FirstOrDefault()?.Parameters
+                    ?? []
+                : [];
         }
 
         public static bool IsPrimitive(this ITypeSymbol target, bool includeObject = true) =>
-            (includeObject && target.SpecialType is SpecialType.System_Object) || target.SpecialType is SpecialType.System_Enum
-                or SpecialType.System_Boolean
-                or SpecialType.System_Byte
-                or SpecialType.System_SByte
-                or SpecialType.System_Char
-                or SpecialType.System_DateTime
-                or SpecialType.System_Decimal
-                or SpecialType.System_Double
-                or SpecialType.System_Int16
-                or SpecialType.System_Int32
-                or SpecialType.System_Int64
-                or SpecialType.System_Single
-                or SpecialType.System_UInt16
-                or SpecialType.System_UInt32
-                or SpecialType.System_UInt64
-                or SpecialType.System_String
-            || target.Name is "DateTimeOffset" or "Guid"
-            || (target.SpecialType is SpecialType.System_Nullable_T
-                && IsPrimitive(((INamedTypeSymbol)target).TypeArguments[0]));
+            (includeObject && target.SpecialType is SpecialType.System_Object)
+                || target.SpecialType is SpecialType.System_Enum
+                    or SpecialType.System_Boolean
+                    or SpecialType.System_Byte
+                    or SpecialType.System_SByte
+                    or SpecialType.System_Char
+                    or SpecialType.System_DateTime
+                    or SpecialType.System_Decimal
+                    or SpecialType.System_Double
+                    or SpecialType.System_Int16
+                    or SpecialType.System_Int32
+                    or SpecialType.System_Int64
+                    or SpecialType.System_Single
+                    or SpecialType.System_UInt16
+                    or SpecialType.System_UInt32
+                    or SpecialType.System_UInt64
+                    or SpecialType.System_String
+                || target.Name is "DateTimeOffset" or "Guid"
+                || (target.SpecialType is SpecialType.System_Nullable_T
+                    && IsPrimitive(((INamedTypeSymbol)target).TypeArguments[0]));
 
         public static ITypeSymbol AsNonNullable(this ITypeSymbol type) =>
             type.Name == "Nullable"
@@ -146,11 +190,7 @@ namespace SourceCrafter.DependencyInjection
                 || typeSymbol is INamedTypeSymbol { Name: "Nullable" };
 
         public static bool AllowsNull(this ITypeSymbol typeSymbol)
-#if DEBUG
-            => typeSymbol.BaseType?.ToGlobalNonGenericNamespace() is not ("global::System.ValueType" or "global::System.ValueTuple");
-#else
             => typeSymbol is { IsValueType: false, IsTupleType: false, IsReferenceType: true };
-#endif
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static string Wordify(this string identifier, short upper = 0)
@@ -199,45 +239,105 @@ namespace SourceCrafter.DependencyInjection
             return new string(buffer, 0, bufferIndex);
         }
 
-        public static string GenKey(ServiceDescriptor serviceDescriptor)
+        public static bool TryGetAsyncType(this ISymbol? factorySymbol, out ITypeSymbol? factoryType)
         {
-            return $"{serviceDescriptor.Lifetime}|{serviceDescriptor.ExportTypeName}|{serviceDescriptor.EnumKeyTypeName}";
+            switch((factoryType = factorySymbol switch
+            {
+                IMethodSymbol m => m.ReturnType,
+                IPropertySymbol p => p.Type,
+                IFieldSymbol p => p.Type,
+                _ => null
+            })?.ToGlobalNonGenericNamespace())
+            {
+                case "global::System.Threading.Tasks.ValueTask" or "global::System.Threading.Tasks.Task"
+                    when factoryType is INamedTypeSymbol { TypeArguments:[{ } firstTypeArg] }:
+
+                    factoryType = firstTypeArg;
+                    return true;
+
+                default:
+
+                    return false;
+            };
         }
 
-        public static string GenKey(Lifetime lifetime, string typeFullName, IFieldSymbol? name)
+        public static Disposability GetDisposability(this ITypeSymbol type)
         {
-            return $"{lifetime}|{typeFullName}|{name?.Type?.ToGlobalNamespaced()}";
+            Disposability disposability = Disposability.None;
+
+            foreach (var iFace in type.AllInterfaces)
+            {
+                switch (iFace.ToGlobalNonGenericNamespace())
+                {
+                    case "global::System.IDisposable" when disposability is Disposability.None:
+                        disposability = Disposability.Disposable;
+                        break;
+                    case "global::System.IAsyncDisposable" when disposability < Disposability.AsyncDisposable:
+                        return Disposability.AsyncDisposable;
+                }
+            }
+
+            return disposability;
         }
 
+        public static string RemoveDuplicates(this string? input)
+        {
+            if ((input = input?.Trim()) is null or "")
+                return "";
+
+            var result = "";
+            int wordStart = 0;
+
+            for (int i = 1; i < input.Length; i++)
+            {
+                if (char.IsUpper(input[i]))
+                {
+                    string word = input[wordStart..i];
+
+                    if (!result.EndsWith(word))
+                    {
+                        result += word;
+                    }
+
+                    wordStart = i;
+                }
+            }
+
+            string lastWord = input[wordStart..];
+
+            if (!result.EndsWith(lastWord, StringComparison.OrdinalIgnoreCase))
+            {
+                result += lastWord;
+            }
+
+            return result;
+        }
 
         public static string SanitizeTypeName(
             ITypeSymbol type,
             HashSet<string> methodsRegistry,
             Map<(int, Lifetime, string?), string> dependencyRegistry,
             Lifetime lifeTime,
-            string? enumTypeName,
-            string? enumValue)
+            string? serviceId)
         {
             int hashCode = SymbolEqualityComparer.Default.GetHashCode(type);
-           
+
             string id = Sanitize(type).Capitalize();
 
-            ref var idOut = ref dependencyRegistry.GetValueOrAddDefault((hashCode, lifeTime, enumTypeName + "." + enumValue), out var exists);
+            ref var idOut = ref dependencyRegistry.GetValueOrAddDefault((hashCode, lifeTime, serviceId), out var exists);
 
             if (exists)
             {
                 return idOut!;
             }
+
             Dictionary<(int, Lifetime, string?), string> _dic = [];
-   
+
             _ = methodsRegistry.Add(idOut = id)
-                || (enumValue != null &&
-                        (methodsRegistry.Add(idOut = $"{id}For{enumValue}")
-                            || methodsRegistry.Add(idOut = $"{id}For{enumValue}")
-                            || methodsRegistry.Add(idOut = $"{id}{enumValue}For{enumTypeName}")
-                            || methodsRegistry.Add(idOut = $"{lifeTime}{id}")
-                            || methodsRegistry.Add(idOut = $"{lifeTime}{id}For{enumValue}")
-                            || methodsRegistry.Add(idOut = $"{lifeTime}{id}For{enumValue}{enumTypeName}")))
+                || (serviceId != null &&
+                    (methodsRegistry.Add(idOut = $"{id}For{serviceId}")
+                        || methodsRegistry.Add(idOut = $"{lifeTime}{id}")
+                        || methodsRegistry.Add(idOut = $"{lifeTime}{id}For{serviceId}")))
                 || methodsRegistry.Add(idOut = $"{lifeTime}{id}");
 
             return idOut;

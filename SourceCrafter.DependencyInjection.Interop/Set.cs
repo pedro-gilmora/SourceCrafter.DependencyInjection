@@ -1,15 +1,66 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System;
+using System.Collections.Generic;
+using System.Collections;
 
 namespace SourceCrafter.DependencyInjection;
 
-public delegate void RefItemResolver<T>(ref T item);
-
-public class Set<T>
+public abstract class Set<TValue> : IEnumerable<TValue>
 {
+    public static Set<TValue> Create<TKey>(
+        Func<TValue, TKey> _keyGenerator,
+        IEqualityComparer<TKey>? _comparer = null)
+    {
+        Func<TKey, int> hashCodeGetter = _comparer is null
+            ? default(TKey) is int or short or byte or uint or ushort
+                ? e => Convert.ToInt32(e)
+                : e => Convert.ToInt32(EqualityComparer<TKey>.Default.GetHashCode(e))
+            : e => Convert.ToInt32(_comparer.GetHashCode(e));
+
+        Func<TKey, TKey, bool> equals = _comparer is null
+            ? default(TKey) is int or short or long or byte or uint or ushort or ulong or double or float
+                ? ((TKey a, TKey b) => a!.Equals(b))
+                : EqualityComparer<TKey>.Default.Equals
+            : _comparer.Equals;
+
+        return new Set<TKey, TValue>(_keyGenerator)
+        {
+            getHashCode = hashCodeGetter,
+            equals = equals
+        };
+    }
+
+    public abstract bool TryAdd(TValue value);
+
+    public ref TValue? GetOrAddDefault<TKey>(TKey key, out bool exists)
+    {
+        return ref ((Set<TKey, TValue>)this).GetOrAddDefault(key, out exists);
+    }
+
+    public ref TValue GetValueOrInsertor<TKey>(TKey key, out Action<TValue> insertor)
+    {
+        return ref ((Set<TKey, TValue>)this).GetValueOrInsertor(key, out insertor);
+    }
+
+    public bool TryGetValue<TKey>(TKey key, out TValue val)
+    {
+        return ((Set<TKey, TValue>)this).TryGetValue(key, out val);
+    }
+
+    public abstract void Clear();
+
+    public abstract IEnumerator<TValue> GetEnumerator();
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
+internal class Set<TKey, TValue>(Func<TValue, TKey> _keyGenerator) : Set<TValue>
+{
+    internal Func<TKey, int> getHashCode = null!;
+    internal Func<TKey, TKey, bool> equals = null!;
     private int[]? _buckets;
-    private Entry<string, T>[]? _entries;
+    private Entry[]? _entries;
 #if TARGET_64BIT
     private ulong _fastModMultiplier;
 #endif
@@ -17,10 +68,10 @@ public class Set<T>
     private int _freeList;
     private int _freeCount;
     private int _version;
-    private static readonly StringComparer _comparer = StringComparer.Ordinal;
-    private readonly Func<T, string> _keyGenerator;
     private const int StartOfFreeList = -3;
-    public const int HashPrime = 101;
+    private const int HashPrime = 101;
+    private const int MaxPrimeArrayLength = 0x7FFFFFC3;
+
     internal static ReadOnlySpan<int> Primes =>
         [
             3,
@@ -99,17 +150,11 @@ public class Set<T>
 
     public int Count => _count;
 
-    public Set(Func<T, string> keyGenerator)
-    {
-        Initialize(0);
-        _keyGenerator = keyGenerator;
-    }
-
     private int Initialize(int capacity)
     {
         int size = GetPrime(capacity);
         int[] buckets = new int[size];
-        var entries = new Entry<string, T>[size];
+        var entries = new Entry[size];
 
         // Assign member variables after both arrays allocated to guard against corruption from OOM if second fails
         _freeList = -1;
@@ -122,7 +167,7 @@ public class Set<T>
         return size;
     }
 
-    public static int GetPrime(int min)
+    private static int GetPrime(int min)
     {
         if (min < 0)
             throw new ArgumentException("Hashtable's capacity overflowed and went negative. Check load factor, capacity and the current size of the table");
@@ -142,7 +187,7 @@ public class Set<T>
         return min;
     }
 
-    public static bool IsPrime(int candidate)
+    private static bool IsPrime(int candidate)
     {
         if ((candidate & 1) != 0)
         {
@@ -157,22 +202,24 @@ public class Set<T>
         return candidate == 2;
     }
 
-    public bool TryAdd(T value)
+    public override bool TryAdd(TValue value)
     {
-        Entry<string, T>[]? entries = _entries!;
-        
-        string key = _keyGenerator(value);
+        if (_buckets is null) Initialize(0);
 
-        uint hashCode = (uint)_comparer.GetHashCode();
+        Entry[]? entries = _entries!;
+
+        TKey key = _keyGenerator(value);
+
+        var hashCode = getHashCode(key);
 
         uint collisionCount = 0;
-        ref int bucket = ref GetBucket(hashCode);
+        ref int bucket = ref GetBucket((uint)hashCode);
         int i = bucket - 1; // Value in _buckets is 1-based
 
 
         while ((uint)i < (uint)entries.Length)
         {
-            if (entries[i].id == hashCode && _comparer.Equals(key, entries[i].Key))
+            if (entries[i].id == hashCode && equals(key, entries[i].Key))
             {
                 return false;
             }
@@ -202,15 +249,15 @@ public class Set<T>
             if (count == entries.Length)
             {
                 Resize();
-                bucket = ref GetBucket(hashCode);
+                bucket = ref GetBucket((uint)hashCode);
             }
             index = count;
             _count = count + 1;
             entries = _entries;
         }
 
-        ref Entry<string, T> entry = ref entries![index];
-        entry.id = hashCode;
+        ref Entry entry = ref entries![index];
+        entry.id = (uint)hashCode;
         entry.next = bucket - 1; // Value in _buckets is 1-based
         entry.Key = key;
         entry.Value = value;
@@ -220,20 +267,22 @@ public class Set<T>
         return true;
     }
 
-    public ref T? GetOrAddDefault(string key, out bool exists)
+    public ref TValue? GetOrAddDefault(TKey key, out bool exists)
     {
-        Entry<string, T>[]? entries = _entries!;
+        if (_buckets is null) Initialize(0);
 
-        uint hashCode = (uint)_comparer.GetHashCode(key);
+        Entry[]? entries = _entries!;
+
+        var hashCode = getHashCode(key!);
 
         uint collisionCount = 0;
-        ref int bucket = ref GetBucket(hashCode);
+        ref int bucket = ref GetBucket((uint)hashCode);
         int i = bucket - 1; // Value in _buckets is 1-based
 
 
         while ((uint)i < (uint)entries.Length)
         {
-            if (entries[i].id == hashCode && _comparer.Equals(key, entries[i].Key))
+            if (entries[i].id == hashCode && equals(key, entries[i].Key))
             {
                 exists = true;
 
@@ -265,15 +314,15 @@ public class Set<T>
             if (count == entries.Length)
             {
                 Resize();
-                bucket = ref GetBucket(hashCode);
+                bucket = ref GetBucket((uint)hashCode);
             }
             index = count;
             _count = count + 1;
             entries = _entries;
         }
 
-        ref Entry<string, T> entry = ref entries![index];
-        entry.id = hashCode;
+        ref Entry entry = ref entries![index];
+        entry.id = (uint)hashCode;
         entry.next = bucket - 1; // Value in _buckets is 1-based
         entry.Key = key;
         bucket = index + 1; // Value in _buckets is 1-based
@@ -282,22 +331,24 @@ public class Set<T>
         exists = false;
 
         return ref entry.Value!;
-    }    
+    }
 
-    public ref T GetValueOrInsertor(string key, out Action<T> insertor)
+    public ref TValue GetValueOrInsertor(TKey key, out Action<TValue> insertor)
     {
-        Entry<string, T>[]? entries = _entries!;
+        if (_buckets is null) Initialize(0);
 
-        uint hashCode = (uint)_comparer.GetHashCode(key);
+        Entry[]? entries = _entries!;
+
+        var hashCode = getHashCode(key);
 
         uint collisionCount = 0;
-        ref int bucket = ref GetBucket(hashCode);
+        ref int bucket = ref GetBucket((uint)hashCode);
         int i = bucket - 1; // Value in _buckets is 1-based
 
 
         while ((uint)i < (uint)entries.Length)
         {
-            if (entries[i].id == hashCode && _comparer.Equals(key, entries[i].Key))
+            if (entries[i].id == hashCode && equals(key, entries[i].Key))
             {
                 insertor = null!;
                 return ref entries[i].Value;
@@ -316,9 +367,9 @@ public class Set<T>
 
         insertor = item =>
         {
-            hashCode = (uint)_comparer.GetHashCode(key = _keyGenerator(item));
+            hashCode = getHashCode(key = _keyGenerator(item)!);
             var entries = _entries!;
-            ref int bucket = ref GetBucket(hashCode);
+            ref int bucket = ref GetBucket((uint)hashCode);
             int index;
             if (_freeCount > 0)
             {
@@ -333,15 +384,15 @@ public class Set<T>
                 if (count == entries.Length)
                 {
                     Resize();
-                    bucket = ref GetBucket(hashCode);
+                    bucket = ref GetBucket((uint)hashCode);
                 }
                 index = count;
                 _count = count + 1;
                 entries = _entries;
             }
 
-            ref Entry<string, T> entry = ref entries![index];
-            entry.id = hashCode;
+            ref Entry entry = ref entries![index];
+            entry.id = (uint)hashCode;
             entry.next = bucket - 1; // Value in _buckets is 1-based
             entry.Key = key;
             entry.Value = item;
@@ -349,13 +400,15 @@ public class Set<T>
             _version++;
         };
 
-        return ref (new T[1] { default! })[0];
+        return ref (new TValue[1] { default! })[0];
     }
 
-    public bool TryGetValue(string key, out T val)
+    public bool TryGetValue(TKey key, out TValue val)
     {
-        uint hashCode = (uint)_comparer.GetHashCode(key);
-        int i = GetBucket(hashCode);
+        if (_buckets is null) Initialize(0);
+
+        var hashCode = getHashCode(key);
+        int i = GetBucket((uint)hashCode);
         var entries = _entries;
         uint collisionCount = 0;
         i--; // Value in _buckets is 1-based; subtract 1 from i. We do it here so it fuses with the following conditional.
@@ -369,7 +422,7 @@ public class Set<T>
             }
 
             ref var entry = ref entries[i];
-            if (entry.id == hashCode && _comparer.Equals(entry.Key, key))
+            if (entry.id == hashCode && equals(entry.Key, key))
             {
                 val = entry.Value;
                 return true;
@@ -392,16 +445,19 @@ public class Set<T>
     private void Resize(int newSize, bool forceNewHashCodes)
     {
         // Value types never rehash
-        var entries = new Entry<string, T>[newSize];
+        var entries = new Entry[newSize];
 
         int count = _count;
-        Array.Copy(_entries, entries, count);
+
+        Array.Copy(_entries!, entries, count);
 
         // Assign member variables after both arrays allocated to guard against corruption from OOM if second fails
         _buckets = new int[newSize];
+
 #if TARGET_64BIT
         _fastModMultiplier = GetFastModMultiplier((uint)newSize);
 #endif
+
         for (int i = 0; i < count; i++)
         {
             if (entries[i].next >= -1)
@@ -414,11 +470,11 @@ public class Set<T>
 
         _entries = entries;
     }
-    public static ulong GetFastModMultiplier(uint divisor) =>
+
+    private static ulong GetFastModMultiplier(uint divisor) =>
             ulong.MaxValue / divisor + 1;
 
-    public const int MaxPrimeArrayLength = 0x7FFFFFC3;
-    public static int ExpandPrime(int oldSize)
+    private static int ExpandPrime(int oldSize)
     {
         int newSize = 2 * oldSize;
 
@@ -445,7 +501,7 @@ public class Set<T>
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static uint FastMod(uint value, uint divisor, ulong multiplier)
+    private static uint FastMod(uint value, uint divisor, ulong multiplier)
     {
         // We use modified Daniel Lemire's fastmod algorithm (https://github.com/dotnet/runtime/pull/406),
         // which allows to avoid the long multiplication if the divisor is less than 2**31.
@@ -459,37 +515,69 @@ public class Set<T>
         return highbits;
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public void ForEach(RefItemResolver<T> action)
+    public override void Clear()
     {
-        for (int i = 0; i < _count; i++)
-        {
-            ref var item = ref _entries![i];
-            action(ref item.Value);
-        }
-    }
+        if (_buckets is null) Initialize(0);
 
-    public void ForEach(Action<T> action)
-    {
-        for (int i = 0; i < _count; i++)
-        {
-            ref var item = ref _entries![i];
-            action(item.Value);
-        }
-    }
-
-    public void Clear()
-    {
         int count = _count;
+
         if (count > 0)
         {
-            Array.Clear(_buckets, 0, _buckets!.Length);
+            Array.Clear(_buckets!, 0, _buckets!.Length);
 
             _count = 0;
             _freeList = -1;
             _freeCount = 0;
 
-            Array.Clear(_entries, 0, count);
+            Array.Clear(_entries!, 0, count);
         }
+    }
+
+    public override IEnumerator<TValue> GetEnumerator()
+    {
+        return _entries is null
+            ? EmptyEnumerator.Default
+            : new Enumerator(_entries, _count);
+    }
+
+    readonly struct EmptyEnumerator : IEnumerator<TValue>
+    {
+        internal readonly static EmptyEnumerator Default = new();
+        public readonly TValue Current => default!;
+
+        readonly object IEnumerator.Current => default!;
+
+        public readonly void Dispose() { }
+
+        public readonly bool MoveNext() => false;
+
+        public readonly void Reset() { }
+    }
+
+    struct Enumerator(Entry[] entries, int count) : IEnumerator<TValue>
+    {
+        int i = -1;
+
+        public readonly TValue Current => entries[i].Value;
+
+        readonly object IEnumerator.Current => Current!;
+
+        public readonly void Dispose() { }
+
+        public bool MoveNext() => ++i < count;
+
+        public void Reset() => i = -1;
+    }
+
+    struct Entry
+    {
+        public TKey Key;
+        public TValue Value;
+        internal int next;
+        internal uint id;
+
+        public void Deconstruct(out TKey outKey, out TValue outValue) => (outKey, outValue) = (Key, Value);
+
+        public override readonly string ToString() => $"Key: {Key}, Value: {Value}";
     }
 }

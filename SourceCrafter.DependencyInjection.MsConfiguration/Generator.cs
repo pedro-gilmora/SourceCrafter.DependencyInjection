@@ -7,6 +7,11 @@ using SourceCrafter.DependencyInjection;
 using System.Text;
 using System.Collections.Generic;
 using SourceCrafter.DependencyInjection.Interop;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System.Data;
+using System.IO;
+using System.Text.RegularExpressions;
+using System.Runtime.InteropServices.ComTypes;
 
 
 [Generator]
@@ -19,6 +24,9 @@ public class Generator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
+#if DEBUG_SG
+        System.Diagnostics.Debugger.Launch();
+#endif
         var servicesContainers = context.SyntaxProvider
                 .ForAttributeWithMetadataName("SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute",
                     (node, a) => true,
@@ -31,17 +39,36 @@ public class Generator : IIncrementalGenerator
                     (t, c) => (t.Attributes[0], (IParameterSymbol)t.TargetSymbol))
                 .Collect();
 
+        var configs = context.SyntaxProvider
+                .ForAttributeWithMetadataName("SourceCrafter.DependencyInjection.MsConfiguration.Metadata.JsonConfigurationAttribute",
+                    (node, a) => true,
+                    (t, c) => (t.Attributes[0], t.TargetSymbol))
+                .WithComparer(new JsonConfigProviderComparer())
+                .Collect();
+
         context.RegisterSourceOutput(
             context.CompilationProvider
                 .Combine(servicesContainers)
-                .Combine(settings), OnCompile);
+                .Combine(settings)
+                .Combine(configs),
+            static (context, collectedInfo) =>
+            {
+                var (((compilation, containers), settings), configs) = collectedInfo;
+
+                OnCompile(context, compilation, containers, settings, configs);
+            });
     }
 
-    private void OnCompile(SourceProductionContext context, ((Compilation, ImmutableArray<(SemanticModel, INamedTypeSymbol)>), ImmutableArray<(AttributeData, IParameterSymbol)>) collectedInfo)
-    {
-        var ((compilation, containers), settings) = collectedInfo;
+    static readonly Regex remover = new("^Get|[Ss]ettings?|[Cc]onfig(?:uration)?", RegexOptions.Compiled);
 
-        Map<string, ValueBuilder> resolvedTypes = new (StringComparer.Ordinal);
+    private static void OnCompile(
+        SourceProductionContext context,
+        Compilation compilation,
+        ImmutableArray<(SemanticModel, INamedTypeSymbol)> containers,
+        ImmutableArray<(AttributeData, IParameterSymbol)> settings,
+        ImmutableArray<(AttributeData, ISymbol)> configs)
+    {
+        //Map<string, ValueBuilder> resolvedTypes = new (StringComparer.Ordinal);
 
         //InteropServices.RegisterDependencyResolvers(generatorGuid, Resolve);
 
@@ -49,9 +76,9 @@ public class Generator : IIncrementalGenerator
         //{
         //    servicesDescriptors.ForEach((DependencyKey key, ref ServiceDescriptor item) =>
         //    {
-        //        if (resolvedTypes.TryGetValue(item.ExportTypeName, out var existing) && !item.Resolved)
+        //        if (resolvedTypes.TryGetValue(item.ExportTypeName, out var existing) && !item.IsResolved)
         //        {
-        //            item.Resolved = true;
+        //            item.IsResolved = true;
         //            item.ResolvedBy = generatorGuid;
         //            item.GenerateValue = existing!;
         //            return;
@@ -62,15 +89,16 @@ public class Generator : IIncrementalGenerator
         if (!IsMsConfigInstalled(compilation, out var iConfigTypeSymbol)) return;
 
         Map<(int, Lifetime, string?), string> dependencyRegistry = new(EqualityComparer<(int, Lifetime, string?)>.Default);
-        
-        HashSet<string> methodsRegistry = new(StringComparer.Ordinal);
-        
-        DependencyMap discoveredServices = new(new DependencyComparer());
 
-        Map<string, ValueBuilder> keys = new(StringComparer.Ordinal);
+        HashSet<string> methodsRegistry = new(StringComparer.Ordinal);
+
+        Map<string, string> files = new(StringComparer.Ordinal);
+        HashSet<string> keys = new(StringComparer.Ordinal);
 
         foreach (var (model, container) in containers)
         {
+            var attrs = container.GetAttributes();
+
             StringBuilder code = new(@"#nullable enable
 using global::Microsoft.Extensions.Configuration;
 
@@ -89,49 +117,123 @@ using global::Microsoft.Extensions.Configuration;
             code.Append("public partial class ")
                 .Append(providerClassName)
                 .Append(@"
-{
-    ");
+{");
 
-            foreach (var (setting, parameter) in settings)
+            foreach (var (configAttr, target) in configs)
             {
-                var key = setting.ConstructorArguments.FirstOrDefault().Value as string ?? "";
-
-                if (key.Length == 0)
+                if (configAttr.ConstructorArguments[0].Value is string { Length: > 0} fileName
+                    && (target is IAssemblySymbol 
+                    || SymbolEqualityComparer.Default.Equals(target, container)))
                 {
-                    continue;
-                }
+                    var key = (configAttr.ConstructorArguments[1].Value?.ToString() ?? "").Trim();
 
-                ref var existingOrNew = ref keys.GetValueOrAddDefault(key, out var exists)!;
+                    ref var configMethodName = ref files.GetValueOrAddDefault(key, out var fileExists);
 
-                if (exists)
-                {
-                    continue;
-                }
+                    if (fileExists) continue;
 
-                var settingType = parameter.Type.ToGlobalNamespaced();
+                    fileName = Path.GetFileNameWithoutExtension(fileName);
 
-                var identifier = Extensions.SanitizeTypeName(parameter.Type, methodsRegistry, dependencyRegistry, Lifetime.Singleton, null, null);
+                    var nameFormat = (string)configAttr.ConstructorArguments[4].Value!;
 
-                var fieldIdentifier = "_" + identifier.Camelize();
+                    configMethodName = nameFormat.Replace("{0}", key).RemoveDuplicates();
 
-                identifier = "Get" + identifier;
+                    var fieldName = configMethodName is ['G', 'e', 't', ..] ? configMethodName[3..] : configMethodName;
+                    var optional = configAttr.ConstructorArguments[2].Value?.ToString().ToLower();
+                    var reloadOnChange = configAttr.ConstructorArguments[3].Value?.ToString().ToLower();
+                    var handleEnviroments = (bool)configAttr.ConstructorArguments[5].Value!;
 
-                resolvedTypes.TryAdd(settingType, code => code.Append(identifier).Append("()"));
+                    //Register key to provide to settings
 
-                code.Append(@"
+                    code.Append(@"
     ").Append(generatedCodeAttribute).Append(@"
     private static ")
+                        .Append("global::Microsoft.Extensions.Configuration.IConfiguration")
+                        .Append(@"? _f")
+                        .Append(fieldName)
+                        .Append(@";
+
+    ").Append(generatedCodeAttribute).Append(@"
+    private static ")
+                        .Append("global::Microsoft.Extensions.Configuration.IConfiguration")
+                        .Append(@" ")
+                        .Append(configMethodName)
+                        .Append(@"()
+    {
+        if(")
+                        .Append(@"_f")
+                        .Append(fieldName)
+                        .Append(@" is not null) return ")
+                        .Append(@"_f")
+                        .Append(fieldName)
+                        .Append(@";
+
+        lock (__lock)
+        {
+            return ")
+                        .Append(@"_f")
+                        .Append(fieldName)
+                        .Append(@" ??= new global::Microsoft.Extensions.Configuration.ConfigurationBuilder()");
+
+                    if (handleEnviroments)
+                    {
+                        code.Append(@"
+                .AddJsonFile($""{(global::System.IO.Path.GetFullPath(""")
+                            .Append(fileName)
+                            .Append(@"""))}.{Environment}.json"", true, ")
+                            .Append(reloadOnChange)
+                            .Append(")");
+                    }
+
+                    code.Append(@"
+                .AddJsonFile(global::System.IO.Path.GetFullPath(""")
+                        .Append(fileName)
+                        .Append(@".json""), ")
+                        .Append(optional)
+                        .Append(@", ")
+                        .Append(reloadOnChange)
+                        .Append(@")
+                .Build();
+        }
+    }
+");
+                }
+            }
+
+            foreach (var (settingAttr, parameter) in settings)
+            {
+                if (settingAttr.ConstructorArguments[0].Value is not string { Length: > 0 } settingPath 
+                    || !keys.Add(settingPath)
+                    || (settingAttr.ConstructorArguments[2].Value?.ToString() ?? "").Trim() is not { } configKey
+                    || !files.TryGetValue(configKey, out var configMethodName)) continue;
+
+                var lifetime = (Lifetime)(byte)settingAttr.ConstructorArguments[1].Value!;
+                var nameFormat = (string)settingAttr.ConstructorArguments[3].Value!;
+                var settingType = parameter.Type.ToGlobalNamespaced();
+                var identifier = nameFormat.Replace("{0}", configKey).RemoveDuplicates()!;
+                var fieldIdentifier = "_" + identifier.Camelize();
+
+                code.Append(@"
+    ").Append(generatedCodeAttribute)
+    .Append(@"
+    private ");
+
+                if(lifetime is Lifetime.Singleton)
+                    code.Append("static ");
+                
+                code
                     .Append(settingType)
                     .Append(@"? ")
                     .Append(fieldIdentifier)
                     .Append(@";
 
-    ").Append(generatedCodeAttribute).Append(@"
-    [global::SourceCrafter.DependencyInjection.Interop.DependencyResolverAttribute<")
-                    .Append(settingType)
-                    .Append(@">]
-    private static ")
-                    .Append(settingType)
+    ").Append(generatedCodeAttribute)
+    .Append(@"
+    private ");
+
+                if (lifetime is Lifetime.Singleton)
+                    code.Append("static ");
+
+                code.Append(settingType)
                     .AddSpace()
                     .Append(identifier)
                     .Append(@"()
@@ -142,7 +244,7 @@ using global::Microsoft.Extensions.Configuration;
             lock (__lock)     
                 return ")
                     .Append(fieldIdentifier)
-                    .Append(@" ??= BuildMsSetting();
+                    .Append(@" ??= BuildSetting();
 
         return ")
                     .Append(fieldIdentifier)
@@ -150,21 +252,20 @@ using global::Microsoft.Extensions.Configuration;
 
         ")
                     .Append(settingType)
-                    .Append(@" BuildMsSetting()
+                    .Append(@" BuildSetting()
         {
             var setting = new ")
                     .Append(settingType)
                     .Append(@"();
 
-            global::SourceCrafter.DependencyInjection.MsConfiguration.Metadata.ConfigurationResolver
-                .GetJsonConfiguration()
-                .GetSection(""").Append(key).Append(@""")
+            ").Append(configMethodName).Append(@"() 
+                .GetSection(""").Append(settingPath).Append(@""")                
                 .Bind(setting);
 
             return setting;
         }
     }
-                    ");
+");
             }
 
             code.Append(@"
@@ -173,12 +274,33 @@ using global::Microsoft.Extensions.Configuration;
             context.AddSource($"{container.MetadataName}.msConfig", code.ToString());
         }
     }
+#nullable enable
+    //private static bool HasRegisteredType(ImmutableArray<AttributeData> attrs, ITypeSymbol type, SemanticModel _model)
+    //{
+    //    foreach (var item in attrs)
+    //    {
+    //        if (item.AttributeClass?.ToGlobalNonGenericNamespace()
+    //            is ServiceDescriptor.SingletonAttr
+    //            or ServiceDescriptor.ScopedAttr
+    //            or ServiceDescriptor.TransientAttr
+    //            && (item.AttributeClass.TypeParameters switch
+    //               {
+    //                   [_, { } _type] => SymbolEqualityComparer.Default.Equals(_type, type),
+    //                   [{ } _type] => SymbolEqualityComparer.Default.Equals(_type, type),
+    //                   _ => item.ApplicationSyntaxReference?.GetSyntax() 
+    //                       is AttributeSyntax { ArgumentList.Arguments: [_, { Expression: TypeOfExpressionSyntax {Type:{ } _type } }] }
+    //                       && SymbolEqualityComparer.Default.Equals(_model!.GetSymbolInfo(_type).Symbol, type)
+    //               })) return true;
+    //    }
+    //    return false;
+    //}
+
     //    private static (string, string)? ResolveDependency(Compilation compilation, ITypeSymbol serviceContainer, Set<ServiceDescriptor> servicesDescriptors)
     //    {
     //        if (!IsMsConfigInstalled(compilation, out var iConfigTypeSymbol)) return null;
 
     //        StringBuilder extraCode = new(@"
-#nullable enable
+
     //using global::Microsoft.Extensions.Configuration;
 
     //");
@@ -339,5 +461,22 @@ using global::Microsoft.Extensions.Configuration;
         }
 
         return $@"[global::System.CodeDom.Compiler.GeneratedCode(""{name}"", ""1.0.0"")]";
+    }
+}
+
+internal class JsonConfigProviderComparer : IEqualityComparer<(AttributeData attr, ISymbol target)>
+{
+    public bool Equals((AttributeData attr, ISymbol target) x, (AttributeData attr, ISymbol target) y)
+    {
+        return (x is { attr.ConstructorArguments: [{ Value: string { Length: > 0 } xFilePath }] }
+            && y is { attr.ConstructorArguments: [{ Value: string { Length: > 0 } yFilePath }] })
+            && ((xFilePath, yFilePath) is (null or "", null or "")
+                || (xFilePath, yFilePath) is ({ Length: > 0 }, { Length: > 0 })
+                    && xFilePath.Equals(yFilePath, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public int GetHashCode((AttributeData attr, ISymbol target) obj)
+    {
+        return (obj.attr.ConstructorArguments[0].Value ?? "").GetHashCode();
     }
 }

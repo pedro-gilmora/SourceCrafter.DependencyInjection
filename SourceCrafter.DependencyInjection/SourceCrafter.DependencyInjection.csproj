@@ -23,7 +23,7 @@
 		<Nullable>enable</Nullable>
 		<IsRoslynComponent>true</IsRoslynComponent>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
-		<Configurations>Debug;Release;Pack;DEBUG_SG;DEBUG_SG</Configurations>
+		<Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>
 		<PackageOutputPath>../packaging</PackageOutputPath>
 		<Version>$(PackageVersion)</Version>
 	</PropertyGroup>
@@ -49,8 +49,13 @@
 	  <ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" />
 	</ItemGroup>
 
-	<ItemGroup >
+	<ItemGroup>
+	  <None Remove="bin\Debug\netstandard2.0\\SourceCrafter.DependencyInjection.dll" />
+	</ItemGroup>
+
+	<ItemGroup>
 		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
+		<None Remove="bin\Debug\netstandard2.0\\SourceCrafter.DependencyInjection.Interop.dll" />
 		<None Include="$(OutputPath)\$(AssemblyName).Interop.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
 	</ItemGroup>
 

@@ -446,7 +446,7 @@ public class Map<TKey, TVal>
             iterator(_entries![i].Key, ref _entries[i].Value);
         }
     }
-    public ref TVal GetValueOrInsertor(TKey key, out Action<TVal> insertor)
+    public ref TVal GetValueOrInserter(TKey key, out Action<TVal> insertor)
     {
         Entry<TKey, TVal>[]? entries = _entries!;
 

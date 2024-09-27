@@ -50,11 +50,16 @@
 
 	<ItemGroup>
 		<PackageReference Include="System.Runtime.InteropServices" Version="4.3.0" />
+		<PackageReference Include="System.Text.Json" Version="8.0.4" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" ReferenceOutputAssembly="true" />
 		<ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" ReferenceOutputAssembly="true" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <None Remove="bin\Debug\netstandard2.0\\SourceCrafter.DependencyInjection.MsConfiguration.dll" />
 	</ItemGroup>
 
 	<ItemGroup>

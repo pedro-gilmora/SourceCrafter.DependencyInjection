@@ -32,9 +32,9 @@ function Get-Version {
     return $version
 }
 
-Set-Location $PSScriptRoot
+Set-Location "$PWD"
 
-$testProjPath = "$PSScriptRoot/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj"
+$testProjPath = "$PWD/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj"
 
 $testProjContent = [xml]$(Get-Content $testProjPath)
 
@@ -63,35 +63,35 @@ PACKER: Updating package: $($_.GetAttribute('Include')) from version $version"
     Write-Output "
 PACKER: Test project references where updated
 "
-    if(-not (Test-Path "$PSScriptRoot/packaging/"))
+    if(-not (Test-Path "$PWD/packaging/"))
     {
         Write-Host "PACKER: Created packaging output folder
 "
-        New-Item -ItemType Directory -Path "$PSScriptRoot/packaging/"
+        New-Item -ItemType Directory -Path "$PWD/packaging/"
     }
     if($clean -eq "true")
     {
         Write-Information "PACKER: Removing packages"
-        Remove-Item -Path "$PSScriptRoot/packaging/*.*" -recurse
+        Remove-Item -Path "$PWD/packaging/*.*" -recurse
     }
 
     if($pack -eq 'true')
     {
         try
         {
-            if(dotnet nuget list source | Select-String -Pattern 'DILocalPackages')
+            if(-not (dotnet nuget list source | Select-String -Pattern 'DILocalPackages'))
             {
-                dotnet nuget add source $PSScriptRoot/packaging -n DILocalPackages
+                dotnet nuget add source "$PWD/packaging" -n DILocalPackages
             }
         
             dotnet restore
 
             Write-Host "PACKER: Packaging projects
 "
-            dotnet pack $PSScriptRoot/SourceCrafter.DependencyInjection.Interop/SourceCrafter.DependencyInjection.Interop.csproj -c Release -p:PackageVersion=$version
-            dotnet pack $PSScriptRoot/SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj -c Release -p:PackageVersion=$version
-            dotnet pack $PSScriptRoot/SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -p:PackageVersion=$version
-            dotnet pack $PSScriptRoot/SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -p:PackageVersion=$version
+            dotnet pack $PWD/SourceCrafter.DependencyInjection.Interop/SourceCrafter.DependencyInjection.Interop.csproj -c Release -p:PackageVersion=$version
+            dotnet pack $PWD/SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj -c Release -p:PackageVersion=$version
+            dotnet pack $PWD/SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -p:PackageVersion=$version
+            dotnet pack $PWD/SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -p:PackageVersion=$version
         }
         catch
         {
@@ -110,18 +110,17 @@ PACKER: Testin projects
     {
         if(dotnet nuget list source | Select-String -Pattern 'LocalPackages')
         {
-            dotnet nuget add source $PSScriptRoot/packaging -n DILocalPackages
+            dotnet nuget add source $PWD/packaging -n DILocalPackages
         }        
         
-        dotnet restore $PSScriptRoot/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj
+        dotnet restore $PWD/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj
     }
     
     if($clean -eq 'true')
     {
-        dotnet clean $PSScriptRoot/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
+        dotnet clean $PWD/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
     }
     
-    dotnet build $PSScriptRoot/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
-    dotnet test $PSScriptRoot/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release /v:d
-
+    dotnet build $PWD/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
+    dotnet test $PWD/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release /v:d
 }

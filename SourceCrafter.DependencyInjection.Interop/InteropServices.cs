@@ -13,7 +13,7 @@ using System.Threading;
 namespace SourceCrafter.DependencyInjection.Interop
 {
     [AttributeUsage(AttributeTargets.Assembly | AttributeTargets.Method, AllowMultiple = true)]
-    public class DependencyResolverAttribute<IDependencyResolver> : Attribute;
+    public class UseAttribute<IDependencyResolver> : Attribute;
 
     public delegate void ContainerRegistrationHandler(Compilation compilation, ITypeSymbol serviceContainer, DependencyMap servicesDescriptors);
 
@@ -58,7 +58,7 @@ namespace SourceCrafter.DependencyInjection.Interop
             ExternalResolvers.TryRemove(key, out _);
         }
 
-        internal static List<string> ResolveExternalDependencies(SynchronizationContext context, Compilation compilation, ITypeSymbol serviceContainer, DependencyMap servicesDescriptors)
+        internal static List<string> ResolveExternalDependencies(Compilation compilation, ITypeSymbol serviceContainer, DependencyMap servicesDescriptors)
         {
             List<string> list = [];
 
@@ -68,10 +68,9 @@ namespace SourceCrafter.DependencyInjection.Interop
             {
                 lock (_lock)
                 {
-                    context.Send(_ => item(compilation, serviceContainer, servicesDescriptors), null);
+                    item(compilation, serviceContainer, servicesDescriptors);
                 }
             }
-
             return list;
         }
     }

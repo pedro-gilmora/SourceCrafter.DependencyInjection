@@ -1,42 +1,46 @@
 ﻿using SourceCrafter.DependencyInjection.Attributes;
 using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
 
+using System.Text.RegularExpressions;
+
+[assembly: JsonConfiguration]
+
 namespace SourceCrafter.DependencyInjection.Tests
 {
-    public enum Main { Identity, App }
-
     [ServiceContainer]
-    [Singleton<Configuration>(factoryOrInstance: nameof(BuildConfiguration))]
+    [JsonConfiguration]
+    //[Singleton<Configuration>(factoryOrInstance: nameof(BuildConfiguration))]
     [Singleton<IDatabase, Database>]
-    [Scoped<IDatabase, Database>(Main.App)]
+    //[Scoped<IDatabase, Database>(Main.App)]
     [Scoped<AuthService>]
-    [Transient<int>(Main.App, nameof(ResolveAsync))]
-    [Transient<string>(Main.App, nameof(Name))]
+    [Transient<int>("Count", nameof(ResolveAsync))]
+    //[Transient<string>(Main.App, nameof(Name))]
     public partial class Server
     {
-        const string Name = "Server::Name";
+        //const string Name = "Server::Name";
 
-        static Configuration BuildConfiguration()
-        {
-            return default!;
-        }
+        //static Configuration BuildConfiguration()
+        //{
+        //    return default!;
+        //}
         static ValueTask<int> ResolveAsync(CancellationToken _)
         {
             return ValueTask.FromResult(1);
         }
     }
 
-    public class AuthService([Singleton] IDatabase application, [Transient(Main.App)] int o) : global::System.IDisposable
+    public class AuthService([Singleton] IDatabase application, [Transient("Count")] int o) :IDisposable
     {
+        public int O => o;
         public IDatabase Database { get; } = application;
 
         public void Dispose()
         {
-
+            //Continue with HostEnvironment
         }
     }
 
-    public class Database([JsonSetting("AppSettings")] AppSettings config) : IDatabase, global::System.IAsyncDisposable
+    public class Database([JsonSetting("AppSettings")] AppSettings config) : IDatabase, IAsyncDisposable
     {
         //AppSettings config = config;
 
