@@ -25,7 +25,7 @@ jobs:
     - name: Publish generator and endpoints to Nuget
       if: github.ref_name == 'dev'
       run: |
-        package="$(find . -wholename '**/Pack/SourceCrafter.DependencyInjection.1*.nupkg' -exec echo "{}" \;)"
+        package="$(find . -wholename '**/packaging/SourceCrafter.DependencyInjection.*.nupkg' | grep -E 'SourceCrafter.DependencyInjection.[0-9\.]+.nupkg')"
         dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
         package="$(find . -wholename '**/Pack/SourceCrafter.DependencyInjection.Interop*.nupkg' -exec echo "{}" \;)"
         dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json
