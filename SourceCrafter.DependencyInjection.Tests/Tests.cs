@@ -48,15 +48,6 @@ namespace SourceCrafter.DependencyInjection.Tests
         {
             await using Server serverContainer = new();
 
-//            #pragma warning disable SCDI03 // Type not registered in container
-//                        serverContainer.GetService<IConfiguration>()
-//#pragma warning restore SCDI03 // Type not registered in container
-
-//                            .GetSection("AppSettings")
-//                            .Get<AppSettings>()!
-
-            //.Setting1.Should().Be("Value1");
-
             serverContainer.GetDatabase().TrySave(out var setting1);
 
             setting1.Should().Be("Value1");

@@ -20,7 +20,8 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
         bool optional = true,
         bool reloadOnChange = true,
         string nameFormat = "Get{0}Configuration",
-        bool handleEnviroments = true)
+        bool handleEnviroments = true
+    )
         : SingletonAttribute<IConfiguration>(nameFormat);
     //: SingletonAttribute<IConfiguration>(factoryOrInstance: nameof(ConfigurationResolver.GetJsonConfiguration));
 

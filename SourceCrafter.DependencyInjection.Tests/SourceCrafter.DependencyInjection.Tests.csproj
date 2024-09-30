@@ -37,10 +37,10 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup Condition="$(Configuration) != 'DEBUG_SG'">
-    <PackageReference Include="SourceCrafter.DependencyInjection" Version="0.24.271.34" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.Interop" Version="0.24.271.34" IsVisible="false" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="0.24.271.34" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="0.24.271.34" IsVisible="false" />
+    <PackageReference Include="SourceCrafter.DependencyInjection" Version="0.24.274.9" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.Interop" Version="0.24.274.9" IsVisible="false" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="0.24.274.9" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="0.24.274.9" IsVisible="false" />
   </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.json">
