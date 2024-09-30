@@ -27,5 +27,5 @@ jobs:
       run: |        
         for package in $(find . -wholename '**/packaging/*.nupkg'); do
           # Execute nuget push for each package
-          nuget push "$package" -Source https://api.nuget.org/v3/index.json -ApiKey ${{ secrets.NUGET_API_KEY }}
+          dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json"
         done
