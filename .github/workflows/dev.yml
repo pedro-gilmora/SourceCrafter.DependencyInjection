@@ -24,12 +24,8 @@ jobs:
       
     - name: Publish generator and endpoints to Nuget
       if: github.ref_name == 'dev'
-      run: |
-        package="$(find . -wholename '**/packaging/SourceCrafter.DependencyInjection.*.nupkg' | grep -E 'SourceCrafter.DependencyInjection.[0-9\.]+.nupkg')"
-        dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json"
-        package="$(find . -wholename '**/packaging/SourceCrafter.DependencyInjection.Interop*.nupkg' -exec echo "{}" \;)"
-        dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json"
-        package="$(find . -wholename '**/packaging/SourceCrafter.DependencyInjection.MsConfiguration*.nupkg' -exec echo "{}" \;)"
-        dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json"
-        package="$(find . -wholename '**/packaging/SourceCrafter.DependencyInjection.MsConfiguration.Metadata*.nupkg' -exec echo "{}" \;)"
-        dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json"
+      run: |        
+        for package in $(find . -wholename '**/packaging/*.nupkg'); do
+          # Execute nuget push for each package
+          nuget push "$package" -Source https://api.nuget.org/v3/index.json -ApiKey ${{ secrets.NUGET_API_KEY }}
+        done
