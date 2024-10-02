@@ -99,14 +99,18 @@ class ServiceContainerGenerator
         INamedTypeSymbol providerClass)
     {
         disposability = default;
-        var isExternal = false;
         INamedTypeSymbol attrClass = originalAttrClass;
+        var isExternal = false;
 
-        if (attrClass is null || GetLifetime(ref attrClass, ref isExternal) is not { } lifetime) return;
+        if (attrClass is null
+            || attrClass.Name.StartsWith("ServiceContainer")
+            || GetLifetimeFromCtor(ref attrClass, ref isExternal, attrSyntax) is not { } lifetime) return;
 
         var _params = attrSyntax.ArgumentList?.Arguments ?? default;
 
         GetDependencyInfo(_model, attrClass.TypeArguments, _params, parameters, out var depInfo);
+
+        if (!depInfo.IsCached && lifetime is not Lifetime.Transient) depInfo.IsCached = true;
 
         if (HasNoType() || InterfaceRequiresInternalFactory()) return;
 
@@ -133,9 +137,7 @@ class ServiceContainerGenerator
 
         ref var existingOrNew = ref discoveredServices.GetValueOrAddDefault((lifetime, exportTypeFullName, depInfo.Key), out var exists)!;
 
-        var identifier = (depInfo.NameFormat is not null)
-            ? string.Format(depInfo.NameFormat, depInfo.Key).RemoveDuplicates()
-            : Extensions.SanitizeTypeName(depInfo.ImplType, methodsRegistry, dependencyRegistry, lifetime, depInfo.Key);
+        string methodName = GetMethodName(isExternal, lifetime, depInfo, isAsync, methodsRegistry, dependencyRegistry);
 
         if (exists)
         {
@@ -158,9 +160,9 @@ class ServiceContainerGenerator
             {
                 Lifetime = lifetime,
                 Key = depInfo.Key,
-                ExternalGenerated = isExternal,
-                ResolverMethodName = isExternal ? identifier : "Get" + identifier,
-                CacheField = "_" + identifier.Camelize(),
+                IsExternal = isExternal,
+                ResolverMethodName = methodName,
+                CacheField = "_" + methodName.Camelize(),
                 Factory = depInfo.Factory,
                 FactoryKind = depInfo.FactoryKind,
                 Disposability = thisDisposability,
@@ -169,17 +171,17 @@ class ServiceContainerGenerator
                 Attributes = depInfo.ImplType.GetAttributes(),
                 IsAsync = isAsync,
                 ContainerType = providerClass,
-                Cached = depInfo.Cached ?? depInfo.Factory is null,
+                IsCached = depInfo.IsCached,
                 Params = Extensions.GetParameters(depInfo),
                 DefaultParamValues = depInfo.DefaultParamValues
             };
         }
 
-        bool HasNoType() => depInfo is { ImplType:null, IFaceType: null };
+        bool HasNoType() => depInfo is { ImplType: null, IFaceType: null };
 
         bool InterfaceRequiresInternalFactory()
         {
-            if (depInfo is { IFaceType: not null, ImplType:null, Factory:null } && !isExternal)
+            if (depInfo is { IFaceType: not null, ImplType: null, Factory: null } && !isExternal)
             {
                 _diagnostics.TryAdd(
                     ServiceContainerGeneratorDiagnostics.InterfaceRequiresFactory(attrSyntax.Name));
@@ -241,13 +243,6 @@ class ServiceContainerGenerator
             }
         }
 
-
-        service.GenerateValue = service.ExternalGenerated
-            ? service.BuildAsExternalValue
-            : service.IsFactory
-                ? service.UseFactoryValueResolver
-                : service.BuildValueInstance;
-
         service.CheckParamsDependencies(
             _model,
             discoveredServices,
@@ -260,16 +255,9 @@ class ServiceContainerGenerator
 
         if (service.Disposability > disposability) disposability = service.Disposability;
 
-        if (service.ExternalGenerated) return;
+        if (service is { IsExternal:true } or {IsFactory:true, IsCached:false }) return;
 
-        if (service.IsKeyed)
-        {
-            keyedMethods.TryAdd(service, service.BuildSwitchBranch);
-        }
-        else
-        {
-            methods += service.BuildResolver;
-        }
+        methods += service.BuildResolver;
     }
 
     private void UpdateAsyncStatus()
@@ -343,20 +331,6 @@ class ServiceContainerGenerator
 
         methods?.Invoke(icode, false, Generator.generatedCodeAttribute);
 
-        foreach (var service in keyedMethods.KeysAsSpan())
-        {
-            icode
-                .Append(@"
-	")
-                .AppendLine(Generator.generatedCodeAttribute)
-                .Append("    ");
-
-            BuildKeyedResolverMethodSignature(icode, service);
-
-            icode.Append(@";
-");
-        }
-
         if (hasScopedService)
         {
             icode.Append(@"
@@ -421,63 +395,6 @@ class ServiceContainerGenerator
 
         methods?.Invoke(code, true, Generator.generatedCodeAttribute);
 
-        foreach (var (service, keyedValueResolverBuilder) in keyedMethods.AsSpan())
-        {
-            if (service.ExternalGenerated) continue;
-
-            if (service.Cached)
-            {
-                code.Append(@"
-    ")
-                    .Append(Generator.generatedCodeAttribute)
-                    .Append(@"
-    private ");
-
-                if (service.Lifetime is Lifetime.Singleton) code.Append("static ");
-
-                code
-                    .Append(service.FullTypeName)
-                    .Append("? ")
-                    .Append(service.CacheField)
-                    .Append(@";");
-            }
-
-            code
-                .Append(@"
-	")
-                .AppendLine(Generator.generatedCodeAttribute)
-                .Append("    public ");
-
-            if (service.IsAsync) code.Append("async ");
-
-            BuildKeyedResolverMethodSignature(code, service);
-
-            code.Append(@"
-	{
-		switch(key)
-		{");
-
-            keyedValueResolverBuilder(code);
-
-            code.Append(@"
-			default: throw InvalidKeyedService(""")
-                .Append(service.ExportTypeName)
-                .Append(@""", """)
-                .Append(service.Key)
-                .Append(@""");
-		}
-	}
-");
-        }
-
-        if (keyedMethods.Count > 0)
-        {
-            code.Append(@"
-	private static global::System.NotImplementedException InvalidKeyedService(string typeFullName, string serviceKeyName) =>
-			new global::System.NotImplementedException($""There's no registered keyed-implementation for [{serviceKeyName} = global::SourceCrafter.DependencyInjection.IKeyedServiceProvider<{typeFullName}>.GetService({serviceKeyName} name)]"");
-");
-        }
-
         if (hasScopedService)
         {
             code.Append(@"
@@ -494,7 +411,7 @@ class ServiceContainerGenerator
 
         addSource(fileName + ".generated", codeStr);
 
-        //CheckUsages(usages);
+        //ChueckUsages(usages);
     }
 
     private void BuildDisposability(StringBuilder code, bool buildingInterface)
@@ -566,26 +483,6 @@ class ServiceContainerGenerator
         }
     }
 
-    private static void BuildKeyedResolverMethodSignature(StringBuilder code, ServiceDescriptor service)
-    {
-        if (service.IsAsync)
-        {
-            code.Append("global::System.Threading.Tasks.ValueTask<")
-                .Append(service.ExportTypeName)
-                .Append(@"> ")
-                .Append(service.ResolverMethodName)
-                .Append(@"Async(string key, global::System.Threading.CancellationToken cancellationToken = default)");
-        }
-        else
-        {
-            code.Append(service.ExportTypeName)
-                .Append(@" ")
-                .Append(service.ResolverMethodName)
-                .Append(@"(")
-                .Append(service.Key)
-                .Append(" key)");
-        }
-    }
     /*
     private void CheckUsages(ImmutableArray<InvocationExpressionSyntax> usages)
     {

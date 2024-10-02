@@ -318,13 +318,14 @@ namespace SourceCrafter.DependencyInjection
             HashSet<string> methodsRegistry,
             Map<(int, Lifetime, string?), string> dependencyRegistry,
             Lifetime lifeTime,
-            string? serviceId)
+            string? key,
+            bool isCached)
         {
             int hashCode = SymbolEqualityComparer.Default.GetHashCode(type);
 
             string id = Sanitize(type).Capitalize();
 
-            ref var idOut = ref dependencyRegistry.GetValueOrAddDefault((hashCode, lifeTime, serviceId), out var exists);
+            ref var idOut = ref dependencyRegistry.GetValueOrAddDefault((hashCode, lifeTime, key), out var exists);
 
             if (exists)
             {
@@ -334,10 +335,10 @@ namespace SourceCrafter.DependencyInjection
             Dictionary<(int, Lifetime, string?), string> _dic = [];
 
             _ = methodsRegistry.Add(idOut = id)
-                || (serviceId != null &&
-                    (methodsRegistry.Add(idOut = $"{id}For{serviceId}")
+                || (key != null &&
+                    (methodsRegistry.Add(idOut = $"{id}For{key}")
                         || methodsRegistry.Add(idOut = $"{lifeTime}{id}")
-                        || methodsRegistry.Add(idOut = $"{lifeTime}{id}For{serviceId}")))
+                        || methodsRegistry.Add(idOut = $"{lifeTime}{id}For{key}")))
                 || methodsRegistry.Add(idOut = $"{lifeTime}{id}");
 
             return idOut;

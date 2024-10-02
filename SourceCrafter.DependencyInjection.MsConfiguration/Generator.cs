@@ -12,7 +12,8 @@ using System.Data;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Runtime.InteropServices.ComTypes;
-
+using static SourceCrafter.DependencyInjection.Extensions;
+using System.Threading;
 
 [Generator]
 public class Generator : IIncrementalGenerator
@@ -203,29 +204,36 @@ using global::Microsoft.Extensions.Configuration;
             {
                 if (settingAttr.ConstructorArguments[0].Value is not string { Length: > 0 } settingPath 
                     || !keys.Add(settingPath)
-                    || (settingAttr.ConstructorArguments[2].Value?.ToString() ?? "").Trim() is not { } configKey
+                    || (settingAttr.ConstructorArguments[4].Value?.ToString() ?? "").Trim() is not { } configKey
                     || !files.TryGetValue(configKey, out var configMethodName)) continue;
+
+                var isPrimitive = parameter.Type.IsPrimitive();
 
                 var lifetime = (Lifetime)(byte)settingAttr.ConstructorArguments[1].Value!;
                 var nameFormat = (string)settingAttr.ConstructorArguments[3].Value!;
                 var settingType = parameter.Type.ToGlobalNamespaced();
-                var identifier = nameFormat.Replace("{0}", configKey).RemoveDuplicates()!;
+                var identifier = nameFormat.Replace("{0}", settingAttr.ConstructorArguments[2].Value?.ToString().Pascalize() ?? "").RemoveDuplicates()!;
                 var fieldIdentifier = "_" + identifier.Camelize();
 
-                code.Append(@"
-    ").Append(generatedCodeAttribute)
-    .Append(@"
+                if (!isPrimitive) {
+                    code.Append(@"
+    ")
+                        .Append(generatedCodeAttribute)
+                        .Append(@"
     private ");
 
-                if(lifetime is Lifetime.Singleton)
-                    code.Append("static ");
-                
-                code
-                    .Append(settingType)
-                    .Append(@"? ")
-                    .Append(fieldIdentifier)
-                    .Append(@";
 
+                    if (lifetime is Lifetime.Singleton)
+                        code.Append("static ");
+
+                    code
+                        .Append(settingType)
+                        .Append(@"? ")
+                        .Append(fieldIdentifier)
+                        .Append(@";
+");
+                }
+                    code.Append(@"
     ").Append(generatedCodeAttribute)
     .Append(@"
     private ");
@@ -235,28 +243,45 @@ using global::Microsoft.Extensions.Configuration;
 
                 code.Append(settingType)
                     .AddSpace()
-                    .Append(identifier)
-                    .Append(@"()
+                    .Append(identifier);
+
+                if (isPrimitive)
+                {
+                    code.Append(@"() => ")
+                        .Append(configMethodName)
+                        .Append(@"().GetValue<")
+                        .Append(settingType)
+                        .Append(@">(""")
+                        .Append(settingPath)
+                        .Append(@""");");
+                }
+                else {
+                    code
+                        .Append(@"()
     {
         if (")
-                    .Append(fieldIdentifier)
-                    .Append(@" is null)
+                        .Append(fieldIdentifier)
+                        .Append(@" is null)
             lock (__lock)     
                 return ")
-                    .Append(fieldIdentifier)
-                    .Append(@" ??= BuildSetting();
+                        .Append(fieldIdentifier)
+                        .Append(@" ??= BuildSetting();
 
         return ")
-                    .Append(fieldIdentifier)
-                    .Append(@";
+                        .Append(fieldIdentifier)
+                        .Append(@";
 
         ")
-                    .Append(settingType)
-                    .Append(@" BuildSetting()
+                        .Append(settingType)
+                        .Append(@" BuildSetting()
         {
-            var setting = new ")
-                    .Append(settingType)
-                    .Append(@"();
+            ")
+                        .Append(settingType)
+                        .Append(" setting = new ")
+                        .Append(settingType)
+                        .Append(@"();");
+
+                    code.Append(@"
 
             ").Append(configMethodName).Append(@"() 
                 .GetSection(""").Append(settingPath).Append(@""")                
@@ -265,7 +290,8 @@ using global::Microsoft.Extensions.Configuration;
             return setting;
         }
     }
-");
+"); 
+                }
             }
 
             code.Append(@"

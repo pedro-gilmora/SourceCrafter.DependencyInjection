@@ -42,7 +42,10 @@ namespace SourceCrafter.DependencyInjection.Tests
         }
     }
 
-    public class Database([JsonSetting("AppSettings")] AppSettings config) : IDatabase, IAsyncDisposable
+    public class Database(
+        [JsonSetting("AppSettings")] AppSettings config, 
+        [JsonSetting("ConnectionStrings::DefaultConnection", key: "ConnectionString", nameFormat: "Get{0}")] string connection) 
+        : IDatabase, IAsyncDisposable
     {
         //AppSettings config = config;
 

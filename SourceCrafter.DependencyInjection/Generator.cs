@@ -8,12 +8,7 @@ using System.Collections.Generic;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.CSharp;
 using SourceCrafter.DependencyInjection.Attributes;
-
-//[assembly: InternalsVisibleTo("SourceCrafter.MappingGenerator.UnitTests")]
-namespace SourceCrafter.DependencyInjection;
-
-[AttributeUsage(AttributeTargets.Assembly)]
-public class DependencyResolverAttribute<IDependencyResolver> : Attribute;
+using SourceCrafter.DependencyInjection;
 
 [Generator]
 public class Generator : IIncrementalGenerator

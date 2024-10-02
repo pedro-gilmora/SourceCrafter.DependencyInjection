@@ -2,6 +2,8 @@
 
 using System.Text.RegularExpressions;
 
+using Xunit;
+
 namespace SourceCrafter.DependencyInjection.Tests
 {
     public enum Test { Element }

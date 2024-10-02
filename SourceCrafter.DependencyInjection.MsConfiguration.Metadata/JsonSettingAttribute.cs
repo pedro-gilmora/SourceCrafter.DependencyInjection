@@ -30,7 +30,8 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
         string path, 
         Lifetime lifetime = Lifetime.Singleton,
         string key = "",
-        string nameFormat = "Get{0}Settings"
+        string nameFormat = "Get{0}Settings",
+        string configKey = ""
     ) 
         : DependencyAttribute(lifetime, nameFormat);
 #pragma warning restore CS9113 // Parameter is unread.
