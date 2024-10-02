@@ -259,6 +259,38 @@ public class Map<TKey, TVal>
         return false;
     }
 
+    public virtual bool Contains(TKey key)
+    {
+        uint hashCode = (uint)_comparer.GetHashCode(key);
+        int i = GetBucket(hashCode);
+        var entries = _entries;
+        uint collisionCount = 0;
+        i--; // Value in _buckets is 1-based; subtract 1 from i. We do it here so it fuses with the following conditional.
+        do
+        {
+            // Test in if to drop range check for following array access
+            if ((uint)i >= (uint)entries!.Length)
+            {
+                return false;
+            }
+
+            ref var entry = ref entries[i];
+            if (entry.id == hashCode && _comparer.Equals(entry.Key, key))
+            {
+                return true;
+            }
+
+            i = entry.next;
+
+            collisionCount++;
+        } while (collisionCount <= (uint)entries.Length);
+
+        // The chain of entries forms a loop; which means a concurrent update has happened.
+        // Break out of the loop and throw, rather than looping forever.
+
+        return false;
+    }
+
     public bool TryAdd(TKey key, TVal value)
     {
         Entry<TKey, TVal>[]? entries = _entries!;

@@ -50,7 +50,7 @@ class ServiceContainerGenerator
     MemberBuilder?
         methods = null;
 
-    Action<StringBuilder>?
+    Action<StringBuilder, string>?
         singletonDisposeStatments = null,
         disposeStatments = null;
 
@@ -84,7 +84,7 @@ class ServiceContainerGenerator
                 attr.AttributeClass,
                 (AttributeSyntax)attr.ApplicationSyntaxReference!.GetSyntax(),
                 attr.AttributeConstructor?.Parameters,
-                out disposability,
+                ref disposability,
                 providerClass);
         }
 
@@ -95,7 +95,7 @@ class ServiceContainerGenerator
         INamedTypeSymbol originalAttrClass,
         AttributeSyntax attrSyntax,
         ImmutableArray<IParameterSymbol>? parameters,
-        out Disposability disposability,
+        ref Disposability disposability,
         INamedTypeSymbol providerClass)
     {
         disposability = default;
@@ -127,9 +127,16 @@ class ServiceContainerGenerator
             }
         }
 
-        var thisDisposability = depInfo.ImplType.GetDisposability();
+        Disposability thisDisposability = Disposability.None;
 
-        if (thisDisposability > disposability) disposability = thisDisposability;
+        if (depInfo.IsCached)
+        {
+            thisDisposability = depInfo.ImplType.GetDisposability();
+
+            if (thisDisposability > disposability) disposability = thisDisposability;
+
+            if (depInfo.Disposability > disposability) disposability = depInfo.Disposability;
+        }
 
         var typeName = depInfo.ImplType.ToGlobalNamespaced();
 
@@ -165,10 +172,11 @@ class ServiceContainerGenerator
                 CacheField = "_" + methodName.Camelize(),
                 Factory = depInfo.Factory,
                 FactoryKind = depInfo.FactoryKind,
-                Disposability = thisDisposability,
+                Disposability = (Disposability)Math.Max((byte)thisDisposability, (byte)depInfo.Disposability),
                 IsResolved = true,
                 ResolvedBy = Generator.generatorGuid,
                 Attributes = depInfo.ImplType.GetAttributes(),
+                RequiresDisposabilityCast = thisDisposability is Disposability.None && depInfo.Disposability is not Disposability.None,
                 IsAsync = isAsync,
                 ContainerType = providerClass,
                 IsCached = depInfo.IsCached,
@@ -195,54 +203,6 @@ class ServiceContainerGenerator
 
     void ResolveService(ServiceDescriptor service)
     {
-        if (service.NotRegistered || service.IsCancelTokenParam) return;
-
-        if (interfacesRegistry.Add((service.Key, service.ExportTypeName)))
-        {
-            interfaces += service.AddInterface;
-        }
-
-        if (service.Lifetime is Lifetime.Scoped && !hasScopedService) hasScopedService = true;
-
-        if (service.Lifetime is not Lifetime.Transient)
-        {
-            if (service.IsAsync)
-            {
-                UpdateAsyncStatus();
-            }
-            else if (!requiresLocker)
-            {
-                requiresLocker = true;
-            }
-
-            switch (service.Disposability)
-            {
-                case Disposability.AsyncDisposable:
-
-                    if (service.Lifetime is Lifetime.Scoped)
-                    {
-                        disposeStatments += service.BuildDisposeAsyncStatment;
-                    }
-                    else
-                    {
-                        singletonDisposeStatments += service.BuildDisposeAsyncStatment;
-                    }
-
-                    break;
-                case Disposability.Disposable:
-
-                    if (service.Lifetime is Lifetime.Scoped)
-                    {
-                        disposeStatments += service.BuildDisposeStatment;
-                    }
-                    else
-                    {
-                        singletonDisposeStatments += service.BuildDisposeStatment;
-                    }
-                    break;
-            }
-        }
-
         service.CheckParamsDependencies(
             _model,
             discoveredServices,
@@ -251,13 +211,69 @@ class ServiceContainerGenerator
             UpdateAsyncStatus,
             _compilation,
             _diagnostics,
-            Generator.generatorGuid);
+            Generator.generatorGuid,
+            OnFoundService,
+            ref disposability);
 
-        if (service.Disposability > disposability) disposability = service.Disposability;
+        OnFoundService(service);
 
-        if (service is { IsExternal:true } or {IsFactory:true, IsCached:false }) return;
 
-        methods += service.BuildResolver;
+        void OnFoundService(ServiceDescriptor foundService)
+        {
+            if (foundService.NotRegistered || foundService.IsCancelTokenParam) return;
+
+            if (interfacesRegistry.Add((foundService.Key, foundService.ExportTypeName)))
+            {
+                interfaces += foundService.AddInterface;
+            }
+
+            if (foundService.Lifetime is Lifetime.Scoped && !hasScopedService) hasScopedService = true;
+
+            if (foundService.Lifetime is not Lifetime.Transient)
+            {
+                if (foundService.IsAsync)
+                {
+                    UpdateAsyncStatus();
+                }
+                else if (!requiresLocker)
+                {
+                    requiresLocker = true;
+                }
+
+                switch (foundService.Disposability)
+                {
+                    case Disposability.AsyncDisposable:
+
+                        if (foundService.Lifetime is Lifetime.Scoped)
+                        {
+                            disposeStatments += foundService.BuildDisposeAsyncStatment;
+                        }
+                        else
+                        {
+                            singletonDisposeStatments += foundService.BuildDisposeAsyncStatment;
+                        }
+
+                        break;
+                    case Disposability.Disposable:
+
+                        if (foundService.Lifetime is Lifetime.Scoped)
+                        {
+                            disposeStatments += foundService.BuildDisposeStatment;
+                        }
+                        else
+                        {
+                            singletonDisposeStatments += foundService.BuildDisposeStatment;
+                        }
+                        break;
+                }
+            }
+
+            if (foundService.Disposability > disposability) disposability = foundService.Disposability;
+
+            if (foundService is { IsExternal: true } or { IsFactory: true, IsCached: false }) return;
+
+            methods += foundService.BuildResolver;
+        }
     }
 
     private void UpdateAsyncStatus()
@@ -455,21 +471,37 @@ class ServiceContainerGenerator
 
             if (!buildingInterface)
             {
-                disposeStatments?.Invoke(code);
-
                 if (hasScopedService)
                 {
-                    if (disposeStatments != null)
+                    code.Append(@"
+		if(isScoped)
+        {");
+
+                    disposeStatments?.Invoke(code, "   ");
+
+                    if (singletonDisposeStatments is null)
                     {
-                        code.AppendLine();
+                        code.Append(@"
+		}");
                     }
+                    else
+                    {
+                        code.Append(@"
+		}
+		else
+        {");
+
+                    singletonDisposeStatments?.Invoke(code, "    ");
 
                     code.Append(@"
-		if(isScoped) return;
-");
-                }
+		}");
+                    }
 
-                singletonDisposeStatments?.Invoke(code);
+                }
+                else
+                {
+                    singletonDisposeStatments?.Invoke(code, "");
+                }
 
                 code.Append(@"
 	}

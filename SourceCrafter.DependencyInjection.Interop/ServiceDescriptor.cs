@@ -6,6 +6,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -52,6 +53,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
     public ITypeSymbol ContainerType = null!;
     public bool NotRegistered = false;
     public bool IsAsync = false;
+    public bool RequiresDisposabilityCast = false;
     internal bool IsCancelTokenParam;
     public bool IsExternal;
     public Guid ResolvedBy;
@@ -60,23 +62,6 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
 
     private bool? isFactory;
     internal bool IsFactory => isFactory ??= Factory is not null;
-
-
-    internal readonly static Dictionary<int, string>
-        genericParamNames = new()
-        {
-            {0, KeyParamName},
-            {1, FactoryOrInstanceParamName },
-            {2, CacheParamName }
-        },
-        paramNames = new()
-        {
-            {0, KeyParamName },
-            {1, ImplParamName },
-            {2, IfaceParamName },
-            {3, FactoryOrInstanceParamName },
-            {4, CacheParamName }
-        };
 
     private bool? isNamed;
 
@@ -436,7 +421,9 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
         Action updateAsyncContainerStatus,
         Compilation compilation,
         Set<Diagnostic> diagnostics,
-        Guid generatorGuid)
+        Guid generatorGuid,
+        Action<ServiceDescriptor> onFoundService,
+        ref Disposability disposability)
     {
         if (GetParameters() is not { IsDefaultOrEmpty: false } parameters) return;
 
@@ -502,21 +489,29 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
                         continue;
                     }
 
-                    var disposability = paramType.GetDisposability();
+                    Disposability thisDisposability = Disposability.None;
 
-                    if (disposability > Disposability) Disposability = disposability;
+                    if (depInfo.IsCached)
+                    {
+                        thisDisposability = depInfo.ImplType.GetDisposability();
+
+                        if (thisDisposability > disposability) disposability = thisDisposability;
+
+                        if (depInfo.Disposability > disposability) disposability = depInfo.Disposability;
+                    }
 
                     var methodName = GetMethodName(isExternal, lifetime, depInfo, isAsync, methodsRegistry, dependencyRegistry);
 
-                    found = new(realParamType, paramTypeName, paramTypeName, key, null)
+                    found = new(realParamType, paramTypeName, paramTypeName, depInfo.Key, null)
                     {
                         Lifetime = lifetime,
-                        Key = key,
+                        Key = depInfo.Key,
+                        RequiresDisposabilityCast = thisDisposability is Disposability.None && depInfo.Disposability is not Disposability.None, 
                         ResolverMethodName = methodName,
                         CacheField = "_" + methodName.Camelize(),
                         Factory = depInfo.Factory,
                         FactoryKind = depInfo.FactoryKind,
-                        Disposability = disposability,
+                        Disposability = (Disposability)Math.Max((byte)thisDisposability, (byte)depInfo.Disposability),
                         IsResolved = true,
                         ResolvedBy = generatorGuid,
                         Attributes = realParamType.GetAttributes(),
@@ -535,7 +530,11 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
                         updateAsyncContainerStatus,
                         compilation,
                         diagnostics,
-                        generatorGuid);
+                        generatorGuid, 
+                        onFoundService,
+                        ref disposability);
+
+                    onFoundService(found);
 
                     resolvedDeps++;
                 }
@@ -549,8 +548,9 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
             {
                 foreach (var lifetime in lifetimes)
                 {
-                    if (entries.TryGetValue((lifetime, paramTypeName, null), out _))
+                    if (entries.TryGetValue((lifetime, paramTypeName, null), out var found) || entries.TryGetValue((lifetime, paramTypeName, ""), out found))
                     {
+                        BuildParams += found.BuildAsParam;
                         resolvedDeps++;
                         break;
                     }
@@ -697,22 +697,33 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
         code.Append(')');
     }
 
-    internal void BuildDisposeAsyncStatment(StringBuilder code)
+    internal void BuildDisposeAsyncStatment(StringBuilder code, string indent)
     {
-        code.Append(@"
-		if(")
+        code.AppendFormat(@"
+{0}        if (", indent);
+
+        if (RequiresDisposabilityCast)
+            code.Append(CacheField).Append(" is global::System.IAsyncDisposable ").Append(CacheField).Append("AsyncDisposable) await ")
             .Append(CacheField)
+            .Append("AsyncDisposable.DisposeAsync();");
+        else
+            code.Append(CacheField)
             .Append(" is not null) await ")
             .Append(CacheField)
             .Append(".DisposeAsync();");
     }
 
-    internal void BuildDisposeStatment(StringBuilder code)
+    internal void BuildDisposeStatment(StringBuilder code, string indent)
     {
-        code.Append(@"
-		")
-            .Append(CacheField)
-            .Append("?.Dispose();");
+        code.AppendFormat(@"
+{0}        ", indent);
+
+        if (RequiresDisposabilityCast)
+            code.Append('(').Append(CacheField).Append(" as global::System.IDisposable)");
+        else
+            code.Append(CacheField);
+        
+        code.Append("?.Dispose();");
     }
 
     public static void GetDependencyInfo(
@@ -787,6 +798,12 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
                         : param.HasExplicitDefaultValue && (bool)param.ExplicitDefaultValue!;
 
                     continue;
+
+                case "disposability" when param.HasExplicitDefaultValue:
+
+                    depInfo.Disposability = (Disposability)(byte)param.ExplicitDefaultValue!;
+
+                    continue;
             }
         }
     }
@@ -837,6 +854,72 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
 
         return null;
     }
+
+    internal void AddBuilders(
+        HashSet<(string?, string)> interfacesRegistry,
+        ref CommaSeparateBuilder? interfaces,
+        ref bool hasScopedService,
+        ref Action<StringBuilder, string>? disposeStatments,
+        ref Action<StringBuilder, string>? singletonDisposeStatments,
+        ref bool requiresLocker,
+        ref MemberBuilder? methods,
+        ref Disposability disposability,
+        Action updateAsyncStatus)
+    {
+        if (NotRegistered || IsCancelTokenParam) return;
+
+        if (interfacesRegistry.Add((Key, ExportTypeName)))
+        {
+            interfaces += AddInterface;
+        }
+
+        if (Lifetime is Lifetime.Scoped && !hasScopedService) hasScopedService = true;
+
+        if (Lifetime is not Lifetime.Transient)
+        {
+            if (IsAsync)
+            {
+                updateAsyncStatus();
+            }
+            else if (!requiresLocker)
+            {
+                requiresLocker = true;
+            }
+
+            switch (Disposability)
+            {
+                case Disposability.AsyncDisposable:
+
+                    if (Lifetime is Lifetime.Scoped)
+                    {
+                        disposeStatments += BuildDisposeAsyncStatment;
+                    }
+                    else
+                    {
+                        singletonDisposeStatments += BuildDisposeAsyncStatment;
+                    }
+
+                    break;
+                case Disposability.Disposable:
+
+                    if (Lifetime is Lifetime.Scoped)
+                    {
+                        disposeStatments += BuildDisposeStatment;
+                    }
+                    else
+                    {
+                        singletonDisposeStatments += BuildDisposeStatment;
+                    }
+                    break;
+            }
+        }
+
+        if (Disposability > disposability) disposability = Disposability;
+
+        if (this is { IsExternal: true } or { IsFactory: true, IsCached: false }) return;
+
+        methods += BuildResolver;
+    }
 }
 
 public record struct DependencySlimInfo(ITypeSymbol? IFaceType,
@@ -846,4 +929,5 @@ public record struct DependencySlimInfo(ITypeSymbol? IFaceType,
     string? Key,
     string? NameFormat,
     ImmutableArray<IParameterSymbol> DefaultParamValues,
-    bool IsCached);
+    bool IsCached,
+    Disposability Disposability);

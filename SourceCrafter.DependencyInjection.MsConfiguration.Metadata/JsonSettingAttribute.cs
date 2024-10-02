@@ -20,7 +20,8 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
         bool optional = true,
         bool reloadOnChange = true,
         string nameFormat = "Get{0}Configuration",
-        bool handleEnviroments = true
+        bool handleEnviroments = true,
+        Disposability disposability = Disposability.Disposable
     )
         : SingletonAttribute<IConfiguration>(nameFormat);
     //: SingletonAttribute<IConfiguration>(factoryOrInstance: nameof(ConfigurationResolver.GetJsonConfiguration));
@@ -33,6 +34,16 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
         string nameFormat = "Get{0}Settings",
         string configKey = ""
     ) 
+        : DependencyAttribute(lifetime, nameFormat);
+
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface, AllowMultiple = true)]
+    public sealed class JsonSettingAttribute<T>(
+        string path,
+        Lifetime lifetime = Lifetime.Singleton,
+        string key = "",
+        string nameFormat = "Get{0}Settings",
+        string configKey = ""
+    )
         : DependencyAttribute(lifetime, nameFormat);
 #pragma warning restore CS9113 // Parameter is unread.
 

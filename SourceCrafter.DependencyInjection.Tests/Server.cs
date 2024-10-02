@@ -16,6 +16,8 @@ namespace SourceCrafter.DependencyInjection.Tests
     //[Scoped<IDatabase, Database>(Main.App)]
     [Scoped<AuthService>]
     [Transient<int>("Count", nameof(ResolveAsync))]
+    [JsonSetting<AppSettings>("AppSettings")]
+    [JsonSetting<string>("ConnectionStrings::DefaultConnection", key: "ConnectionString", nameFormat: "Get{0}")]
     //[Transient<string>(Main.App, nameof(Name))]
     public partial class Server
     {
@@ -31,7 +33,7 @@ namespace SourceCrafter.DependencyInjection.Tests
         }
     }
 
-    public class AuthService([Singleton] IDatabase application, [Transient("Count")] int o) :IDisposable
+    public class AuthService([Singleton] IDatabase application, [Transient("Count")] int o) : IDisposable
     {
         public int O => o;
         public IDatabase Database { get; } = application;
@@ -43,9 +45,8 @@ namespace SourceCrafter.DependencyInjection.Tests
     }
 
     public class Database(
-        [JsonSetting("AppSettings")] AppSettings config, 
-        [JsonSetting("ConnectionStrings::DefaultConnection", key: "ConnectionString", nameFormat: "Get{0}")] string connection) 
-        : IDatabase, IAsyncDisposable
+        AppSettings config,
+        [Singleton("ConnectionString")] string connection) : IDatabase, IAsyncDisposable
     {
         //AppSettings config = config;
 
