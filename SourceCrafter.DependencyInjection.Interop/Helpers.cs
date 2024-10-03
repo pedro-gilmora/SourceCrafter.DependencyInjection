@@ -341,7 +341,7 @@ namespace SourceCrafter.DependencyInjection
                         || methodsRegistry.Add(idOut = $"{lifeTime}{id}For{key}")))
                 || methodsRegistry.Add(idOut = $"{lifeTime}{id}");
 
-            return idOut;
+            return idOut.Replace(" ", "");
 
             static string Sanitize(ITypeSymbol type)
             {
