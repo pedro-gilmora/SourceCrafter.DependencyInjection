@@ -19,9 +19,9 @@ public class Generator : IIncrementalGenerator
 
     ~Generator()
     {
-
+        server?.Stop();
     }
-
+    static object _lock = new();
     static DependenciesServer? server;
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -30,7 +30,7 @@ public class Generator : IIncrementalGenerator
         System.Diagnostics.Debugger.Launch();
 #endif
 
-    var resolvers = context.CompilationProvider.SelectMany((comp, _) => GetResolvers(comp)).Collect();
+        var resolvers = context.CompilationProvider.SelectMany((comp, _) => GetResolvers(comp)).Collect();
 
         var getServiceCheck = context.SyntaxProvider
                 .CreateSyntaxProvider(
@@ -54,45 +54,71 @@ public class Generator : IIncrementalGenerator
             .Combine(servicesContainers),
             //.Combine(getExternal), 
             static (p, info) =>
-        {
-            var (compilation, servicesContainers) = info;
-
-            Dictionary<string, Map<(Lifetime, string, string?), ServiceDescriptor>> containers = new();
-
-            server?.Stop();
-
-            server = new(containers);
-
-            server.Start();
-
-            Map<string, byte> uniqueName = new(StringComparer.Ordinal);
-
-            var errorsSb = new StringBuilder("/*").AppendLine();
-
-            int start = errorsSb.Length;
-
-            Set<Diagnostic> diagnostics = Set<Diagnostic>.Create(e => e.Location.GetHashCode());
-
-            try
             {
-                foreach (var serviceContainer in servicesContainers)
+                var (compilation, servicesContainers) = info;
+
+                Dictionary<string, Map<(Lifetime, string, string?), ServiceDescriptor>> containers = new();
+
+                if(!EnsureDependenciesServer(p, containers)) return;
+
+                server!.Start();
+
+                Map<string, byte> uniqueName = new(StringComparer.Ordinal);
+
+                var errorsSb = new StringBuilder("/*").AppendLine();
+
+                int start = errorsSb.Length;
+
+                Set<Diagnostic> diagnostics = Set<Diagnostic>.Create(e => e.Location.GetHashCode());
+
+                try
                 {
-                    ServiceContainerGenerator
-                        .Parse(compilation, serviceContainer.SemanticModel, serviceContainer.Class, diagnostics)
-                        .Build(containers, [], uniqueName, p.AddSource);
-                }
+                    foreach (var serviceContainer in servicesContainers)
+                    {
+                        ServiceContainerGenerator
+                            .Parse(compilation, serviceContainer.SemanticModel, serviceContainer.Class, diagnostics)
+                            .Build(containers, [], uniqueName, p.AddSource);
+                    }
 
-                foreach(var item in diagnostics) p.ReportDiagnostic(item);
-            }
-            catch (Exception e)
-            {
-                errorsSb.AppendLine(e.ToString());
-            }
-            if (errorsSb.Length > start)
-            {
-                p.AddSource("errors", errorsSb.Append("*/").ToString());
-            }
-        });
+                    foreach (var item in diagnostics) p.ReportDiagnostic(item);
+                }
+                catch (Exception e)
+                {
+                    errorsSb.AppendLine(e.ToString());
+                }
+                if (errorsSb.Length > start)
+                {
+                    p.AddSource("errors", errorsSb.Append("*/").ToString());
+                }
+            });
+    }
+
+    private static bool EnsureDependenciesServer(SourceProductionContext p, Dictionary<string, Map<(Lifetime, string, string?), ServiceDescriptor>> containers)
+    {
+        try
+        {
+            if (server is null)
+                lock (_lock)
+                    (server ??= new(containers))._containers = containers;
+            else
+                server._containers = containers;
+            
+            return true;
+        }
+        catch (Exception ex)
+        {
+            p.ReportDiagnostic(Diagnostic.Create(
+                new DiagnosticDescriptor(
+                    "SCDI0000",
+                    "Dependencies server could not initiate.",
+                    $"Error: {ex}",
+                    "Operability",
+                    DiagnosticSeverity.Info,
+                    true),
+                null));
+
+            return false;
+        }
     }
 
     private static IEnumerable<INamedTypeSymbol> GetResolvers(Compilation comp)

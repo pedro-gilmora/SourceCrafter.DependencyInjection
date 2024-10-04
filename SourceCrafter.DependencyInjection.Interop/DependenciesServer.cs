@@ -25,13 +25,12 @@ internal class DependenciesServer
 {
     private readonly TcpListener server;
     private readonly CancellationTokenSource cancellationTokenSource;
-    private readonly Dictionary<string, DependencyMap> _containers;
+    internal Dictionary<string, DependencyMap> _containers;
 
     internal DependenciesServer(Dictionary<string, DependencyMap> containers)
     {
         cancellationTokenSource = new CancellationTokenSource();
         server = TcpListener.Create(9995);
-        _containers = containers;
     }
 
     internal void Start()
