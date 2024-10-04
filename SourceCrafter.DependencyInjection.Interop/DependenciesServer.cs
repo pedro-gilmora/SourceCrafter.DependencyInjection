@@ -31,6 +31,7 @@ internal class DependenciesServer
     {
         cancellationTokenSource = new CancellationTokenSource();
         server = TcpListener.Create(9995);
+        server.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
         Start();
     }
 
