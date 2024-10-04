@@ -3,11 +3,8 @@ using System;
 using System.Linq;
 using System.Reflection;
 using System.Text;
-using Microsoft.CodeAnalysis.Text;
 using System.Collections.Generic;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.CSharp;
-using SourceCrafter.DependencyInjection.Attributes;
 using SourceCrafter.DependencyInjection;
 using SourceCrafter.DependencyInjection.Interop;
 
@@ -50,42 +47,44 @@ public class Generator : IIncrementalGenerator
                     (t, c) => (t.SemanticModel, Class: (INamedTypeSymbol)t.TargetSymbol))
                 .Collect();
 
+        Dictionary<string, Map<(Lifetime, string, string?), ServiceDescriptor>> containers = [];
+
         context.RegisterSourceOutput(context.CompilationProvider
             .Combine(servicesContainers),
             //.Combine(getExternal), 
-            static (p, info) =>
+            (p, info) =>
             {
                 var (compilation, servicesContainers) = info;
 
-                Dictionary<string, Map<(Lifetime, string, string?), ServiceDescriptor>> containers = new();
-
-                if(!EnsureDependenciesServer(p, containers)) return;
-
-                server!.Start();
-
-                Map<string, byte> uniqueName = new(StringComparer.Ordinal);
-
                 var errorsSb = new StringBuilder("/*").AppendLine();
 
-                int start = errorsSb.Length;
+                int start = errorsSb.Length, attempts = 2;
 
-                Set<Diagnostic> diagnostics = Set<Diagnostic>.Create(e => e.Location.GetHashCode());
-
-                try
-                {
-                    foreach (var serviceContainer in servicesContainers)
+                while (--attempts > -1)
+                    try
                     {
-                        ServiceContainerGenerator
-                            .Parse(compilation, serviceContainer.SemanticModel, serviceContainer.Class, diagnostics)
-                            .Build(containers, [], uniqueName, p.AddSource);
+                        if (!EnsureDependenciesServer(p, containers)) continue;
+
+                        Map<string, byte> uniqueName = new(StringComparer.Ordinal);
+
+                        Set<Diagnostic> diagnostics = Set<Diagnostic>.Create(e => e.Location.GetHashCode());
+
+                        foreach (var serviceContainer in servicesContainers)
+                        {
+                            ServiceContainerGenerator
+                                .Parse(compilation, serviceContainer.SemanticModel, serviceContainer.Class, diagnostics)
+                                .Build(containers, [], uniqueName, p.AddSource);
+                        }
+
+                        foreach (var item in diagnostics) p.ReportDiagnostic(item);
+
+                        break;
+                    }
+                    catch (Exception e)
+                    {
+                        errorsSb.AppendLine(e.ToString());
                     }
 
-                    foreach (var item in diagnostics) p.ReportDiagnostic(item);
-                }
-                catch (Exception e)
-                {
-                    errorsSb.AppendLine(e.ToString());
-                }
                 if (errorsSb.Length > start)
                 {
                     p.AddSource("errors", errorsSb.Append("*/").ToString());
@@ -99,10 +98,10 @@ public class Generator : IIncrementalGenerator
         {
             if (server is null)
                 lock (_lock)
-                    (server ??= new(containers))._containers = containers;
+                    (server ??= new())._containers = containers;
             else
                 server._containers = containers;
-            
+
             return true;
         }
         catch (Exception ex)
