@@ -14,10 +14,12 @@ using System.Text.RegularExpressions;
 using System.Runtime.InteropServices.ComTypes;
 using static SourceCrafter.DependencyInjection.Extensions;
 using System.Threading;
+using SourceCrafter.DependencyInjection.Attributes;
 
 [Generator]
 public class Generator : IIncrementalGenerator
 {
+    private const string IConfigurationType = "global::Microsoft.Extensions.Configuration.IConfiguration";
     internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
     readonly static Guid generatorGuid = new("54B00B9C-7CF8-45B2-81FC-361B7F5026EB");
 
@@ -102,9 +104,13 @@ public class Generator : IIncrementalGenerator
         Map<string, string> files = new(StringComparer.Ordinal);
         HashSet<string> keys = new(StringComparer.Ordinal);
 
+        DependenciesClient dependencies = new();
+
         foreach (var (model, container) in containers)
         {
             var attrs = container.GetAttributes();
+
+            var containerTypeName = container.ToGlobalNamespaced();
 
             StringBuilder code = new(@"#nullable enable
 using global::Microsoft.Extensions.Configuration;
@@ -140,8 +146,18 @@ using global::Microsoft.Extensions.Configuration;
 
                         if (fileExists) continue;
 
-                        fileName = Path.GetFileNameWithoutExtension(fileName);
+                        //fileName = Path.GetFileNameWithoutExtension(fileName);
 
+                        //string? methodCall;
+                        //try
+                        //{
+                        //    methodCall = dependencies.GetDependency(containerTypeName, Lifetime.Singleton, IConfigurationType, key);
+                        //}
+                        //catch (Exception)
+                        //{
+                        //    methodCall = null;
+                        //    continue;
+                        //}
                         var nameFormat = (string)configAttr.ConstructorArguments[4].Value!;
 
                         configMethodName = nameFormat.Replace("{0}", key).RemoveDuplicates();
@@ -156,14 +172,14 @@ using global::Microsoft.Extensions.Configuration;
                         code.Append(@"
     ").Append(generatedCodeAttribute).Append(@"
     private static ")
-                            .Append("global::Microsoft.Extensions.Configuration.IConfiguration")
+                            .Append(IConfigurationType)
                             .Append(@"? _")
                             .Append(fieldName)
                             .Append(@";
 
     ").Append(generatedCodeAttribute).Append(@"
     private static ")
-                            .Append("global::Microsoft.Extensions.Configuration.IConfiguration")
+                            .Append(IConfigurationType)
                             .Append(@" ")
                             .Append(configMethodName)
                             .Append(@"()

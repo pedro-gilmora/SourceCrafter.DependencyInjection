@@ -9,6 +9,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.CSharp;
 using SourceCrafter.DependencyInjection.Attributes;
 using SourceCrafter.DependencyInjection;
+using SourceCrafter.DependencyInjection.Interop;
 
 [Generator]
 public class Generator : IIncrementalGenerator
@@ -16,13 +17,20 @@ public class Generator : IIncrementalGenerator
     internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
     internal readonly static Guid generatorGuid = new("31C54896-DE65-4FDC-8EBA-5A169A6E3CBB");
 
+    ~Generator()
+    {
+
+    }
+
+    static DependenciesServer? server;
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
 #if DEBUG_SG
         System.Diagnostics.Debugger.Launch();
 #endif
 
-        var resolvers = context.CompilationProvider.SelectMany((comp, _) => GetResolvers(comp)).Collect();
+    var resolvers = context.CompilationProvider.SelectMany((comp, _) => GetResolvers(comp)).Collect();
 
         var getServiceCheck = context.SyntaxProvider
                 .CreateSyntaxProvider(
@@ -49,30 +57,40 @@ public class Generator : IIncrementalGenerator
         {
             var (compilation, servicesContainers) = info;
 
+            Dictionary<string, Map<(Lifetime, string, string?), ServiceDescriptor>> containers = new();
+
+            server?.Stop();
+
+            server = new(containers);
+
+            server.Start();
+
             Map<string, byte> uniqueName = new(StringComparer.Ordinal);
 
-            var sb = new StringBuilder("/*").AppendLine();
-            int start = sb.Length;
+            var errorsSb = new StringBuilder("/*").AppendLine();
+
+            int start = errorsSb.Length;
 
             Set<Diagnostic> diagnostics = Set<Diagnostic>.Create(e => e.Location.GetHashCode());
 
             try
             {
-                foreach (var item in servicesContainers)
+                foreach (var serviceContainer in servicesContainers)
                 {
-                    new ServiceContainerGenerator(compilation, item.SemanticModel, item.Class, diagnostics)
-                        .TryBuild([], uniqueName, p.AddSource);
+                    ServiceContainerGenerator
+                        .Parse(compilation, serviceContainer.SemanticModel, serviceContainer.Class, diagnostics)
+                        .Build(containers, [], uniqueName, p.AddSource);
                 }
 
                 foreach(var item in diagnostics) p.ReportDiagnostic(item);
             }
             catch (Exception e)
             {
-                sb.AppendLine(e.ToString());
+                errorsSb.AppendLine(e.ToString());
             }
-            if (sb.Length > start)
+            if (errorsSb.Length > start)
             {
-                p.AddSource("errors", sb.Append("*/").ToString());
+                p.AddSource("errors", errorsSb.Append("*/").ToString());
             }
         });
     }

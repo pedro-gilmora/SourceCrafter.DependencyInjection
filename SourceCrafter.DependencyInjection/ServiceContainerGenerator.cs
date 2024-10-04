@@ -61,8 +61,15 @@ class ServiceContainerGenerator
         hasAsyncService = false*/;
 
     Disposability disposability = 0;
+
+    public static ServiceContainerGenerator Parse(
+        Compilation compilation,
+        SemanticModel model,
+        INamedTypeSymbol providerClass,
+        Set<Diagnostic> diagnostics) => new(compilation, model, providerClass, diagnostics);
+
     //unify attribute reading
-    public ServiceContainerGenerator(
+    ServiceContainerGenerator(
         Compilation compilation,
         SemanticModel model,
         INamedTypeSymbol providerClass,
@@ -301,9 +308,15 @@ class ServiceContainerGenerator
 
     //TODO: add cancel token
 
-    public void TryBuild(ImmutableArray<ITypeSymbol> usages, Map<string, byte> uniqueName, Action<string, string> addSource)
+    public void Build(
+        Dictionary<string, DependencyMap> containers, 
+        ImmutableArray<ITypeSymbol> usages, 
+        Map<string, byte> uniqueName, 
+        Action<string, string> addSource)
     {
         if (discoveredServices.IsEmpty /*interfaces == null*/) return;
+
+        containers[providerTypeName] = discoveredServices;
 
         StringBuilder code = new(@"#nullable enable
 ");

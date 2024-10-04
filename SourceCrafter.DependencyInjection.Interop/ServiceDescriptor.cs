@@ -661,13 +661,18 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
     {
         if (useIComma.Exchange(true)) code.Append(", ");
 
+        BuildValue(code);
+    }
+
+    internal     void BuildValue(StringBuilder code)
+    {
         if (IsAsync) code.Append("await ");
 
-        if(IsFactory)
+        if (IsFactory)
         {
             BuildFactoryCaller(code);
         }
-        else if(!IsExternal && Lifetime is Lifetime.Transient)
+        else if (!IsExternal && Lifetime is Lifetime.Transient)
         {
             BuildInstance(code);
         }
