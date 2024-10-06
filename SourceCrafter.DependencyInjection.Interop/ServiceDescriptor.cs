@@ -566,7 +566,8 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
                     ExportTypeName));
         }
     }
-    public static string GetMethodName(bool isExternal, Lifetime lifetime, DependencySlimInfo depInfo, bool isAsync, HashSet<string> methodsRegistry, DependencyNamesMap dependencyRegistry)
+
+    internal static string GetMethodName(bool isExternal, Lifetime lifetime, DependencySlimInfo depInfo, bool isAsync, HashSet<string> methodsRegistry, DependencyNamesMap dependencyRegistry)
     {
         var identifier = depInfo.NameFormat is not null
             ? string.Format(depInfo.NameFormat, depInfo.Key.Pascalize()!).RemoveDuplicates()
@@ -580,7 +581,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         return identifier;
     }
 
-    internal static Lifetime? GetLifetimeFromCtor(ref INamedTypeSymbol attrClass, ref bool isExternal, AttributeSyntax attrSyntax)
+    public static Lifetime? GetLifetimeFromCtor(ref INamedTypeSymbol attrClass, ref bool isExternal, AttributeSyntax attrSyntax)
     {
         var lifetime = GetLifetimeFromSyntax(attrSyntax);
 
@@ -731,7 +732,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         code.Append("?.Dispose();");
     }
 
-    internal static bool TryGetDependencyInfo(
+    public static bool TryGetDependencyInfo(
         SemanticModel model,
         ImmutableArray<ITypeSymbol> attrParamTypes,
         SeparatedSyntaxList<AttributeArgumentSyntax> attrArgsSyntax,
