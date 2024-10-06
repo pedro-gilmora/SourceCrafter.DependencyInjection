@@ -21,9 +21,8 @@ public class Generator : IIncrementalGenerator
 
     ~Generator()
     {
-        DependenciesServer.Server?.Stop();
+        Dependencies.Clear();
     }
-    static object _lock = new();
     //static DependenciesServer? server;
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -92,8 +91,22 @@ public class Generator : IIncrementalGenerator
                 var errorsSb = new StringBuilder("/*").AppendLine();
 
                 int start = errorsSb.Length;
-                
-                if (!EnsureDependenciesServer(p, containers)) return;
+
+                if (!Dependencies.EnsureDependenciesServer(p, containers, out string error)) 
+                {
+                    p.ReportDiagnostic(
+                        Diagnostic.Create(
+                            new DiagnosticDescriptor(
+                                "SCDI0000",
+                                "Dependencies server could not initiate.",
+                                $"Error: {error}",
+                                "Operability",
+                                DiagnosticSeverity.Info,
+                                true),
+                            null));
+
+                    return; 
+                }
 
                 try
                 {
@@ -130,41 +143,6 @@ public class Generator : IIncrementalGenerator
                     p.AddSource("errors", errorsSb.Append("*/").ToString());
                 }
             });
-    }
-
-    private static bool EnsureDependenciesServer(SourceProductionContext p, Dictionary<string, DependencyMap> containers)
-    {        
-        int attempts = 2;
-
-        while (attempts-- > -1)
-            try
-            {
-                if (DependenciesServer.Server is null)
-                    lock (_lock) (DependenciesServer.Server ??= new())._containers = containers;
-                else
-                    DependenciesServer.Server._containers = containers;
-
-                return true;
-            }
-            catch(Exception ex)
-            {
-                if (attempts == 0)
-                {
-                    p.ReportDiagnostic(Diagnostic.Create(
-                        new DiagnosticDescriptor(
-                            "SCDI0000",
-                            "Dependencies server could not initiate.",
-                            $"Error: {ex}",
-                            "Operability",
-                            DiagnosticSeverity.Info,
-                            true),
-                        null)); 
-                    
-                    return false;
-                }
-            }
-
-        return false;
     }
 
     private static string ParseToolAndVersion()

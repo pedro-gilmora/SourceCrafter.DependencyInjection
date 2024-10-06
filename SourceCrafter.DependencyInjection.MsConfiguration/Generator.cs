@@ -18,6 +18,8 @@ public class Generator : IIncrementalGenerator
 
     static volatile bool isMsConfigInstalled = false;
 
+    
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
 #if DEBUG_SG
@@ -147,7 +149,7 @@ using global::Microsoft.Extensions.Configuration;
 #if DEBUG_SG || DEBUG
                         //var methodCall = DependenciesClient.GetDependency(containerTypeName, Lifetime.Singleton, IConfigurationType, key);
                         //var methodCall = DependenciesClient.GetDependency(containerTypeName, Lifetime.Singleton, IConfigurationType, key);
-                        var method = DependenciesServer.GetDependency(containerTypeName, Lifetime.Singleton, configTypeName, key);
+                        var method = Dependencies.GetDependency(containerTypeName, Lifetime.Singleton, configTypeName, key);
 
                             //DependenciesClient
 #endif
