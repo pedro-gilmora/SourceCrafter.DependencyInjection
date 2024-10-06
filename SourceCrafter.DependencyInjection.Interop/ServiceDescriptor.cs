@@ -11,16 +11,16 @@ using System.Text;
 
 namespace SourceCrafter.DependencyInjection.Interop;
 
-public delegate void CommaSeparateBuilder(ref bool useIComma, StringBuilder code);
-public delegate void ValueBuilder(StringBuilder code);
-public delegate void MemberBuilder(StringBuilder code, bool isImplementation, string generatedCodeAttribute);
-public delegate void ParamsBuilder(StringBuilder code);
+internal delegate void CommaSeparateBuilder(ref bool useIComma, StringBuilder code);
+internal delegate void ValueBuilder(StringBuilder code);
+internal delegate void MemberBuilder(StringBuilder code, bool isImplementation, string generatedCodeAttribute);
+internal delegate void ParamsBuilder(StringBuilder code);
 
-public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullName, string? key, ITypeSymbol? _interface = null)
+public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullName, string key, ITypeSymbol? _interface = null)
 {
     static readonly Lifetime[] lifetimes = [Lifetime.Singleton, Lifetime.Scoped, Lifetime.Transient];
 
-    public const string
+    internal const string
         CancelTokenFQMetaName = "System.Threading.CancellationToken",
         EnumFQMetaName = "global::System.Enum",
         KeyParamName = "key",
@@ -36,36 +36,36 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         ServiceContainerAttr = "global::SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute";
 
     public string FullTypeName = null!;
-    public string ResolverMethodName = null!;
-    public string CacheField = null!;
-    public ITypeSymbol Type = type;
-    public ITypeSymbol? Interface = _interface;
-    public ISymbol? Factory;
-    public SymbolKind FactoryKind;
+    internal string ResolverMethodName = null!;
+    internal string CacheField = null!;
+    internal ITypeSymbol Type = type;
+    internal ITypeSymbol? Interface = _interface;
+    internal ISymbol? Factory;
+    internal SymbolKind FactoryKind;
     public Lifetime Lifetime = Lifetime.Singleton;
     public bool IsCached = true;
-    public string? Key = key;
+    public string Key = key;
     public Disposability Disposability;
-    //public ValueBuilder GenerateValue = null!;
-    public CommaSeparateBuilder? BuildParams = null!;
-    public SemanticModel TypeModel = null!;
+    //internal ValueBuilder GenerateValue = null!;
+    internal CommaSeparateBuilder? BuildParams = null!;
+    internal SemanticModel TypeModel = null!;
     public bool IsResolved;
-    public ImmutableArray<AttributeData> Attributes = [];
-    public ITypeSymbol ContainerType = null!;
+    internal ImmutableArray<AttributeData> Attributes = [];
+    internal ITypeSymbol ContainerType = null!;
     public bool NotRegistered = false;
-    public bool RequiresDisposabilityCast = false;
-    internal bool IsCancelTokenParam;
+    internal bool RequiresDisposabilityCast = false;
+    public bool IsCancelTokenParam;
     public bool IsExternal;
     internal AttributeSyntax OriginDefinition = null!;
     internal ServiceContainer ServiceContainer = null!;
 
-    public readonly string ExportTypeName = exportTypeFullName;
+    internal readonly string ExportTypeName = exportTypeFullName;
     private bool? isFactory;
 
     private bool? isNamed;
 
    bool _isAsync = false;
-    public bool IsAsync 
+    public  bool IsAsync 
     {
         get => _isAsync;
         set {
@@ -77,7 +77,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         }
     }
 
-    internal bool IsFactory => isFactory ??= Factory is not null;
+    public bool IsFactory => isFactory ??= Factory is not null;
 
     internal bool IsKeyed => isNamed ??= Key is { Length: > 0 };
 
@@ -142,7 +142,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
 
             code.Append("    ");
 
-            code.Append("public ");
+            code.Append("internal ");
         }
         else
         {
@@ -580,7 +580,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         return identifier;
     }
 
-    public static Lifetime? GetLifetimeFromCtor(ref INamedTypeSymbol attrClass, ref bool isExternal, AttributeSyntax attrSyntax)
+    internal static Lifetime? GetLifetimeFromCtor(ref INamedTypeSymbol attrClass, ref bool isExternal, AttributeSyntax attrSyntax)
     {
         var lifetime = GetLifetimeFromSyntax(attrSyntax);
 
@@ -615,7 +615,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         }
     }
 
-    public static Lifetime? GetLifetimeFromSyntax(AttributeSyntax attribute)
+    internal static Lifetime? GetLifetimeFromSyntax(AttributeSyntax attribute)
     {
         if (attribute.ArgumentList?.Arguments
                 .FirstOrDefault(x => x.NameColon?.Name.Identifier.ValueText is "lifetime")?.Expression is MemberAccessExpressionSyntax { Name.Identifier.ValueText: { } memberName }
@@ -657,14 +657,14 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         code.Append("cancellationToken.Value");
     }
 
-    public void BuildAsParam(ref bool useIComma, StringBuilder code)
+    internal void BuildAsParam(ref bool useIComma, StringBuilder code)
     {
         if (useIComma.Exchange(true)) code.Append(", ");
 
         BuildValue(code);
     }
 
-    internal void BuildValue(StringBuilder code)
+    public void BuildValue(StringBuilder code)
     {
         if (IsAsync) code.Append("await ");
 
@@ -731,7 +731,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         code.Append("?.Dispose();");
     }
 
-    public static bool TryGetDependencyInfo(
+    internal static bool TryGetDependencyInfo(
         SemanticModel model,
         ImmutableArray<ITypeSymbol> attrParamTypes,
         SeparatedSyntaxList<AttributeArgumentSyntax> attrArgsSyntax,
