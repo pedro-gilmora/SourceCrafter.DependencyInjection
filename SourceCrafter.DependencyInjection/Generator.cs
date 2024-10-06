@@ -21,10 +21,10 @@ public class Generator : IIncrementalGenerator
 
     ~Generator()
     {
-        server?.Stop();
+        DependenciesServer.Server?.Stop();
     }
     static object _lock = new();
-    static DependenciesServer? server;
+    //static DependenciesServer? server;
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -139,10 +139,10 @@ public class Generator : IIncrementalGenerator
         while (attempts-- > -1)
             try
             {
-                if (server is null)
-                    lock (_lock) (server ??= new())._containers = containers;
+                if (DependenciesServer.Server is null)
+                    lock (_lock) (DependenciesServer.Server ??= new())._containers = containers;
                 else
-                    server._containers = containers;
+                    DependenciesServer.Server._containers = containers;
 
                 return true;
             }

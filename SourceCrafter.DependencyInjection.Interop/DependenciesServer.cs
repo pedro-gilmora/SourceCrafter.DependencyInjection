@@ -21,8 +21,9 @@ enum DepsOps
     MarkAsResolved
 }
 
-internal class DependenciesServer
+public class DependenciesServer
 {
+    internal static DependenciesServer Server = null!;
     private readonly TcpListener server;
     private readonly CancellationTokenSource cancellationTokenSource;
     internal Dictionary<string, DependencyMap> _containers = null!;
@@ -96,6 +97,8 @@ internal class DependenciesServer
                 {
                     bw.Write(true);
                     bw.Write(sb.ToString());
+                    bw.Write((byte)serviceDescriptor.Disposability);
+                    bw.Write((byte)serviceDescriptor.ServiceContainer.disposability);
                 }));
             }
             else
@@ -113,10 +116,20 @@ internal class DependenciesServer
     {
         server.Stop();
     }
+
+    public static ServiceDescriptor? GetDependency(string containerTypeName, Lifetime lifetime, string configTypeName, string key)
+    {
+        return Server._containers is { } _containers
+            && _containers.TryGetValue(containerTypeName, out var map) && map.TryGetValue((Lifetime.Singleton, configTypeName, key), out var serviceDescriptor)
+                ? serviceDescriptor
+                : null;
+    }
 }
+
+public record DependencyResult(string Invocation, Disposability Disposability, Disposability ContainerDisposability);
 public static class DependenciesClient
 {
-    public static string? GetDependency(string containerTypeName, Lifetime lifetime, string type, string? key)
+    public static DependencyResult? GetDependency(string containerTypeName, Lifetime lifetime, string type, string? key)
     {
         try
         {
@@ -139,7 +152,7 @@ public static class DependenciesClient
             }));
 
             // Read response
-            return reader.ReadBoolean() ? reader.ReadString() : null;
+            return reader.ReadBoolean() ? new(reader.ReadString(), (Disposability)reader.ReadByte(), (Disposability)reader.ReadByte()) : null;
         }
         catch (IOException)
         {

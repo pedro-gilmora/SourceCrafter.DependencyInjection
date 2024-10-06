@@ -90,6 +90,8 @@ public class Generator : IIncrementalGenerator
 
         if (!IsMsConfigInstalled(compilation, out var iConfigTypeSymbol)) return;
 
+        var configTypeName = iConfigTypeSymbol.ToGlobalNamespaced();
+
         Map<(int, Lifetime, string?), string> dependencyRegistry = new(EqualityComparer<(int, Lifetime, string?)>.Default);
 
         HashSet<string> methodsRegistry = new(StringComparer.Ordinal);
@@ -142,14 +144,20 @@ using global::Microsoft.Extensions.Configuration;
                         //string? methodCall;
                         //try
                         //{
+#if DEBUG_SG || DEBUG
                         //var methodCall = DependenciesClient.GetDependency(containerTypeName, Lifetime.Singleton, IConfigurationType, key);
-                        //}
-                        //catch (Exception)
-                        //{
-                        //    methodCall = null;
-                        //    continue;
-                        //}
-                        var nameFormat = (string)configAttr.ConstructorArguments[4].Value!;
+                        //var methodCall = DependenciesClient.GetDependency(containerTypeName, Lifetime.Singleton, IConfigurationType, key);
+                        var method = DependenciesServer.GetDependency(containerTypeName, Lifetime.Singleton, configTypeName, key);
+
+                            //DependenciesClient
+#endif
+                            //}
+                            //catch (Exception)
+                            //{
+                            //    methodCall = null;
+                            //    continue;
+                            //}
+                            var nameFormat = (string)configAttr.ConstructorArguments[4].Value!;
 
                         configMethodName = nameFormat.Replace("{0}", key).RemoveDuplicates();
 
