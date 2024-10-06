@@ -34,10 +34,10 @@
     <Analyzer Include="..\SourceCrafter.DependencyInjection.MsConfiguration\bin\$(Configuration)\netstandard2.0\SourceCrafter.DependencyInjection.MsConfiguration.dll" />
   </ItemGroup>
   <ItemGroup Condition="$(Configuration) != 'DEBUG_SG'">
-    <PackageReference Include="SourceCrafter.DependencyInjection" Version="0.24.274.9" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.Interop" Version="0.24.274.9" IsVisible="false" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="0.24.274.9" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="0.24.274.9" IsVisible="false" />
+    <PackageReference Include="SourceCrafter.DependencyInjection" Version="0.24.280.49" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.Interop" Version="0.24.280.49" IsVisible="false" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="0.24.280.49" PrivateAssets="all" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="0.24.280.49" IsVisible="false" />
   </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.json">

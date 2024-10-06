@@ -84,7 +84,7 @@ internal class DependenciesServer
             var containerFullType = reader.ReadString();
             var lifetime = (Lifetime)reader.ReadByte();
             var type = reader.ReadString();
-            var key = reader.ReadBoolean() ? null : reader.ReadString();
+            var key = reader.ReadString();
 
             if (_containers.TryGetValue(containerFullType, out var map) && map.TryGetValue((lifetime, type, key), out var serviceDescriptor))
             {
@@ -114,9 +114,9 @@ internal class DependenciesServer
         server.Stop();
     }
 }
-public class DependenciesClient
+public static class DependenciesClient
 {
-    public string? GetDependency(string containerTypeName, Lifetime lifetime, string type, string? key)
+    public static string? GetDependency(string containerTypeName, Lifetime lifetime, string type, string? key)
     {
         try
         {
@@ -135,11 +135,7 @@ public class DependenciesClient
                 bw.Write(containerTypeName);
                 bw.Write((byte)lifetime);
                 bw.Write(type);
-
-                bool isNullKey = key is null;
-                bw.Write(isNullKey);
-
-                if (!isNullKey) bw.Write(key);
+                bw.Write(key);
             }));
 
             // Read response

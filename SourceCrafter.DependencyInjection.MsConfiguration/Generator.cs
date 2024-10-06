@@ -7,14 +7,7 @@ using SourceCrafter.DependencyInjection;
 using System.Text;
 using System.Collections.Generic;
 using SourceCrafter.DependencyInjection.Interop;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using System.Data;
-using System.IO;
-using System.Text.RegularExpressions;
-using System.Runtime.InteropServices.ComTypes;
 using static SourceCrafter.DependencyInjection.Extensions;
-using System.Threading;
-using SourceCrafter.DependencyInjection.Attributes;
 
 [Generator]
 public class Generator : IIncrementalGenerator
@@ -104,8 +97,6 @@ public class Generator : IIncrementalGenerator
         Map<string, string> files = new(StringComparer.Ordinal);
         HashSet<string> keys = new(StringComparer.Ordinal);
 
-        DependenciesClient dependencies = new();
-
         foreach (var (model, container) in containers)
         {
             var attrs = container.GetAttributes();
@@ -151,7 +142,7 @@ using global::Microsoft.Extensions.Configuration;
                         //string? methodCall;
                         //try
                         //{
-                        //    methodCall = dependencies.GetDependency(containerTypeName, Lifetime.Singleton, IConfigurationType, key);
+                        //var methodCall = DependenciesClient.GetDependency(containerTypeName, Lifetime.Singleton, IConfigurationType, key);
                         //}
                         //catch (Exception)
                         //{

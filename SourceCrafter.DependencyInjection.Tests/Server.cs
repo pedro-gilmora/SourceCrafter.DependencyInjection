@@ -10,14 +10,14 @@ using System.Text.RegularExpressions;
 namespace SourceCrafter.DependencyInjection.Tests
 {
     [ServiceContainer]
-    [JsonConfiguration]
-    //[Singleton<Configuration>(factoryOrInstance: nameof(BuildConfiguration))]
+    [JsonSetting<AppSettings>("AppSettings")]
+    [JsonSetting<string>("ConnectionStrings::DefaultConnection", nameFormat: "GetConnectionString")]
+    //[JsonConfiguration]
+    ////[Singleton<Configuration>(factoryOrInstance: nameof(BuildConfiguration))]
+    [Transient<int>("count", nameof(ResolveAsync))]
     [Singleton<IDatabase, Database>]
     //[Scoped<IDatabase, Database>(Main.App)]
-    [Scoped<AuthService>]
-    [Transient<int>("Count", nameof(ResolveAsync))]
-    [JsonSetting<AppSettings>("AppSettings")]
-    [JsonSetting<string>("ConnectionStrings::DefaultConnection", key: "ConnectionString", nameFormat: "Get{0}")]
+    [Scoped<IAuthService, AuthService>]
     //[Transient<string>(Main.App, nameof(Name))]
     public partial class Server
     {
@@ -27,15 +27,15 @@ namespace SourceCrafter.DependencyInjection.Tests
         //{
         //    return default!;
         //}
-        static ValueTask<int> ResolveAsync(CancellationToken _)
+        internal static ValueTask<int> ResolveAsync(CancellationToken _)
         {
             return ValueTask.FromResult(1);
         }
     }
 
-    public class AuthService([Singleton] IDatabase application, [Transient("Count")] int o) : IDisposable
+    public class AuthService(IDatabase application, int count) : IAuthService, IDisposable
     {
-        public int O => o;
+        public int O => count;
         public IDatabase Database { get; } = application;
 
         public void Dispose()
@@ -44,15 +44,18 @@ namespace SourceCrafter.DependencyInjection.Tests
         }
     }
 
-    public class Database(
-        AppSettings config,
-        [Singleton("ConnectionString")] string connection) : IDatabase, IAsyncDisposable
+    public interface IAuthService
+    {
+        IDatabase Database { get; }
+    }
+
+    public class Database(AppSettings settings,string connection) : IDatabase, IAsyncDisposable
     {
         //AppSettings config = config;
 
         public void TrySave(out string setting1)
         {
-            setting1 = config?.Setting1 ?? "Value3"/*config.Setting1*/;
+            setting1 = settings?.Setting1 ?? "Value3"/*config.Setting1*/;
         }
 
         public ValueTask DisposeAsync()

@@ -8,8 +8,6 @@ using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
 using System;
 using System.IO;
 
-[assembly: Use<JsonSettingAttribute>]
-
 namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
 {
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Assembly, AllowMultiple = false)]
@@ -36,7 +34,7 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
     ) 
         : DependencyAttribute(lifetime, nameFormat);
 
-    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface, AllowMultiple = true)]
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Parameter, AllowMultiple = true)]
     public sealed class JsonSettingAttribute<T>(
         string path,
         Lifetime lifetime = Lifetime.Singleton,

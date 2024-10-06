@@ -6,18 +6,19 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
-using System.Linq.Expressions;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using System.Text;
-using System.Transactions;
-using System.Xml.Linq;
 
 namespace SourceCrafter.DependencyInjection.Interop;
 
-public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string exportTypeFullName, string? key, ITypeSymbol? _interface = null)
+public delegate void CommaSeparateBuilder(ref bool useIComma, StringBuilder code);
+public delegate void ValueBuilder(StringBuilder code);
+public delegate void MemberBuilder(StringBuilder code, bool isImplementation, string generatedCodeAttribute);
+public delegate void ParamsBuilder(StringBuilder code);
+
+public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullName, string? key, ITypeSymbol? _interface = null)
 {
-    static readonly Lifetime[] lifetimes = [Lifetime.Singleton, Lifetime.Scoped, Lifetime.Scoped];
+    static readonly Lifetime[] lifetimes = [Lifetime.Singleton, Lifetime.Scoped, Lifetime.Transient];
 
     public const string
         CancelTokenFQMetaName = "System.Threading.CancellationToken",
@@ -34,7 +35,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
         DependencyAttr = "global::SourceCrafter.DependencyInjection.Attributes.DependencyAttribute",
         ServiceContainerAttr = "global::SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute";
 
-    public string FullTypeName = typeName;
+    public string FullTypeName = null!;
     public string ResolverMethodName = null!;
     public string CacheField = null!;
     public ITypeSymbol Type = type;
@@ -52,46 +53,37 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
     public ImmutableArray<AttributeData> Attributes = [];
     public ITypeSymbol ContainerType = null!;
     public bool NotRegistered = false;
-    public bool IsAsync = false;
     public bool RequiresDisposabilityCast = false;
     internal bool IsCancelTokenParam;
     public bool IsExternal;
-    public Guid ResolvedBy;
+    internal AttributeSyntax OriginDefinition = null!;
+    internal ServiceContainer ServiceContainer = null!;
 
     public readonly string ExportTypeName = exportTypeFullName;
-
     private bool? isFactory;
-    internal bool IsFactory => isFactory ??= Factory is not null;
 
     private bool? isNamed;
 
-    internal bool IsKeyed => isNamed ??= Key is not null;
+   bool _isAsync = false;
+    public bool IsAsync 
+    {
+        get => _isAsync;
+        set {
+            if(!_isAsync && value && !ResolverMethodName.EndsWith("Async"))
+            {
+                ResolverMethodName += "Async";
+            }
+            _isAsync = value;
+        }
+    }
+
+    internal bool IsFactory => isFactory ??= Factory is not null;
+
+    internal bool IsKeyed => isNamed ??= Key is { Length: > 0 };
 
     internal ImmutableArray<IParameterSymbol>?
         Params,
         DefaultParamValues;
-
-    void AppendFactoryContainingType(StringBuilder code)
-    {
-        if (!SymbolEqualityComparer.Default.Equals(Factory!.ContainingType, ContainerType))
-        {
-            code.Append(Factory.ContainingType.ToGlobalNamespaced()).Append('.');
-        }
-    }
-
-    public void BuildSwitchBranch(StringBuilder code)
-    {
-        code.Append(@"
-			case """)
-            .Append(Key)
-            .Append(@""" :
-");
-
-        BuildResolverBody(code, 2);
-
-        code.Append(@"
-");
-    }
 
     public override string ToString()
     {
@@ -119,7 +111,9 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
     internal void BuildCachedCaller(StringBuilder code)
     {
         code.Append(ResolverMethodName)
-            .Append(IsAsync ? "Async(cancellationToken.Value" : "(")
+            .Append(IsAsync 
+                ? (ResolverMethodName.EndsWith("Async") ? "Async" : null) + "(cancellationToken.Value" 
+                : "(")
             .Append(')');
     }
 
@@ -127,6 +121,8 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
     {
         if (isImplementation)
         {
+            ServiceContainer.CheckMethodUsage(Lifetime, ResolverMethodName);
+
             code.Append(@"
     ")
                 .Append(generatedCodeAttribute)
@@ -166,8 +162,6 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
                 .Append("> ")
                 .Append(ResolverMethodName);
 
-            if (IsAsync && !ResolverMethodName.EndsWith("Async")) code.Append("Async");
-            
             code.Append(@"(global::System.Threading.CancellationToken? cancellationToken = default)");
         }
         else
@@ -211,7 +205,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
             var checkNullOnValueType = (Interface ?? Type) is { IsValueType: true, NullableAnnotation: not NullableAnnotation.Annotated };
 
             code.AppendFormat(@"
-{0}		if (", indentSeed)
+		if (", indentSeed)
                 .Append(CacheField);
 
             if (checkNullOnValueType)
@@ -241,34 +235,34 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
             {
                 code.AppendFormat(@"
 
-{0}        await __globalSemaphore.WaitAsync(cancellationToken ??= __globalCancellationTokenSrc.Token);
+        await __globalSemaphore.WaitAsync(cancellationToken ??= __globalCancellationTokenSrc.Token);
 
-{0}        try
-{0}        {{
-{0}            return ", indentSeed);
+        try
+        {{
+            return ", indentSeed);
 
                 code.Append(CacheField)
                     .Append(@" ??= ");
 
-                BuildValue(code);
+                AppendBuilder(code);
 
                 code.AppendFormat(@";
-{0}        }}
-{0}        finally
-{0}        {{
-{0}            __globalSemaphore.Release();
-{0}        }}", indentSeed);
+        }}
+        finally
+        {{
+            __globalSemaphore.Release();
+        }}", indentSeed);
 
             }
             else
             {
                 code.AppendFormat(@"
 
-{0}        lock(__lock) return ", indentSeed)
+        lock(__lock) return ", indentSeed)
                     .Append(CacheField)
                     .Append(@" ??= ");
 
-                BuildValue(code);
+                AppendBuilder(code);
 
                 code.Append(@";");
             }
@@ -276,62 +270,24 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
         else
         {
             code.AppendFormat(@"
-{0}        return ", indentSeed);
+        return ", indentSeed);
 
             BuildInstance(code);
 
             code.Append(@";");
         }
 
-        void BuildValue(StringBuilder code)
+        void AppendBuilder(StringBuilder code)
         {
-            switch (Lifetime)
+            if (IsFactory)
             {
-                case Lifetime.Singleton:
+                if (IsAsync && IsFactory) code.Append("await ");
 
-                    if (IsFactory)
-                    {
-                        if (IsAsync && IsFactory) code.Append("await ");
-
-                        BuildFactoryCaller(code);
-                    }
-                    else
-                    {
-                        BuildInstance(code);
-                    }
-
-                    break;
-                case Lifetime.Scoped:
-
-                    code
-                        .AppendFormat(@"isScoped 
- {0}               ? ", indentSeed);
-
-                    if (IsFactory)
-                    {
-                        if (IsAsync && IsFactory) code.Append("await ");
-
-                        BuildFactoryCaller(code);
-                    }
-                    else
-                    {
-                        BuildInstance(code);
-                    }
-
-                    code
-                        .AppendFormat(@"
- {0}               : throw InvalidCallOutOfScope(""", indentSeed)
-                        .Append(FullTypeName)
-                        .Append(@""");");
-
-                    break;
-                case Lifetime.Transient:
-
-                    if (IsAsync && IsFactory) code.Append("await ");
-
-                    BuildInstance(code);
-
-                    break;
+                BuildFactoryCaller(code);
+            }
+            else
+            {
+                BuildInstance(code);
             }
         }
     }
@@ -342,13 +298,12 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
 
         switch (Factory)
         {
-            case IMethodSymbol method:
+            case IMethodSymbol { ContainingType: { } containingType, IsStatic: { } isStatic } method:
 
-                AppendFactoryContainingType(code);
+                AppendFactoryContainingType(code, containingType, isStatic);
 
-                if (method.TypeArguments is { IsDefaultOrEmpty: false } and [{ } argType]
-                    && SymbolEqualityComparer.Default.Equals(argType, Type)
-                    && SymbolEqualityComparer.Default.Equals(method.ReturnType, Type))
+                if (method is { Name: "Task" or "ValueTask", TypeArguments: { IsDefaultOrEmpty: false } and [{ } argType] }
+                    && SymbolEqualityComparer.Default.Equals(argType, Type))
                 {
                     code.Append(method.Name);
                     code.Append('<')
@@ -373,9 +328,9 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
                 break;
 
 
-            case IPropertySymbol { IsIndexer: bool isIndexer } prop:
+            case IPropertySymbol { IsIndexer: bool isIndexer, ContainingType: { } containingType, IsStatic: { } isStatic } prop:
 
-                AppendFactoryContainingType(code);
+                AppendFactoryContainingType(code, containingType, isStatic);
 
                 if (isIndexer)
                 {
@@ -395,9 +350,9 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
                 break;
 
 
-            case IFieldSymbol field:
+            case IFieldSymbol { ContainingType: { } containingType, IsStatic: { } isStatic } field:
 
-                AppendFactoryContainingType(code);
+                AppendFactoryContainingType(code, containingType, isStatic);
 
                 code.Append(field.Name);
 
@@ -405,25 +360,31 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
 
             default:
 
-                code.Append("default");
-
-                if (Type?.IsNullable() is false) code.Append('!');
+                AppendDefault(code);
 
                 break;
         }
     }
 
-    internal void CheckParamsDependencies(
-        SemanticModel model,
-        DependencyMap entries,
-        HashSet<string> methodsRegistry,
-        Map<(int, Lifetime, string?), string> dependencyRegistry,
-        Action updateAsyncContainerStatus,
-        Compilation compilation,
-        Set<Diagnostic> diagnostics,
-        Guid generatorGuid,
-        Action<ServiceDescriptor> onFoundService,
-        ref Disposability disposability)
+    private void AppendDefault(StringBuilder code)
+    {
+        code.Append("default");
+
+        if (Type?.IsNullable() is false) code.Append('!');
+    }
+
+    private void AppendFactoryContainingType(StringBuilder code, INamedTypeSymbol containingType, bool isStatic)
+    {
+        if (SymbolEqualityComparer.Default.Equals(containingType, ContainerType))
+            return;
+
+        if (isStatic)
+            code.Append(containingType.ToGlobalNamespaced()).Append('.');
+        else
+            return;
+    }
+
+    internal void CheckParamsDependencies(ServiceContainer container, ImmutableArray<InvokeInfo> _serviceCalls)
     {
         if (GetParameters() is not { IsDefaultOrEmpty: false } parameters) return;
 
@@ -434,143 +395,182 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
             var paramType = param.Type;
             var paramTypeName = param.Type.ToGlobalNamespaced();
 
+            var isExternal = false;
+
+            DependencySlimInfo depInfo = default;
+            Lifetime lifetime = default;
+            ServiceDescriptor found = null!;
+
+            if (paramTypeName.Equals("global::" + CancelTokenFQMetaName))
+            {
+                resolvedDeps++;
+                BuildParams += AppendCancelToken;
+                continue;
+            }
+
             if (param.GetAttributes() is { Length: > 0 } paramAttrs)
             {
                 foreach (var attr in paramAttrs)
                 {
                     INamedTypeSymbol attrClass = attr.AttributeClass!;
 
-                    var isExternal = false;
-
                     if (attr.ApplicationSyntaxReference!.GetSyntax() is not AttributeSyntax attrSyntax
                         || attrClass is null
-                        || GetLifetimeFromCtor(ref attrClass, ref isExternal, attrSyntax) is not { } lifetime) continue;
+                        || GetLifetimeFromCtor(ref attrClass, ref isExternal, attrSyntax) is not { } _lifetime) continue;
 
-                    var isAsync = paramType.TryGetAsyncType(out var realParamType);
+                    lifetime = _lifetime;
 
-                    realParamType ??= paramType;
+                    var attrParams = (IMethodSymbol)container._model.GetSymbolInfo(attr.ApplicationSyntaxReference.GetSyntax()).Symbol!;
 
-                    var attrParams = (IMethodSymbol)model.GetSymbolInfo(attr.ApplicationSyntaxReference.GetSyntax()).Symbol!;
-
-                    GetDependencyInfo(
-                        model,
+                    if (TryGetDependencyInfo(
+                        container._model,
                         attr.AttributeClass!.TypeArguments,
                         attrSyntax.ArgumentList?.Arguments ?? [],
                         attrParams.Parameters,
-                        out var depInfo);
-
-
-                    if (!depInfo.IsCached && lifetime is not Lifetime.Transient) depInfo.IsCached = true;
-
-                    var found = entries.GetValueOrInserter((lifetime, paramTypeName, depInfo.Key), out var insertService);
-
-                    if (paramType.IsPrimitive() && depInfo.Key is null)
-                    {
-                        diagnostics.TryAdd(
-                            ServiceContainerGeneratorDiagnostics.PrimitiveDependencyShouldBeKeyed(
-                                lifetime,
-                                attrSyntax,
-                                paramTypeName,
-                                paramTypeName));
-
-                        continue;
-                    }
-
-                    if (found != null)
-                    {
-                        if (found.IsAsync && !IsAsync) IsAsync = true;
-
-                        updateAsyncContainerStatus();
-
-                        resolvedDeps++;
-
-                        BuildParams += found.BuildAsParam;
-
-                        continue;
-                    }
-
-                    Disposability thisDisposability = Disposability.None;
-
-                    if (depInfo.IsCached)
-                    {
-                        thisDisposability = depInfo.ImplType.GetDisposability();
-
-                        if (thisDisposability > disposability) disposability = thisDisposability;
-
-                        if (depInfo.Disposability > disposability) disposability = depInfo.Disposability;
-                    }
-
-                    var methodName = GetMethodName(isExternal, lifetime, depInfo, isAsync, methodsRegistry, dependencyRegistry);
-
-                    found = new(realParamType, paramTypeName, paramTypeName, depInfo.Key, null)
-                    {
-                        Lifetime = lifetime,
-                        Key = depInfo.Key,
-                        RequiresDisposabilityCast = thisDisposability is Disposability.None && depInfo.Disposability is not Disposability.None, 
-                        ResolverMethodName = methodName,
-                        CacheField = "_" + methodName.Camelize(),
-                        Factory = depInfo.Factory,
-                        FactoryKind = depInfo.FactoryKind,
-                        Disposability = (Disposability)Math.Max((byte)thisDisposability, (byte)depInfo.Disposability),
-                        IsResolved = true,
-                        ResolvedBy = generatorGuid,
-                        Attributes = realParamType.GetAttributes(),
-                        IsAsync = isAsync,
-                        IsCached = depInfo.IsCached,
-                        Params = Extensions.GetParameters(depInfo)
-                    };
-
-                    BuildParams += found.BuildAsParam;
-
-                    found.CheckParamsDependencies(
-                        model,
-                        entries,
-                        methodsRegistry,
-                        dependencyRegistry,
-                        updateAsyncContainerStatus,
-                        compilation,
-                        diagnostics,
-                        generatorGuid, 
-                        onFoundService,
-                        ref disposability);
-
-                    onFoundService(found);
-
-                    resolvedDeps++;
+                        paramType,
+                        param.Name,
+                        out depInfo)) break;
                 }
-            }
-            else if (paramTypeName.Equals("global::" + CancelTokenFQMetaName))
-            {
-                BuildParams += AppendCancelToken;
-                resolvedDeps++;
             }
             else
             {
-                foreach (var lifetime in lifetimes)
+                foreach (var lifeTime in lifetimes)
                 {
-                    if (entries.TryGetValue((lifetime, paramTypeName, null), out var found) || entries.TryGetValue((lifetime, paramTypeName, ""), out found))
+                    if (container.servicesMap.TryGetValue((lifeTime, paramTypeName, ""), out found)
+                        || container.servicesMap.TryGetValue((lifeTime, paramTypeName, param.Name), out found))
                     {
-                        BuildParams += found.BuildAsParam;
+                        if (found.IsAsync && !IsAsync)
+                        {
+                            IsAsync = true;
+
+                            if(!container.requiresSemaphore) container.UpdateAsyncStatus();
+                        }
                         resolvedDeps++;
-                        break;
+                        BuildParams += found.BuildAsParam;
+                        goto check;
                     }
                 }
             }
+
+            if (!depInfo.IsCached && lifetime is not Lifetime.Transient) depInfo.IsCached = true;
+
+            var isAsync = depInfo.FinalType.TryGetAsyncType(out var realParamType);
+
+            if (isAsync)
+            {
+                if (!IsAsync) IsAsync = true;
+
+                depInfo.FinalType = realParamType!;
+
+                if (!container.requiresSemaphore) container.UpdateAsyncStatus();
+
+                if (depInfo.FactoryKind is SymbolKind.Method
+                    && !((IMethodSymbol)depInfo.Factory!).Parameters.Any(p => p.Type.ToDisplayString() is CancelTokenFQMetaName))
+                {
+                    container._diagnostics.TryAdd(
+                        ServiceContainerGeneratorDiagnostics
+                            .CancellationTokenShouldBeProvided(depInfo.Factory, OriginDefinition));
+                }
+            }
+
+            found = container.servicesMap.GetValueOrInserter((lifetime, paramTypeName, depInfo.Key), out var insertService);
+
+            if (found != null)
+            {
+                if (found.IsAsync && !IsAsync)
+                {
+                    IsAsync = true;
+
+                    if (!container.requiresSemaphore) container.UpdateAsyncStatus();
+                }
+
+                resolvedDeps++;
+
+                BuildParams += found.BuildAsParam;
+
+                continue;
+            }
+
+            var paramSyntax = param.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() ?? OriginDefinition;
+
+            if (found is null && depInfo.ImplType is null && paramType.TypeKind is TypeKind.Interface)
+            {
+                container._diagnostics.TryAdd(
+                    ServiceContainerGeneratorDiagnostics
+                        .ParamInterfaceTypeWithoutImplementation(
+                            paramSyntax,
+                            ContainerType.ToGlobalNamespaced()));
+
+                continue;
+            }
+
+            if (!isExternal && paramType.IsPrimitive() && depInfo.Key is "")
+            {
+                container._diagnostics.TryAdd(
+                    ServiceContainerGeneratorDiagnostics.PrimitiveDependencyShouldBeKeyed(
+                        lifetime,
+                        paramSyntax,
+                        paramTypeName,
+                        paramTypeName));
+
+                continue;
+            }
+
+            Disposability thisDisposability = Disposability.None;
+
+            if (depInfo.IsCached)
+            {
+                thisDisposability = depInfo.FinalType.GetDisposability();
+
+                if (thisDisposability > container.disposability) container.disposability = thisDisposability;
+
+                if (depInfo.Disposability > container.disposability) container.disposability = depInfo.Disposability;
+            }
+
+            var methodName = GetMethodName(isExternal, lifetime, depInfo, isAsync, container.methodsRegistry, container.methodNamesMap);
+
+            found = new(depInfo.FinalType, paramTypeName, depInfo.Key, null)
+            {
+                ServiceContainer = ServiceContainer,
+                Lifetime = lifetime,
+                Key = depInfo.Key,
+                FullTypeName = depInfo.ImplType!.ToGlobalNamespaced(),
+                RequiresDisposabilityCast = thisDisposability is Disposability.None && depInfo.Disposability is not Disposability.None,
+                ResolverMethodName = methodName,
+                CacheField = "_" + methodName.Camelize(),
+                Factory = depInfo.Factory,
+                FactoryKind = depInfo.FactoryKind,
+                Disposability = (Disposability)Math.Max((byte)thisDisposability, (byte)depInfo.Disposability),
+                IsResolved = true,
+                Attributes = depInfo.FinalType.GetAttributes(),
+                IsAsync = isAsync,
+                IsCached = depInfo.IsCached,
+                Params = Extensions.GetParameters(depInfo),
+                ContainerType = ContainerType
+            };
+
+            BuildParams += found.BuildAsParam;
+
+            container.ResolveService(found);
+
+            resolvedDeps++;
+
+        check:;
         }
 
         if (resolvedDeps < parameters.Length && Type.DeclaringSyntaxReferences is [{ } first])
         {
-            diagnostics.TryAdd(
+            container._diagnostics.TryAdd(
                 ServiceContainerGeneratorDiagnostics.DependencyWithUnresolvedParameters(
                     first.GetSyntax(),
                     ExportTypeName));
         }
     }
-    public static string GetMethodName(bool isExternal, Lifetime lifetime, DependencySlimInfo depInfo, bool isAsync, HashSet<string> methodsRegistry, Map<(int, Lifetime, string?), string> dependencyRegistry)
+    public static string GetMethodName(bool isExternal, Lifetime lifetime, DependencySlimInfo depInfo, bool isAsync, HashSet<string> methodsRegistry, DependencyNamesMap dependencyRegistry)
     {
-        var identifier = (depInfo.NameFormat is not null)
-                    ? string.Format(depInfo.NameFormat, depInfo.Key).RemoveDuplicates()
-                    : Extensions.SanitizeTypeName(depInfo.ImplType, methodsRegistry, dependencyRegistry, lifetime, depInfo.Key, depInfo.IsCached);
+        var identifier = depInfo.NameFormat is not null
+            ? string.Format(depInfo.NameFormat, depInfo.Key.Pascalize()!).RemoveDuplicates()
+            : Extensions.SanitizeTypeName(depInfo.ImplType ?? depInfo.FinalType, methodsRegistry, dependencyRegistry, lifetime, depInfo.Key);
 
         identifier = isExternal ? identifier : depInfo.Factory?.ToNameOnly() ?? ("Get" + identifier);
 
@@ -584,7 +584,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
     {
         var lifetime = GetLifetimeFromSyntax(attrSyntax);
 
-        if(lifetime.HasValue) return lifetime.Value;
+        if (lifetime.HasValue) return lifetime.Value;
 
         do
         {
@@ -618,7 +618,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
     public static Lifetime? GetLifetimeFromSyntax(AttributeSyntax attribute)
     {
         if (attribute.ArgumentList?.Arguments
-                .FirstOrDefault(x => x.NameColon?.Name.Identifier.ValueText is "lifetime")?.Expression is MemberAccessExpressionSyntax { Name.Identifier.ValueText: { } memberName } 
+                .FirstOrDefault(x => x.NameColon?.Name.Identifier.ValueText is "lifetime")?.Expression is MemberAccessExpressionSyntax { Name.Identifier.ValueText: { } memberName }
             && Enum.TryParse(memberName, out Lifetime lifetime))
         {
             return lifetime;
@@ -664,7 +664,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
         BuildValue(code);
     }
 
-    internal     void BuildValue(StringBuilder code)
+    internal void BuildValue(StringBuilder code)
     {
         if (IsAsync) code.Append("await ");
 
@@ -727,15 +727,17 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
             code.Append('(').Append(CacheField).Append(" as global::System.IDisposable)");
         else
             code.Append(CacheField);
-        
+
         code.Append("?.Dispose();");
     }
 
-    public static void GetDependencyInfo(
+    public static bool TryGetDependencyInfo(
         SemanticModel model,
         ImmutableArray<ITypeSymbol> attrParamTypes,
         SeparatedSyntaxList<AttributeArgumentSyntax> attrArgsSyntax,
         ImmutableArray<IParameterSymbol>? attrParams,
+        ITypeSymbol? paramType,
+        string key,
         out DependencySlimInfo depInfo)
     {
         depInfo = default;
@@ -767,16 +769,19 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
                     depInfo.IFaceType = (ITypeSymbol)model!.GetSymbolInfo(type).Symbol!;
 
                     continue;
-                case KeyParamName:
 
-                    depInfo.Key = GetStrExpressionOrValue(model, param, arg);
+                case KeyParamName when GetStrExpressionOrValue(model, param!, arg) is { } keyValue:
 
-                    continue;
-                case NameFormatParamName:
-
-                    depInfo.NameFormat = GetStrExpressionOrValue(model, param, arg);
+                    depInfo.Key = keyValue;
 
                     continue;
+
+                case NameFormatParamName when GetStrExpressionOrValue(model, param, arg) is { } nameOrValue:
+
+                    depInfo.NameFormat = nameOrValue;
+
+                    continue;
+
                 case FactoryOrInstanceParamName
 
                     when arg?.Expression is InvocationExpressionSyntax
@@ -788,17 +793,22 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
                     switch (model.GetSymbolInfo(methodRef.Expression))
                     {
                         case { Symbol: (IFieldSymbol or IPropertySymbol) and { IsStatic: true, Kind: { } kind } fieldOrProp }:
-                            depInfo.Factory = fieldOrProp; depInfo.FactoryKind = kind; break;
+                            depInfo.Factory = fieldOrProp;
+                            depInfo.FactoryKind = kind;
+                            break;
 
                         case { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [IMethodSymbol { ReturnsVoid: false, IsStatic: true } method] }:
-                            depInfo.Factory = method; depInfo.FactoryKind = SymbolKind.Method; depInfo.DefaultParamValues = method.Parameters; break;
+                            depInfo.Factory = method;
+                            depInfo.FactoryKind = SymbolKind.Method;
+                            depInfo.DefaultParamValues = method.Parameters;
+                            break;
                     }
 
                     continue;
 
                 case CacheParamName:
 
-                    depInfo.IsCached |= arg is not null && bool.TryParse(arg.Expression.ToString(), out var _cache) 
+                    depInfo.IsCached |= arg is not null && bool.TryParse(arg.Expression.ToString(), out var _cache)
                         ? _cache
                         : param.HasExplicitDefaultValue && (bool)param.ExplicitDefaultValue!;
 
@@ -811,6 +821,20 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
                     continue;
             }
         }
+
+        depInfo.FinalType = depInfo.FactoryKind switch
+        {
+            SymbolKind.Method => ((IMethodSymbol)depInfo.Factory!).ReturnType,
+            SymbolKind.Field => ((IFieldSymbol)depInfo.Factory!).Type,
+            SymbolKind.Property => ((IPropertySymbol)depInfo.Factory!).Type,
+            _ => depInfo.IFaceType ?? depInfo.ImplType ?? paramType!
+        };
+
+        if (paramType is { TypeKind: not TypeKind.Interface }) depInfo.ImplType ??= paramType;
+
+        depInfo.Key ??= key ?? "";
+
+        return depInfo is { FinalType: not null, ImplType: not null };
     }
 
     static IEnumerable<(IParameterSymbol, AttributeArgumentSyntax?)> GetAttrParamsMap(
@@ -844,95 +868,32 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string typeName, string 
                     ConstantValue: { } val
                 })
             {
-                return val.ToString().Pascalize();
+                return val.ToString();
             }
             else if (arg.Expression is LiteralExpressionSyntax { Token.ValueText: { } value } e
                 && e.IsKind(SyntaxKind.StringLiteralExpression))
             {
-                return value.Pascalize();
+                return value;
             }
         }
         else if (paramSymbol.HasExplicitDefaultValue)
         {
-            return paramSymbol.ExplicitDefaultValue?.ToString().Pascalize();
+            return paramSymbol.ExplicitDefaultValue?.ToString();
         }
 
         return null;
     }
-
-    internal void AddBuilders(
-        HashSet<(string?, string)> interfacesRegistry,
-        ref CommaSeparateBuilder? interfaces,
-        ref bool hasScopedService,
-        ref Action<StringBuilder, string>? disposeStatments,
-        ref Action<StringBuilder, string>? singletonDisposeStatments,
-        ref bool requiresLocker,
-        ref MemberBuilder? methods,
-        ref Disposability disposability,
-        Action updateAsyncStatus)
-    {
-        if (NotRegistered || IsCancelTokenParam) return;
-
-        if (interfacesRegistry.Add((Key, ExportTypeName)))
-        {
-            interfaces += AddInterface;
-        }
-
-        if (Lifetime is Lifetime.Scoped && !hasScopedService) hasScopedService = true;
-
-        if (Lifetime is not Lifetime.Transient)
-        {
-            if (IsAsync)
-            {
-                updateAsyncStatus();
-            }
-            else if (!requiresLocker)
-            {
-                requiresLocker = true;
-            }
-
-            switch (Disposability)
-            {
-                case Disposability.AsyncDisposable:
-
-                    if (Lifetime is Lifetime.Scoped)
-                    {
-                        disposeStatments += BuildDisposeAsyncStatment;
-                    }
-                    else
-                    {
-                        singletonDisposeStatments += BuildDisposeAsyncStatment;
-                    }
-
-                    break;
-                case Disposability.Disposable:
-
-                    if (Lifetime is Lifetime.Scoped)
-                    {
-                        disposeStatments += BuildDisposeStatment;
-                    }
-                    else
-                    {
-                        singletonDisposeStatments += BuildDisposeStatment;
-                    }
-                    break;
-            }
-        }
-
-        if (Disposability > disposability) disposability = Disposability;
-
-        if (this is { IsExternal: true } or { IsFactory: true, IsCached: false }) return;
-
-        methods += BuildResolver;
-    }
 }
 
-public record struct DependencySlimInfo(ITypeSymbol? IFaceType,
+public record struct DependencySlimInfo(
+    ITypeSymbol FinalType,
+    ITypeSymbol? IFaceType,
     ITypeSymbol ImplType,
     ISymbol? Factory,
     SymbolKind FactoryKind,
-    string? Key,
+    string Key,
     string? NameFormat,
     ImmutableArray<IParameterSymbol> DefaultParamValues,
     bool IsCached,
-    Disposability Disposability);
+    Disposability Disposability,
+    bool IsValid);

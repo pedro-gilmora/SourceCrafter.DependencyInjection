@@ -1,6 +1,4 @@
-﻿global using DependecyKey = (SourceCrafter.DependencyInjection.Interop.Lifetime LifeTime, string ExportFullTypeName, string? Key);
-
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -10,40 +8,40 @@ using System.Linq;
 using System.Text;
 
 using System;
-using SourceCrafter.DependencyInjection.Interop;
-using Microsoft.CodeAnalysis.CSharp;
+using System.IO;
 
-using static SourceCrafter.DependencyInjection.Interop.ServiceDescriptor;
+namespace SourceCrafter.DependencyInjection.Interop;
 
-using DependencyMap = SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Interop.Lifetime, string, string?), SourceCrafter.DependencyInjection.Interop.ServiceDescriptor>;
-
-namespace SourceCrafter.DependencyInjection;
+using static ServiceDescriptor;
 
 
-class ServiceContainerGenerator
+internal class ServiceContainer
 {
-    readonly string providerTypeName, providerClassName;
+    internal readonly string providerTypeName;
 
     readonly ImmutableArray<AttributeData> attributes;
 
-    readonly SemanticModel _model;
-    private readonly Set<Diagnostic> _diagnostics;
-    readonly INamedTypeSymbol _providerClass;
-    private readonly Compilation _compilation;
+    internal readonly SemanticModel _model;
 
-    readonly HashSet<(bool, string)> enumKeysRegistry = [];
+    internal readonly Set<Diagnostic> _diagnostics;
 
-    readonly HashSet<string>
-        methodsRegistry = new(StringComparer.Ordinal);
+    internal readonly string _generatorGuid;
 
-    readonly HashSet<(string?, string)> interfacesRegistry = [];
+    internal readonly ImmutableArray<InvokeInfo> _serviceCalls;
 
-    readonly Map<(int, Lifetime, string?), string> dependencyRegistry = new(EqualityComparer<(int, Lifetime, string?)>.Default);
+    internal readonly INamedTypeSymbol _providerClass;
 
-    readonly DependencyMap discoveredServices = new(new DependencyComparer());
+    internal readonly Compilation _compilation;
 
-    readonly Map<ServiceDescriptor, Action<StringBuilder>>
-        keyedMethods = new(new KeyedServiceComparer());
+    internal HashSet<string> methodsRegistry = new(StringComparer.Ordinal);
+
+    internal readonly HashSet<(string?, string)> interfacesRegistry = [];
+
+    internal readonly DependencyNamesMap methodNamesMap = new(new DependencyComparer<int>());
+
+    internal readonly DependencyMap servicesMap = new(new DependencyComparer<string>());
+
+    //readonly Map<ServiceDescriptor, Action<StringBuilder>> keyedMethods = new(new KeyedServiceComparer());
 
     CommaSeparateBuilder? interfaces = null;
 
@@ -54,36 +52,44 @@ class ServiceContainerGenerator
         singletonDisposeStatments = null,
         disposeStatments = null;
 
+    internal bool requiresSemaphore = false;
+
     bool //useIComma = false,
         hasScopedService = false,
-        requiresLocker = false,
-        requiresSemaphore = false/*,
+        requiresLocker = false/*,
         hasAsyncService = false*/;
 
-    Disposability disposability = 0;
+    internal Disposability disposability = 0;
 
-    public static ServiceContainerGenerator Parse(
+    public static ServiceContainer Parse(
         Compilation compilation,
         SemanticModel model,
         INamedTypeSymbol providerClass,
-        Set<Diagnostic> diagnostics) => new(compilation, model, providerClass, diagnostics);
+        Set<Diagnostic> diagnostics,
+        ImmutableArray<AttributeData> externals,
+        string generatorGuid,
+        ImmutableArray<InvokeInfo> serviceCalls)
 
-    //unify attribute reading
-    ServiceContainerGenerator(
+            => new(compilation, model, providerClass, diagnostics, externals, generatorGuid, serviceCalls);
+
+    ServiceContainer(
         Compilation compilation,
         SemanticModel model,
         INamedTypeSymbol providerClass,
-        Set<Diagnostic> diagnostics)
+        Set<Diagnostic> diagnostics,
+        ImmutableArray<AttributeData> externals,
+        string generatorGuid,
+        ImmutableArray<InvokeInfo> serviceCalls)
     {
         _providerClass = providerClass;
         _compilation = compilation;
         _model = model;
         _diagnostics = diagnostics;
+        _generatorGuid = generatorGuid;
+        _serviceCalls = serviceCalls;
         providerTypeName = _providerClass.ToGlobalNamespaced();
-        providerClassName = _providerClass.ToNameOnly();
         attributes = _providerClass.GetAttributes();
-
-        foreach (var attr in attributes)
+        foreach (var attr in externals.Concat(attributes))
         {
             if (attr.AttributeClass is null) continue;
 
@@ -95,7 +101,17 @@ class ServiceContainerGenerator
                 providerClass);
         }
 
-        foreach(var item in discoveredServices.ValuesAsSpan()) ResolveService(item);
+        foreach (var item in servicesMap.ValuesAsSpan()) ResolveService(item);
+    }
+
+    internal void CheckMethodUsage(Lifetime lifetime, string methodName)
+    {
+        if (lifetime is Lifetime.Scoped
+                    && _serviceCalls.FirstOrDefault(sc => SymbolEqualityComparer.Default.Equals(sc.ContainerType, _providerClass) && methodName == sc.Name && sc.IsNotScoped) is { } el)
+        {
+            _diagnostics.TryAdd(
+                ServiceContainerGeneratorDiagnostics.DependencyCallShouldBeScoped(providerTypeName, el.MethodSyntax));
+        }
     }
 
     private void ParseDependencyAttribute(
@@ -113,19 +129,27 @@ class ServiceContainerGenerator
             || attrClass.Name.StartsWith("ServiceContainer")
             || GetLifetimeFromCtor(ref attrClass, ref isExternal, attrSyntax) is not { } lifetime) return;
 
-        var _params = attrSyntax.ArgumentList?.Arguments ?? default;
 
-        GetDependencyInfo(_model, attrClass.TypeArguments, _params, parameters, out var depInfo);
+        if (!TryGetDependencyInfo(
+                _model,
+                attrClass.TypeArguments,
+                attrSyntax.ArgumentList?.Arguments ?? default,
+                parameters,
+                null,
+                "",
+                out var depInfo)) return;
 
         if (!depInfo.IsCached && lifetime is not Lifetime.Transient) depInfo.IsCached = true;
 
         if (HasNoType() || InterfaceRequiresInternalFactory()) return;
 
-        var isAsync = depInfo.Factory.TryGetAsyncType(out var factoryType);
+        var isAsync = depInfo.FinalType.TryGetAsyncType(out var realParamType);
 
         if (isAsync)
         {
-            UpdateAsyncStatus();
+            depInfo.FinalType = realParamType!;
+
+            if(!requiresSemaphore) UpdateAsyncStatus();
 
             if (depInfo.FactoryKind is SymbolKind.Method
                 && !((IMethodSymbol)depInfo.Factory!).Parameters.Any(p => p.Type.ToDisplayString() is CancelTokenFQMetaName))
@@ -145,13 +169,13 @@ class ServiceContainerGenerator
             if (depInfo.Disposability > disposability) disposability = depInfo.Disposability;
         }
 
-        var typeName = depInfo.ImplType.ToGlobalNamespaced();
+        var typeName = (depInfo.ImplType ?? depInfo.FinalType).ToGlobalNamespaced();
 
         var exportTypeFullName = depInfo.IFaceType?.ToGlobalNamespaced() ?? typeName;
 
-        ref var existingOrNew = ref discoveredServices.GetValueOrAddDefault((lifetime, exportTypeFullName, depInfo.Key), out var exists)!;
+        ref var existingOrNew = ref servicesMap.GetValueOrAddDefault((lifetime, exportTypeFullName, depInfo.Key), out var exists)!;
 
-        string methodName = GetMethodName(isExternal, lifetime, depInfo, isAsync, methodsRegistry, dependencyRegistry);
+        string methodName = GetMethodName(isExternal, lifetime, depInfo, isAsync, methodsRegistry, methodNamesMap);
 
         if (exists)
         {
@@ -163,26 +187,28 @@ class ServiceContainerGenerator
         }
         else
         {
-            if (depInfo.ImplType.IsPrimitive() && depInfo.Key is null)
+            if (!isExternal && depInfo.ImplType!.IsPrimitive() && depInfo.Key is "")
             {
                 _diagnostics.TryAdd(
                     ServiceContainerGeneratorDiagnostics
                         .PrimitiveDependencyShouldBeKeyed(lifetime, attrSyntax, typeName, exportTypeFullName));
             }
 
-            existingOrNew = new(depInfo.ImplType, typeName, exportTypeFullName, depInfo.Key, depInfo.IFaceType)
+            existingOrNew = new(depInfo.FinalType, exportTypeFullName, depInfo.Key, depInfo.IFaceType)
             {
+                ServiceContainer = this,
+                OriginDefinition = attrSyntax,
                 Lifetime = lifetime,
                 Key = depInfo.Key,
                 IsExternal = isExternal,
+                FullTypeName = typeName,
                 ResolverMethodName = methodName,
                 CacheField = "_" + methodName.Camelize(),
                 Factory = depInfo.Factory,
                 FactoryKind = depInfo.FactoryKind,
                 Disposability = (Disposability)Math.Max((byte)thisDisposability, (byte)depInfo.Disposability),
                 IsResolved = true,
-                ResolvedBy = Generator.generatorGuid,
-                Attributes = depInfo.ImplType.GetAttributes(),
+                Attributes = depInfo.ImplType!.GetAttributes(),
                 RequiresDisposabilityCast = thisDisposability is Disposability.None && depInfo.Disposability is not Disposability.None,
                 IsAsync = isAsync,
                 ContainerType = providerClass,
@@ -208,126 +234,104 @@ class ServiceContainerGenerator
         }
     }
 
-    void ResolveService(ServiceDescriptor service)
+    internal void ResolveService(ServiceDescriptor foundService)
     {
-        service.CheckParamsDependencies(
-            _model,
-            discoveredServices,
-            methodsRegistry,
-            dependencyRegistry,
-            UpdateAsyncStatus,
-            _compilation,
-            _diagnostics,
-            Generator.generatorGuid,
-            OnFoundService,
-            ref disposability);
+        if (foundService.Factory is null && foundService.Type.IsPrimitive()) return;
 
-        OnFoundService(service);
+        foundService.CheckParamsDependencies(this, _serviceCalls);
 
+        if (foundService.NotRegistered || foundService.IsCancelTokenParam) return;
 
-        void OnFoundService(ServiceDescriptor foundService)
+        if (interfacesRegistry.Add((foundService.Key, foundService.ExportTypeName)))
         {
-            if (foundService.NotRegistered || foundService.IsCancelTokenParam) return;
-
-            if (interfacesRegistry.Add((foundService.Key, foundService.ExportTypeName)))
-            {
-                interfaces += foundService.AddInterface;
-            }
-
-            if (foundService.Lifetime is Lifetime.Scoped && !hasScopedService) hasScopedService = true;
-
-            if (foundService.Lifetime is not Lifetime.Transient)
-            {
-                if (foundService.IsAsync)
-                {
-                    UpdateAsyncStatus();
-                }
-                else if (!requiresLocker)
-                {
-                    requiresLocker = true;
-                }
-
-                switch (foundService.Disposability)
-                {
-                    case Disposability.AsyncDisposable:
-
-                        if (foundService.Lifetime is Lifetime.Scoped)
-                        {
-                            disposeStatments += foundService.BuildDisposeAsyncStatment;
-                        }
-                        else
-                        {
-                            singletonDisposeStatments += foundService.BuildDisposeAsyncStatment;
-                        }
-
-                        break;
-                    case Disposability.Disposable:
-
-                        if (foundService.Lifetime is Lifetime.Scoped)
-                        {
-                            disposeStatments += foundService.BuildDisposeStatment;
-                        }
-                        else
-                        {
-                            singletonDisposeStatments += foundService.BuildDisposeStatment;
-                        }
-                        break;
-                }
-            }
-
-            if (foundService.Disposability > disposability) disposability = foundService.Disposability;
-
-            if (foundService is { IsExternal: true } or { IsFactory: true, IsCached: false }) return;
-
-            methods += foundService.BuildResolver;
+            interfaces += foundService.AddInterface;
         }
+
+        if (foundService.Lifetime is Lifetime.Scoped && !hasScopedService) hasScopedService = true;
+
+        if (foundService.Lifetime is not Lifetime.Transient)
+        {
+            if (!requiresSemaphore && foundService.IsAsync)
+            {
+                UpdateAsyncStatus();
+            }
+            else if (!requiresLocker)
+            {
+                requiresLocker = true;
+            }
+
+            switch (foundService.Disposability)
+            {
+                case Disposability.AsyncDisposable:
+
+                    if (foundService.Lifetime is Lifetime.Scoped)
+                    {
+                        disposeStatments += foundService.BuildDisposeAsyncStatment;
+                    }
+                    else
+                    {
+                        singletonDisposeStatments += foundService.BuildDisposeAsyncStatment;
+                    }
+
+                    break;
+                case Disposability.Disposable:
+
+                    if (foundService.Lifetime is Lifetime.Scoped)
+                    {
+                        disposeStatments += foundService.BuildDisposeStatment;
+                    }
+                    else
+                    {
+                        singletonDisposeStatments += foundService.BuildDisposeStatment;
+                    }
+                    break;
+            }
+        }
+
+        if (foundService.Disposability > disposability) disposability = foundService.Disposability;
+
+        if (foundService is { IsExternal: true } or { IsFactory: true, IsCached: false } || foundService.Lifetime is Lifetime.Transient) return;
+
+        methods += foundService.BuildResolver;
     }
 
-    private void UpdateAsyncStatus()
+    internal void UpdateAsyncStatus()
     {
-        if (!requiresSemaphore)
+        requiresSemaphore = true;
+
+        if (_compilation.GetTypeByMetadataName(CancelTokenFQMetaName) is { } cancelType)
         {
-            requiresSemaphore = true;
+            string cancelTypeName = cancelType.ToGlobalNamespaced();
 
-            if (_compilation.GetTypeByMetadataName(CancelTokenFQMetaName) is { } cancelType)
-            {
-                string cancelTypeName = cancelType.ToGlobalNamespaced();
-
-                discoveredServices.GetValueOrAddDefault(
-                    (Lifetime.Singleton, cancelTypeName, null),
-                    out _,
-                    () => new(cancelType, cancelTypeName, cancelTypeName, null)
-                    {
-                        IsResolved = true,
-                        ResolvedBy = Generator.generatorGuid,
-                        IsCancelTokenParam = true
-                    });
-            }
+            servicesMap.GetValueOrAddDefault(
+                (Lifetime.Singleton, cancelTypeName, ""),
+                out _,
+                () => new(cancelType, cancelTypeName, "")
+                {
+                    ServiceContainer = this,
+                    IsResolved = true,
+                    IsCancelTokenParam = true
+                });
         }
     }
 
     //TODO: add cancel token
 
     public void Build(
-        Dictionary<string, DependencyMap> containers, 
-        ImmutableArray<ITypeSymbol> usages, 
-        Map<string, byte> uniqueName, 
+        Dictionary<string, DependencyMap> containers,
+        ImmutableArray<ITypeSymbol> usages,
+        Map<string, byte> uniqueName,
         Action<string, string> addSource)
     {
-        if (discoveredServices.IsEmpty /*interfaces == null*/) return;
+        if (servicesMap.IsEmpty /*interfaces == null*/) return;
 
-        containers[providerTypeName] = discoveredServices;
+        containers[providerTypeName] = servicesMap;
 
         StringBuilder code = new(@"#nullable enable
 ");
-        StringBuilder icode = new(@"#nullable enable
-");
+        //StringBuilder icode = new(@"#nullable enable
+        //");
         var fileName = _providerClass.ToMetadataLongName(uniqueName);
-
-        InteropServices.ResolveExternalDependencies(
-            _compilation,
-            _providerClass,
-            discoveredServices);
 
         if (_providerClass.ContainingNamespace is { IsGlobalNamespace: false } ns)
         {
@@ -336,11 +340,11 @@ class ServiceContainerGenerator
                 .Append(@";
 
 ");
-            icode.Append("namespace ")
-                .Append(ns.ToDisplayString()!)
-                .Append(@";
+            //            icode.Append("namespace ")
+            //                .Append(ns.ToDisplayString()!)
+            //                .Append(@";
 
-");
+            //");
         }
 
         var (modifiers, typeName) = _providerClass.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() switch
@@ -350,44 +354,48 @@ class ServiceContainerGenerator
             _ => ("partial class ", "")
         };
 
-        #region Generate Container Interface
+        //        #region Generate Container Interface
 
-        icode.AppendLine(Generator.generatedCodeAttribute)
-            .Append("public interface I")
-            .Append(typeName);
+        //        icode.AppendLine()
+        //            .Append("public interface I")
+        //            .Append(typeName);
 
-        BuildDisposability(icode, true);
+        //        BuildDisposability(icode, true);
 
-        methods?.Invoke(icode, false, Generator.generatedCodeAttribute);
+        //        methods?.Invoke(icode, false, _generatorGuid);
 
-        if (hasScopedService)
-        {
-            icode.Append(@"
-    ")
-                .AppendLine(Generator.generatedCodeAttribute)
-                .Append("    ")
-                .Append(_providerClass.ContainingNamespace.ToGlobalNamespaced())
-                .Append(".I")
-                .Append(typeName)
-                .Append(@" CreateScope();");
-        }
+        //        if (hasScopedService)
+        //        {
+        //            icode.Append(@"
+        //    ")
+        //                .AppendLine(_generatorGuid)
+        //                .Append("    ")
+        //                .Append(_providerClass.ContainingNamespace.ToGlobalNamespaced())
+        //                .Append(".I")
+        //                .Append(typeName)
+        //                .Append(@" CreateScope();");
+        //        }
 
-        icode.Append(@"
-}");
+        //        icode.Append(@"
+        //}");
 
-        addSource("I" + fileName + ".generated", icode.ToString());
+        //        addSource("I" + fileName + ".generated", icode.ToString());
 
-        #endregion
+        //        #endregion
 
-        code.AppendLine(Generator.generatedCodeAttribute)
+        code.AppendLine(_generatorGuid)
             .Append(modifiers)
             .AddSpace()
-            .Append(typeName)
-            .Append(@" : ")
-            .Append('I')
-            .Append(typeName)
+            .Append(typeName);
+
+        BuildDisposability(code, true);
+
+        code
+            //.Append(@" : ")
+            //.Append('I')
+            //.Append(typeName
+//{)
             .Append(@"
-{
     public static string Environment => global::System.Environment.GetEnvironmentVariable(""DOTNET_ENVIRONMENT"") ?? ""Development"";");
 
         if (requiresLocker)
@@ -412,27 +420,15 @@ class ServiceContainerGenerator
     private bool isScoped = false;
 
     ")
-                .AppendLine(Generator.generatedCodeAttribute)
+                .AppendLine(_generatorGuid)
                 .Append(@"    public ")
-                .Append(_providerClass.ContainingNamespace.ToGlobalNamespaced())
-                .Append(".I")
                 .Append(typeName)
                 .Append(@" CreateScope() =>
 		new ").Append(providerTypeName).Append(@" { isScoped = true };
 ");
         }
 
-        methods?.Invoke(code, true, Generator.generatedCodeAttribute);
-
-        if (hasScopedService)
-        {
-            code.Append(@"
-    ")
-                .AppendLine(Generator.generatedCodeAttribute)
-                .Append(@"    private static global::System.InvalidOperationException InvalidCallOutOfScope(string typeFullName) => 
-		new global::System.InvalidOperationException($""The initialization of the scoped service instance [{typeFullName}] requires a scope creation through the call of [IServiceProviderFactory.CreateScope()] method."");
-");
-        }
+        methods?.Invoke(code, true, _generatorGuid);
 
         BuildDisposability(code, false);
 
@@ -466,7 +462,7 @@ class ServiceContainerGenerator
                 case (Disposability.Disposable, false):
 
                     code.Append(@"
-    ").AppendLine(Generator.generatedCodeAttribute)
+    ").AppendLine(_generatorGuid)
                         .Append(@"    public void Dispose()
 	{");
 
@@ -475,9 +471,16 @@ class ServiceContainerGenerator
                 case (Disposability.AsyncDisposable, false):
 
                     code.Append(@"
-    ").AppendLine(Generator.generatedCodeAttribute)
+    ").AppendLine(_generatorGuid)
                         .Append(@"    public async global::System.Threading.Tasks.ValueTask DisposeAsync()
     {");
+
+                    break;
+
+                default :
+                    
+                    if(buildingInterface) code.Append(@"
+{");
 
                     break;
             }
@@ -504,9 +507,9 @@ class ServiceContainerGenerator
 		else
         {");
 
-                    singletonDisposeStatments?.Invoke(code, "    ");
+                        singletonDisposeStatments?.Invoke(code, "    ");
 
-                    code.Append(@"
+                        code.Append(@"
 		}");
                     }
 
@@ -603,3 +606,4 @@ class ServiceContainerGenerator
     }
     */
 }
+internal record InvokeInfo(ITypeSymbol ContainerType, string Name, IdentifierNameSyntax MethodSyntax, bool IsNotScoped);

@@ -239,15 +239,9 @@ namespace SourceCrafter.DependencyInjection
             return new string(buffer, 0, bufferIndex);
         }
 
-        public static bool TryGetAsyncType(this ISymbol? factorySymbol, out ITypeSymbol? factoryType)
+        public static bool TryGetAsyncType(this ITypeSymbol? typeSymbol, out ITypeSymbol? factoryType)
         {
-            switch((factoryType = factorySymbol switch
-            {
-                IMethodSymbol m => m.ReturnType,
-                IPropertySymbol p => p.Type,
-                IFieldSymbol p => p.Type,
-                _ => null
-            })?.ToGlobalNonGenericNamespace())
+            switch((factoryType = typeSymbol)?.ToGlobalNonGenericNamespace())
             {
                 case "global::System.Threading.Tasks.ValueTask" or "global::System.Threading.Tasks.Task"
                     when factoryType is INamedTypeSymbol { TypeArguments:[{ } firstTypeArg] }:
@@ -263,6 +257,8 @@ namespace SourceCrafter.DependencyInjection
 
         public static Disposability GetDisposability(this ITypeSymbol type)
         {
+            if (type is null) return Disposability.None;
+
             Disposability disposability = Disposability.None;
 
             foreach (var iFace in type.AllInterfaces)
@@ -316,32 +312,34 @@ namespace SourceCrafter.DependencyInjection
         public static string SanitizeTypeName(
             ITypeSymbol type,
             HashSet<string> methodsRegistry,
-            Map<(int, Lifetime, string?), string> dependencyRegistry,
+            DependencyNamesMap dependencyRegistry,
             Lifetime lifeTime,
-            string? key,
-            bool isCached)
+            string key)
         {
             int hashCode = SymbolEqualityComparer.Default.GetHashCode(type);
 
-            string id = Sanitize(type).Capitalize();
+            string id = Sanitize(type).Replace(" ", "").Capitalize();
 
-            ref var idOut = ref dependencyRegistry.GetValueOrAddDefault((hashCode, lifeTime, key), out var exists);
+            ref var idOut = ref dependencyRegistry.GetValueOrAddDefault((lifeTime, hashCode, key), out var exists);
 
             if (exists)
             {
                 return idOut!;
             }
 
-            Dictionary<(int, Lifetime, string?), string> _dic = [];
+            if(key is "")
+            {
+                if (!methodsRegistry.Add(idOut = id)) 
+                    methodsRegistry.Add(idOut = $"{lifeTime}{id}");
+            }
+            else if(!(methodsRegistry.Add(idOut = key) 
+                || methodsRegistry.Add(idOut = $"{key}{id}")
+                || methodsRegistry.Add(idOut = $"{lifeTime}{key}")))
+            {
+                methodsRegistry.Add(idOut = $"{lifeTime}{key}{id}");
+            }
 
-            _ = methodsRegistry.Add(idOut = id)
-                || (key != null &&
-                    (methodsRegistry.Add(idOut = $"{id}For{key}")
-                        || methodsRegistry.Add(idOut = $"{lifeTime}{id}")
-                        || methodsRegistry.Add(idOut = $"{lifeTime}{id}For{key}")))
-                || methodsRegistry.Add(idOut = $"{lifeTime}{id}");
-
-            return idOut.Replace(" ", "");
+            return idOut;
 
             static string Sanitize(ITypeSymbol type)
             {
