@@ -59,6 +59,8 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
     internal AttributeSyntax OriginDefinition = null!;
     internal ServiceContainer ServiceContainer = null!;
 
+    public Disposability ContainerDisposability => ServiceContainer.disposability;
+
     internal readonly string ExportTypeName = exportTypeFullName;
     private bool? isFactory;
 
