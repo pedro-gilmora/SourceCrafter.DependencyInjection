@@ -66,12 +66,13 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
 
     private bool? isNamed;
 
-   bool _isAsync = false;
-    public  bool IsAsync 
+    bool _isAsync = false;
+    public bool IsAsync
     {
         get => _isAsync;
-        set {
-            if(!_isAsync && value && !ResolverMethodName.EndsWith("Async"))
+        set
+        {
+            if (!_isAsync && value && !ResolverMethodName.EndsWith("Async"))
             {
                 ResolverMethodName += "Async";
             }
@@ -113,8 +114,8 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
     internal void BuildCachedCaller(StringBuilder code)
     {
         code.Append(ResolverMethodName)
-            .Append(IsAsync 
-                ? (ResolverMethodName.EndsWith("Async") ? "Async" : null) + "(cancellationToken.Value" 
+            .Append(IsAsync
+                ? (ResolverMethodName.EndsWith("Async") ? "Async" : null) + "(cancellationToken.Value"
                 : "(")
             .Append(')');
     }
@@ -144,7 +145,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
 
             code.Append("    ");
 
-            code.Append("internal ");
+            code.Append("public ");
         }
         else
         {
@@ -445,7 +446,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
                         {
                             IsAsync = true;
 
-                            if(!container.requiresSemaphore) container.UpdateAsyncStatus();
+                            if (!container.requiresSemaphore) container.UpdateAsyncStatus();
                         }
                         resolvedDeps++;
                         BuildParams += found.BuildAsParam;
@@ -529,6 +530,15 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
                 if (depInfo.Disposability > container.disposability) container.disposability = depInfo.Disposability;
             }
 
+            if (!depInfo.IsValid)
+            {
+                resolvedDeps++;
+
+                BuildParams += AddDefault;
+
+                continue;
+            }
+
             var methodName = GetMethodName(isExternal, lifetime, depInfo, isAsync, container.methodsRegistry, container.methodNamesMap);
 
             found = new(depInfo.FinalType, paramTypeName, depInfo.Key, null)
@@ -558,6 +568,15 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
             resolvedDeps++;
 
         check:;
+
+            void AddDefault(ref bool comma, StringBuilder code)
+            {
+                if (!comma) comma = true; else code.Append(", ");
+
+                code.Append("default");
+
+                if (!paramType.IsNullable() && paramType.AllowsNull()) code.Append('!');
+            }
         }
 
         if (resolvedDeps < parameters.Length && Type.DeclaringSyntaxReferences is [{ } first])
@@ -616,18 +635,18 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
 
             return null;
         }
-    }
-
-    internal static Lifetime? GetLifetimeFromSyntax(AttributeSyntax attribute)
-    {
-        if (attribute.ArgumentList?.Arguments
-                .FirstOrDefault(x => x.NameColon?.Name.Identifier.ValueText is "lifetime")?.Expression is MemberAccessExpressionSyntax { Name.Identifier.ValueText: { } memberName }
-            && Enum.TryParse(memberName, out Lifetime lifetime))
+        
+        static Lifetime? GetLifetimeFromSyntax(AttributeSyntax attribute)
         {
-            return lifetime;
-        }
+            if (attribute.ArgumentList?.Arguments
+                    .FirstOrDefault(x => x.NameColon?.Name.Identifier.ValueText is "lifetime")?.Expression is MemberAccessExpressionSyntax { Name.Identifier.ValueText: { } memberName }
+                && Enum.TryParse(memberName, out Lifetime lifetime))
+            {
+                return lifetime;
+            }
 
-        return null;
+            return null;
+        }
     }
 
     internal ImmutableArray<IParameterSymbol> GetParameters()
@@ -734,6 +753,17 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         code.Append("?.Dispose();");
     }
 
+    /// <summary>
+    /// Tries to get the dependency information based on the provided attributes and parameters.
+    /// </summary>
+    /// <param name="model">The semantic model.</param>
+    /// <param name="attrParamTypes">The types of the attribute parameters.</param>
+    /// <param name="attrArgsSyntax">The syntax nodes of the attribute arguments.</param>
+    /// <param name="attrParams">The parameter symbols of the attribute.</param>
+    /// <param name="paramType">The type of the parameter.</param>
+    /// <param name="key">The key of the dependency.</param>
+    /// <param name="depInfo">The dependency information.</param>
+    /// <returns><c>true</c> if the dependency information was successfully retrieved; otherwise, <c>false</c>.</returns>
     public static bool TryGetDependencyInfo(
         SemanticModel model,
         ImmutableArray<ITypeSymbol> attrParamTypes,

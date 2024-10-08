@@ -3,11 +3,12 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System;
+using System.Collections;
 
 namespace SourceCrafter.DependencyInjection.Interop;
 
 public delegate void RefItemResolver<TKey, TVal>(TKey _, ref TVal item);
-public class Map<TKey, TVal>
+public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
 {
     private int[]? _buckets;
     private Entry<TKey, TVal>[]? _entries;
@@ -546,6 +547,62 @@ public class Map<TKey, TVal>
         return ref (new TVal[1] { default! })[0];
     }
 
+    public IEnumerator<(TKey, TVal)> GetEnumerator()
+    {
+        if (_count == 0) return default(EmptyEnumerator);
+
+        return new Enumerator(_entries!, _count);
+    }
+
+    public IEnumerable<TKey> Keys
+    {
+        get
+        {
+            if(_count == 0) yield break;
+
+            for (int i = 0; i < _count; i++) yield return _entries![i].Key; 
+        }
+    }
+
+    public IEnumerable<TVal> Values
+    {
+        get
+        {
+            if (_count == 0) yield break;
+
+            for (int i = 0; i < _count; i++) yield return _entries![i].Value;
+        }
+    }
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    struct EmptyEnumerator : IEnumerator<(TKey, TVal)>
+    {
+        public readonly (TKey, TVal) Current => throw new NotImplementedException();
+
+        readonly object IEnumerator.Current => throw new NotImplementedException();
+
+        public void Dispose() => throw new NotImplementedException();
+
+        public readonly bool MoveNext() => false;
+
+        public void Reset() => throw new NotImplementedException();
+    }
+
+    struct Enumerator(Entry<TKey, TVal>[] entries, int count) : IEnumerator<(TKey, TVal)>
+    {
+        private int current = -1;
+
+        public readonly (TKey, TVal) Current => entries[current];
+
+        readonly object IEnumerator.Current => Current;
+
+        public readonly void Dispose() => throw new NotImplementedException();
+
+        public bool MoveNext() => ++current < count;
+
+        public void Reset() => current = -1;
+    }
 }
 
 public struct Entry<TKey, TValue>
@@ -555,5 +612,5 @@ public struct Entry<TKey, TValue>
     internal int next;
     internal uint id;
 
-    public void Deconstruct(out TKey outKey, out TValue outValue) => (outKey, outValue) = (Key, Value);
+    public static implicit operator (TKey, TValue)(Entry<TKey, TValue> entry) => (entry.Key, entry.Value);
 }

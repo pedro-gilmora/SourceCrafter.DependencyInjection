@@ -14,6 +14,7 @@ namespace SourceCrafter.DependencyInjection.Interop;
 
 using static ServiceDescriptor;
 
+delegate void DisposabilityBuilder(StringBuilder code, string indent = "");
 
 internal class ServiceContainer
 {
@@ -48,7 +49,7 @@ internal class ServiceContainer
     MemberBuilder?
         methods = null;
 
-    Action<StringBuilder, string>?
+    DisposabilityBuilder?
         singletonDisposeStatments = null,
         disposeStatments = null;
 
@@ -58,6 +59,10 @@ internal class ServiceContainer
         hasScopedService = false,
         requiresLocker = false/*,
         hasAsyncService = false*/;
+
+    (Disposability, bool) DisposableInfo => servicesMap.Values
+        .Where(s => s is { IsCached: true, Lifetime: < Lifetime.Transient, Disposability: > Disposability.None })
+        .Aggregate((d: Disposability.None, isd: false), (s, i) => (i.Disposability > s.d ? i.Disposability : s.d, s.isd || i is { IsCached: true, Lifetime: Lifetime.Scoped }));
 
     internal Disposability disposability = 0;
 
@@ -97,7 +102,6 @@ internal class ServiceContainer
                 attr.AttributeClass,
                 (AttributeSyntax)attr.ApplicationSyntaxReference!.GetSyntax(),
                 attr.AttributeConstructor?.Parameters,
-                ref disposability,
                 providerClass);
         }
 
@@ -118,7 +122,6 @@ internal class ServiceContainer
         INamedTypeSymbol originalAttrClass,
         AttributeSyntax attrSyntax,
         ImmutableArray<IParameterSymbol>? parameters,
-        ref Disposability disposability,
         INamedTypeSymbol providerClass)
     {
         disposability = default;
@@ -388,7 +391,9 @@ internal class ServiceContainer
             .AddSpace()
             .Append(typeName);
 
-        BuildDisposability(code, true);
+        var (disposability, hasDisposableScoped) = DisposableInfo;
+
+        BuildDisposability(code, disposability);
 
         code
             //.Append(@" : ")
@@ -414,120 +419,124 @@ internal class ServiceContainer
 ");
         }
 
-        if (hasScopedService)
+        methods?.Invoke(code, true, _generatorGuid);
+
+        BuildDisposabilityMethods(code, typeName, disposability, hasDisposableScoped);
+
+        var codeStr = code.Append('}').ToString();
+
+        addSource(fileName + ".generated", codeStr);
+    }
+    private void BuildDisposabilityMethods(StringBuilder code, string typeName, Disposability disposability, bool hasDisposableScoped)
+    {
+        if (disposability is not Disposability.None)
         {
-            code.Append(@"
+            if(hasDisposableScoped)
+                
+                code.Append(@"
     private bool isScoped = false;
 
     ")
                 .AppendLine(_generatorGuid)
                 .Append(@"    public ")
                 .Append(typeName)
-                .Append(@" CreateScope() =>
-		new ").Append(providerTypeName).Append(@" { isScoped = true };
+                .Append(@" CreateScope() => new ").Append(typeName).Append(@" { isScoped = true };
 ");
-        }
 
-        methods?.Invoke(code, true, _generatorGuid);
 
-        BuildDisposability(code, false);
-
-        var codeStr = code.Append('}').ToString();
-
-        addSource(fileName + ".generated", codeStr);
-
-        //ChueckUsages(usages);
-    }
-
-    private void BuildDisposability(StringBuilder code, bool buildingInterface)
-    {
-        if (disposability > 0)
-        {
-            switch (disposability, buildingInterface)
+            switch (disposability)
             {
-                case (Disposability.Disposable, true):
 
-                    code.Append(@" : global::System.IDisposable	
-{");
-
-                    break;
-
-                case (Disposability.AsyncDisposable, true):
-
-                    code.Append(@" : global::System.IAsyncDisposable	
-{");
-
-                    break;
-
-                case (Disposability.Disposable, false):
+                case Disposability.Disposable:
 
                     code.Append(@"
     ").AppendLine(_generatorGuid)
-                        .Append(@"    public void Dispose()
+                        .Append(@"    public virtual void Dispose()
 	{");
 
                     break;
 
-                case (Disposability.AsyncDisposable, false):
+                case Disposability.AsyncDisposable:
 
                     code.Append(@"
     ").AppendLine(_generatorGuid)
-                        .Append(@"    public async global::System.Threading.Tasks.ValueTask DisposeAsync()
+                        .Append(@"    public virtual async global::System.Threading.Tasks.ValueTask DisposeAsync()
     {");
 
                     break;
-
-                default :
-                    
-                    if(buildingInterface) code.Append(@"
-{");
-
-                    break;
             }
 
-            if (!buildingInterface)
+            if (hasDisposableScoped)
             {
-                if (hasScopedService)
+                switch ((disposeStatments, singletonDisposeStatments))
                 {
-                    code.Append(@"
-		if(isScoped)
+                    case ({ }, { }):
+
+                        code.Append(@"
+        if(isScoped)
         {");
 
-                    disposeStatments?.Invoke(code, "   ");
+                        disposeStatments(code, "   ");
 
-                    if (singletonDisposeStatments is null)
-                    {
                         code.Append(@"
-		}");
-                    }
-                    else
-                    {
-                        code.Append(@"
-		}
-		else
+        }
+        else
         {");
 
-                        singletonDisposeStatments?.Invoke(code, "    ");
+                        singletonDisposeStatments(code, "    ");
 
                         code.Append(@"
-		}");
-                    }
+        }");
 
-                }
-                else
-                {
-                    singletonDisposeStatments?.Invoke(code, "");
-                }
+                        break;
 
-                code.Append(@"
+                    case ({ }, null):
+
+                        disposeStatments(code);
+
+                        break;
+
+                    case (null, { }):
+
+                        singletonDisposeStatments(code);
+
+                        break;
+                }
+            }
+            else if(singletonDisposeStatments is { })
+            {
+                singletonDisposeStatments(code);
+            }
+
+            code.Append(@"
 	}
 ");
-            }
         }
-        else if (buildingInterface)
+    }
+
+    private void BuildDisposability(StringBuilder code, Disposability disposability)
+    {
+
+        switch (disposability)
         {
-            code.Append(@"	
+            case Disposability.Disposable:
+
+                code.Append(@" : global::System.IDisposable	
 {");
+
+                break;
+
+            case Disposability.AsyncDisposable:
+
+                code.Append(@" : global::System.IAsyncDisposable	
+{");
+
+                break;
+
+            default:
+                code.Append(@"	
+{");
+                break;
         }
     }
 
