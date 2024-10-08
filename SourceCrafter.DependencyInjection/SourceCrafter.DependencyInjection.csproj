@@ -26,6 +26,12 @@
 		<Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>
 		<PackageOutputPath>../packaging</PackageOutputPath>
 		<Version>$(PackageVersion)</Version>
+		<Title>Truly compile-time depedency injection</Title>
+		<Description>Compile-time dependency injection library utilizing attributes to simplify and automate service registration</Description>
+		<PackageProjectUrl>https://github.com/pedro-gilmora/SourceCrafter.DependencyInjection/</PackageProjectUrl>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
+		<RepositoryUrl>https://github.com/pedro-gilmora/SourceCrafter.DependencyInjection/</RepositoryUrl>
+		<PackageTags>compile-time, dependency injection</PackageTags>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
@@ -57,6 +63,10 @@
 		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
 		<None Remove="bin\Debug\netstandard2.0\\SourceCrafter.DependencyInjection.Interop.dll" />
 		<None Include="$(OutputPath)\$(AssemblyName).Interop.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
+		<None Include="..\README.md">
+		  <Pack>True</Pack>
+		  <PackagePath>\</PackagePath>
+		</None>
 	</ItemGroup>
 
 	<!--<PropertyGroup>

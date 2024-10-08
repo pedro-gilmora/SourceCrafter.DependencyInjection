@@ -33,7 +33,7 @@ namespace SourceCrafter.DependencyInjection.Tests
         }
     }
 
-    public class AuthService(IDatabase application, int count) : IAuthService//, IDisposable
+    public class AuthService(IDatabase application, int count) : IAuthService, IDisposable
     {
         public int O => count;
         public IDatabase Database { get; } = application;
@@ -49,7 +49,7 @@ namespace SourceCrafter.DependencyInjection.Tests
         IDatabase Database { get; }
     }
 
-    public class Database(AppSettings settings,string connection) : IDatabase//, IAsyncDisposable
+    public class Database(AppSettings settings,string connection) : IDatabase, IAsyncDisposable
     {
         //AppSettings config = config;
 
