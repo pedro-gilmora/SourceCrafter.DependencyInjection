@@ -21,19 +21,13 @@ namespace SourceCrafter.DependencyInjection.Tests
     //[Transient<string>(Main.App, nameof(Name))]
     public partial class Server
     {
-        //const string Name = "Server::Name";
-
-        //static Configuration BuildConfiguration()
-        //{
-        //    return default!;
-        //}
         internal static ValueTask<int> ResolveAsync(CancellationToken _)
         {
             return ValueTask.FromResult(1);
         }
     }
 
-    public class AuthService(IDatabase application, int count) : IAuthService, IDisposable
+    public class AuthService(IDatabase application, int count) : IAuthService//, IDisposable
     {
         public int O => count;
         public IDatabase Database { get; } = application;
@@ -49,7 +43,7 @@ namespace SourceCrafter.DependencyInjection.Tests
         IDatabase Database { get; }
     }
 
-    public class Database(AppSettings settings,string connection) : IDatabase, IAsyncDisposable
+    public class Database(AppSettings settings, string connection) : IDatabase, IAsyncDisposable
     {
         //AppSettings config = config;
 

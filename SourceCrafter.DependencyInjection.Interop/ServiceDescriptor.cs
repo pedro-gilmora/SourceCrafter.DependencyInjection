@@ -61,7 +61,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
 
     public Disposability ContainerDisposability => ServiceContainer.disposability;
 
-    internal readonly string ExportTypeName = exportTypeFullName;
+    public string ExportTypeName;
     private bool? isFactory;
 
     private bool? isNamed;
@@ -161,7 +161,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
             if (isImplementation) code.Append("async ");
 
             code.Append("global::System.Threading.Tasks.ValueTask<")
-                .Append(FullTypeName)
+                .Append(ExportTypeName)
                 .Append("> ")
                 .Append(ResolverMethodName);
 
@@ -169,7 +169,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         }
         else
         {
-            code.Append(FullTypeName)
+            code.Append(ExportTypeName)
                 .Append(' ')
                 .Append(ResolverMethodName)
                 .Append(@"()");
@@ -547,6 +547,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
                 Lifetime = lifetime,
                 Key = depInfo.Key,
                 FullTypeName = depInfo.ImplType!.ToGlobalNamespaced(),
+                ExportTypeName = paramTypeName,
                 RequiresDisposabilityCast = thisDisposability is Disposability.None && depInfo.Disposability is not Disposability.None,
                 ResolverMethodName = methodName,
                 CacheField = "_" + methodName.Camelize(),

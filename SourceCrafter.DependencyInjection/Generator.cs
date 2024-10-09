@@ -48,13 +48,17 @@ public class Generator : IIncrementalGenerator
                     (syntax, _) => syntax is MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax },
                     (gsc, _) =>
                     {
-                        if (gsc.Node is MemberAccessExpressionSyntax { Name: IdentifierNameSyntax { Identifier.ValueText: { } name } method, Expression: IdentifierNameSyntax { } refVar })
+                        if (gsc.Node is MemberAccessExpressionSyntax 
+                            { Name: IdentifierNameSyntax 
+                                { Identifier.ValueText: { } name } method, 
+                                  Expression: IdentifierNameSyntax { } refVar })
                         {
                             if (gsc.SemanticModel.GetSymbolInfo(refVar).Symbol is ILocalSymbol { Type: { } containerType } local
-                                && containerType.GetAttributes().Any(attr => attr.AttributeClass?.ToGlobalNamespaced().EndsWith(serviceContainerFullTypeName) ?? false))
+                                && containerType.GetAttributes()
+                                                .Any(attr => attr.AttributeClass?.ToGlobalNamespaced().EndsWith(serviceContainerFullTypeName) ?? false))
                             {
                                 var isCtor = local.DeclaringSyntaxReferences
-                                    .Any(s => // var declaration or parameter
+                                    .Any(s =>
                                         s.GetSyntax() is VariableDeclaratorSyntax
                                         { Initializer.Value: ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax });
 

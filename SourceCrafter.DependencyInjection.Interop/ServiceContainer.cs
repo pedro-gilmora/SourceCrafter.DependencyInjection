@@ -56,7 +56,7 @@ internal class ServiceContainer
     internal bool requiresSemaphore = false;
 
     bool //useIComma = false,
-        hasScopedService = false,
+        hasScopedServices = false,
         requiresLocker = false/*,
         hasAsyncService = false*/;
 
@@ -205,6 +205,7 @@ internal class ServiceContainer
                 Key = depInfo.Key,
                 IsExternal = isExternal,
                 FullTypeName = typeName,
+                ExportTypeName = (depInfo.IFaceType ?? depInfo.ImplType ?? depInfo.FinalType).ToGlobalNamespaced(),
                 ResolverMethodName = methodName,
                 CacheField = "_" + methodName.Camelize(),
                 Factory = depInfo.Factory,
@@ -250,7 +251,7 @@ internal class ServiceContainer
             interfaces += foundService.AddInterface;
         }
 
-        if (foundService.Lifetime is Lifetime.Scoped && !hasScopedService) hasScopedService = true;
+        if (foundService.Lifetime is Lifetime.Scoped && !hasScopedServices) hasScopedServices = true;
 
         if (foundService.Lifetime is not Lifetime.Transient)
         {
@@ -332,8 +333,7 @@ internal class ServiceContainer
 
         StringBuilder code = new(@"#nullable enable
 ");
-        //StringBuilder icode = new(@"#nullable enable
-        //");
+
         var fileName = _providerClass.ToMetadataLongName(uniqueName);
 
         if (_providerClass.ContainingNamespace is { IsGlobalNamespace: false } ns)
@@ -343,11 +343,6 @@ internal class ServiceContainer
                 .Append(@";
 
 ");
-            //            icode.Append("namespace ")
-            //                .Append(ns.ToDisplayString()!)
-            //                .Append(@";
-
-            //");
         }
 
         var (modifiers, typeName) = _providerClass.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() switch
@@ -356,35 +351,6 @@ internal class ServiceContainer
                 ($"{mods} {keyword}".TrimStart(), $"{identifier}{argList}"),
             _ => ("partial class ", "")
         };
-
-        //        #region Generate Container Interface
-
-        //        icode.AppendLine()
-        //            .Append("public interface I")
-        //            .Append(typeName);
-
-        //        BuildDisposability(icode, true);
-
-        //        methods?.Invoke(icode, false, _generatorGuid);
-
-        //        if (hasScopedService)
-        //        {
-        //            icode.Append(@"
-        //    ")
-        //                .AppendLine(_generatorGuid)
-        //                .Append("    ")
-        //                .Append(_providerClass.ContainingNamespace.ToGlobalNamespaced())
-        //                .Append(".I")
-        //                .Append(typeName)
-        //                .Append(@" CreateScope();");
-        //        }
-
-        //        icode.Append(@"
-        //}");
-
-        //        addSource("I" + fileName + ".generated", icode.ToString());
-
-        //        #endregion
 
         code.AppendLine(_generatorGuid)
             .Append(modifiers)
@@ -431,7 +397,7 @@ internal class ServiceContainer
     {
         if (disposability is not Disposability.None)
         {
-            if(hasDisposableScoped)
+            if(hasScopedServices)
                 
                 code.Append(@"
     private bool isScoped = false;
@@ -498,6 +464,14 @@ internal class ServiceContainer
 
                     case (null, { }):
 
+                        if(hasScopedServices)
+                        {
+                            code.Append(@"
+        if(isScoped) return;
+");
+
+                        }
+
                         singletonDisposeStatments(code);
 
                         break;
@@ -505,11 +479,20 @@ internal class ServiceContainer
             }
             else if(singletonDisposeStatments is { })
             {
+                if (hasScopedServices)
+                {
+                    code.Append(@"
+        if(isScoped) return;
+");
+
+                }
+
                 singletonDisposeStatments(code);
             }
 
             code.Append(@"
-	}
+
+    }
 ");
         }
     }
