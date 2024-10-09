@@ -33,8 +33,9 @@ jobs:
     - name: Notify Telegram
       shell: pwsh      
       run: |
+        $status = if (${{ job.status }} -eq 'failure') { 'failed' } else { 'successfully completed' }
         $message = @"
-        🚀⚙️ Build ${{ github.workflow }} ${{ github.run_number }} ${{ job.status == 'failure' ? 'failed' : 'successfully completed' }}
+        🚀⚙️ Build ${{ github.workflow }} ${{ github.run_number }} $status
         👤 Triggered by ${{ github.actor }}
         🌿 Branch: ${{ github.ref }}
         🔗 Commit: ${{ github.sha }}
