@@ -292,8 +292,13 @@ Intel Core i9-14900HX, 1 CPU, 32 logical and 24 physical cores
   DefaultJob : .NET 8.0.8 (8.0.824.36612), X64 RyuJIT AVX2
 ```
 
-| Method                            | Mean      | Error     | Gen0   | Gen1   | Gen2   | Allocated |
-|---------------------------------- |----------:|----------:|-------:|-------:|-------:|----------:|
-| MrMeeseeksDIE                     | 720.00 ns | 13.869 ns | 0.0391 | 0.0381 | 0.0067 |     616 B |
-| Jab                               |  32.34 ns |  0.290 ns | 0.0085 |      - |      - |     160 B |
-| SourceCrafter_DependencyInjection |  13.27 ns |  0.116 ns | 0.0030 |      - |      - |      56 B |
+| Method                            | Job      | Runtime  | Mean      | Error     | Ratio | RatioSD | Gen0   | Gen1   | Gen2   | Allocated | Alloc Ratio |
+|---------------------------------- |--------- |--------- |----------:|----------:|------:|--------:|-------:|-------:|-------:|----------:|------------:|
+| MrMeeseeksDIE                     | .NET 8.0 | .NET 8.0 | 721.34 ns | 14.413 ns |  1.00 |    0.03 | 0.0372 | 0.0362 | 0.0048 |     616 B |        1.00 |
+| MrMeeseeksDIE                     | .NET 9.0 | .NET 9.0 | 694.30 ns | 11.764 ns |  0.96 |    0.02 | 0.0343 | 0.0334 | 0.0067 |     616 B |        1.00 |
+|                                   |          |          |           |           |       |         |        |        |        |           |             |
+| Jab                               | .NET 8.0 | .NET 8.0 |  32.79 ns |  0.586 ns |  1.00 |    0.02 | 0.0085 |      - |      - |     160 B |        1.00 |
+| Jab                               | .NET 9.0 | .NET 9.0 |  31.32 ns |  0.515 ns |  0.96 |    0.02 | 0.0085 |      - |      - |     160 B |        1.00 |
+|                                   |          |          |           |           |       |         |        |        |        |           |             |
+| SourceCrafter_DependencyInjection | .NET 8.0 | .NET 8.0 |  13.58 ns |  0.062 ns |  1.00 |    0.01 | 0.0030 |      - |      - |      56 B |        1.00 |
+| SourceCrafter_DependencyInjection | .NET 9.0 | .NET 9.0 |  14.07 ns |  0.166 ns |  1.04 |    0.01 | 0.0030 |      - |      - |      56 B |        1.00 |
