@@ -1,14 +1,16 @@
-﻿using Microsoft.Extensions.Logging;
+﻿using Benchmarks;
+
+using Microsoft.Extensions.Logging;
 
 using MrMeeseeks.DIE.Configuration.Attributes;
 
 namespace GettingStarted
 {
-    [ImplementationAggregation(
-        typeof(AppSettings),
-        typeof(Database),
-        typeof(AuthService))]
-    [CreateFunction(typeof(AuthService), "Create")]
+    [TransientImplementationAggregation(typeof(AppSettings))]
+    [ScopeInstanceImplementationAggregation(typeof(Database))]
+    [ImplementationAggregation(typeof(AuthService))]
+    [ImplementationAggregation(typeof(ServerMrMeeseeks))]
+    [CreateFunction(typeof(ServerMrMeeseeks), "Create")]
 
     public sealed partial class ServerMrMeeseeks
     {
@@ -16,49 +18,5 @@ namespace GettingStarted
         {
             return ValueTask.FromResult(1);
         }
-    }
-
-    public class AuthService(Database application) : IAuthService, IDisposable
-    {
-        public IDatabase Database { get; } = application;
-
-        public void Dispose()
-        {
-            //Continue with HostEnvironment
-        }
-    }
-
-    public interface IAuthService
-    {
-        IDatabase Database { get; }
-    }
-
-    public class Database(AppSettings settings) : IDatabase, IAsyncDisposable
-    {
-        public void TrySave(out string setting1)
-        {
-            setting1 = settings?.Setting1 ?? "Value3"/*config.Setting1*/;
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            return default;
-        }
-    }
-
-    public interface IDatabase
-    {
-        void TrySave(out string setting1);
-    }
-
-    public class Configuration
-    {
-
-    }
-
-    public class AppSettings
-    {
-        public string Setting1 { get; set; }
-        public string Setting2 { get; set; }
     }
 }

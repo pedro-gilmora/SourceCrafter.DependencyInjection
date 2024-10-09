@@ -1,23 +1,20 @@
 ﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Jobs;
 
 using GettingStarted;
 
+using Microsoft.Diagnostics.Tracing.Parsers.Tpl;
+
 namespace Benchmarks;
 
 [MemoryDiagnoser, HideColumns("Median", "Median", "StdDev")]
-[SimpleJob(RuntimeMoniker.Net80, baseline: true)]
-[SimpleJob(RuntimeMoniker.Net90)]
-[RPlotExporter]
+[SimpleJob(RuntimeMoniker.Net90, baseline: true)]
+[SimpleJob(RuntimeMoniker.Net80)]
 public class Program
 {
     public static void Main()
     {
-
-        //Pure.DI.DI.Setup("PureDiDeps")
-        //    .Bind().As(Pure.DI.Lifetime.Singleton).To<PureDI.Tests.Database>()
-        //    .Bind().As(Pure.DI.Lifetime.Scoped).To<PureDI.Tests.AuthService>()
-        //    .Root<PureDI.Tests.AuthService>("Root");
 
         //new Program().Pure_DI();
 
@@ -28,31 +25,43 @@ public class Program
     //[Benchmark]
     //public void Pure_DI()
     //{
-    //    var container = new PureDiDeps();
+    //    using var container = new Benchmarks.Server();
 
-    //    container.Root.Database.TrySave(out var setting1);
+    //    container.Root.Test();
     //}
 
     [Benchmark]
-    public void MrMeeseeksDIE()
+    public async Task MrMeeseeksDIE()
     {
-        var container = ServerMrMeeseeks.DIE_CreateContainer();
+        await using var container = ServerMrMeeseeks.DIE_CreateContainer();
         var authService = container.Create();
     }
 
     [Benchmark]
-    public void Jab()
+    public async Task Jab()
     {
-        var container = new Jab.Tests.ServerJab();
-        var scope = container.CreateScope();
+        await using var container = new Jab.Tests.ServerJab();
+        await using var scope = container.CreateScope();
         var authService = scope.GetService<Jab.Tests.IAuthService>();
     }
 
     [Benchmark]
-    public void SourceCrafter_DependencyInjection()
+    public async Task SourceCrafter_DependencyInjection()
     {
-        var container = new SourceCrafter.DependencyInjection.Tests.ServerSCDI();
-        var scope = container.CreateScope();
+        await using var container = new SourceCrafter.DependencyInjection.Tests.ServerSCDI();
+        await using var scope = container.CreateScope();
         var authService = scope.GetAuthService();
     }
 }
+
+//public static class PureDI
+//{
+//    public static void Setup()
+//    {
+//        Pure.DI.DI.Setup("Server")
+//            .Bind().As(Pure.DI.Lifetime.Transient).To<AppSettings>()
+//            .Bind().As(Pure.DI.Lifetime.Singleton).To<Database>()
+//            .Bind().As(Pure.DI.Lifetime.Scoped).To<AuthService>()
+//            .Root<AuthService>("Root");
+//    }
+//}
