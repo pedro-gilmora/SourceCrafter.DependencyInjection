@@ -35,12 +35,13 @@ jobs:
       shell: pwsh      
       run: |
         $status = if ('${{ job.status }}' -eq 'failure') { 'failed' } else { 'successfully completed' }
+        $icon = if ('${{ job.status }}' -eq 'failure') { '⛔' } else { '✅' }
         $message = @"
-        🚀⚙️ Build ${{ github.workflow }} ${{ github.run_number }} $status
-        👤 Triggered by ${{ github.actor }}
-        🌿 Branch: ${{ github.ref }}
-        🔗 Commit: ${{ github.sha }}
-        📝 Commit Message: ${{ github.event.head_commit.message }}
+        🚀$icon <b>${{ github.workflow }}</b> #${{ github.run_number }} Build $status
+        👤 <b>Triggered by:</b> ${{ github.actor }}
+        🌿 <b>Branch:</b> ${{ github.ref }}
+        🔗 <b>Commit:</b> [<code>${{ github.sha }}</code>] 
+        ${{ github.event.head_commit.message }}
         "@
 
         $uri = "https://api.telegram.org/bot${{ secrets.TGBOT_TOKEN }}/sendMessage"
