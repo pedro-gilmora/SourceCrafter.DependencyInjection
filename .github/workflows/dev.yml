@@ -29,3 +29,22 @@ jobs:
           # Execute nuget push for each package
           dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json"
         done
+
+    - name: Notify Telegram
+      shell: pwsh      
+      run: |
+        $message = @"
+        🚀⚙️ Build ${{ github.workflow }} ${{ github.run_number }} ${{ job.status == 'failure' ? 'failed' : 'successfully completed' }}
+        👤 Triggered by ${{ github.actor }}
+        🌿 Branch: ${{ github.ref }}
+        🔗 Commit: ${{ github.sha }}
+        📝 Commit Message: ${{ github.event.head_commit.message }}
+        "@
+
+        $uri = "https://api.telegram.org/bot${{ secrets.TGBOT_TOKEN }}/sendMessage"
+        $body = @{
+            chat_id = ${{ secrets.SC_CHATID }}
+            text    = $message
+        }
+
+        Invoke-RestMethod -Uri $uri -Method Post -Body $body
