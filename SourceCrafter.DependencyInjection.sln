@@ -20,8 +20,9 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution helpers", "Solutio
 		.gitignore = .gitignore
 		.git\workflows\dotnet.yml = .git\workflows\dotnet.yml
 		Package.ps1 = Package.ps1
-		README.md = README.md
 	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Benchmarks", "Benchmarks\Benchmarks.csproj", "{035CB039-0F3F-4D81-A71B-02029A3A265D}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -60,6 +61,12 @@ Global
 		{9FB634C3-693E-4734-8AF2-D2ABE68212F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{9FB634C3-693E-4734-8AF2-D2ABE68212F3}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{9FB634C3-693E-4734-8AF2-D2ABE68212F3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{035CB039-0F3F-4D81-A71B-02029A3A265D}.DEBUG_SG|Any CPU.ActiveCfg = Debug|Any CPU
+		{035CB039-0F3F-4D81-A71B-02029A3A265D}.DEBUG_SG|Any CPU.Build.0 = Debug|Any CPU
+		{035CB039-0F3F-4D81-A71B-02029A3A265D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{035CB039-0F3F-4D81-A71B-02029A3A265D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{035CB039-0F3F-4D81-A71B-02029A3A265D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{035CB039-0F3F-4D81-A71B-02029A3A265D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

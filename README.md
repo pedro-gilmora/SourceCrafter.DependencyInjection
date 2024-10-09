@@ -178,10 +178,10 @@ public partial class Server : global::System.IAsyncDisposable
     }
 
     [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    private global::SourceCrafter.DependencyInjection.Tests.IAuthService? _getAuthService;
+    private global::SourceCrafter.DependencyInjection.Tests.AuthService? _getAuthService;
 
     [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    public async global::System.Threading.Tasks.ValueTask<global::SourceCrafter.DependencyInjection.Tests.IAuthService> GetAuthServiceAsync(global::System.Threading.CancellationToken? cancellationToken = default)
+    public async global::System.Threading.Tasks.ValueTask<global::SourceCrafter.DependencyInjection.Tests.AuthService> GetAuthServiceAsync(global::System.Threading.CancellationToken? cancellationToken = default)
     {
 		if (_getAuthService is not null) return _getAuthService;
 
@@ -212,4 +212,93 @@ public partial class Server : global::System.IAsyncDisposable
 	}
 }
 ```
+--- 
 
+## TODO
+
+- Support generic factory definitions like 
+```cs
+static IService Get<TServiceType>(...) where IService : TServiceType, class /*or struct*/;
+```
+- Modules like Jab
+
+----
+
+## Benchmark
+
+### Definitions 
+#### MrMeeseeks.DIE
+
+```cs
+    [ImplementationAggregation(
+        typeof(AppSettings),
+        typeof(Database),
+        typeof(AuthService))]
+    [CreateFunction(typeof(AuthService), "Create")]
+```
+#### Jab
+
+```cs
+    [ServiceProvider]
+    [Transient<AppSettings>]
+    [Singleton<IDatabase, Database>]
+    [Scoped<IAuthService, AuthService>]
+    public sealed partial class ServerJab;
+```
+#### SourceCrafter.Dependendcy
+
+```cs
+    [ServiceContainer]
+    [Transient<AppSettings>]
+    [Singleton<IDatabase, Database>]
+    [Scoped<IAuthService, AuthService>]
+```
+
+#### Benchmark methods
+
+```cs
+[Benchmark]
+public void MrMeeseeksDIE()
+{
+    var container = ServerMrMeeseeks.DIE_CreateContainer();
+    var authService = container.Create();
+
+    authService.Database.TrySave(out var setting1);
+}
+
+[Benchmark]
+public void Jab()
+{
+    var container = new Jab.Tests.ServerJab();
+    var scope = container.CreateScope();
+    var authService = scope.GetService<Jab.Tests.IAuthService>();
+
+    authService.Database.TrySave(out var setting1);
+}
+
+[Benchmark]
+public void SourceCrafter_DependencyInjection()
+{
+    var container = new SourceCrafter.DependencyInjection.Tests.ServerSCDI();
+    var scope = container.CreateScope();
+    var authService = scope.GetAuthService();
+
+    authService.Database.TrySave(out var setting1);
+}
+```
+
+### Results:
+
+```
+BenchmarkDotNet v0.14.0, Windows 11 (10.0.22631.4169/23H2/2023Update/SunValley3)
+Intel Core i9-14900HX, 1 CPU, 32 logical and 24 physical cores
+.NET SDK 9.0.100-rc.1.24452.12
+  [Host]     : .NET 8.0.8 (8.0.824.36612), X64 RyuJIT AVX2
+  DefaultJob : .NET 8.0.8 (8.0.824.36612), X64 RyuJIT AVX2
+```
+
+| Method                            | Mean      | Error     | Gen0   | Gen1   | Gen2   | Allocated |
+|---------------------------------- |----------:|----------:|-------:|-------:|-------:|----------:|
+| MrMeeseeksDIE                     | 720.00 ns | 13.869 ns | 0.0391 | 0.0381 | 0.0067 |     616 B |
+| Jab                               |  32.34 ns |  0.290 ns | 0.0085 |      - |      - |     160 B |
+| SourceCrafter_DependencyInjection |  13.27 ns |  0.116 ns | 0.0030 |      - |      - |      56 B |

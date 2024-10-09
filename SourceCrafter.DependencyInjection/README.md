@@ -213,3 +213,9 @@ public partial class Server : global::System.IAsyncDisposable
 }
 ```
 
+----
+
+## Benchmark
+
+
+
