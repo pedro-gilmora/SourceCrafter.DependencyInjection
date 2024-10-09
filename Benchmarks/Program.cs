@@ -1,10 +1,14 @@
 ﻿using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Jobs;
 
 using GettingStarted;
 
 namespace Benchmarks;
 
 [MemoryDiagnoser, HideColumns("Median", "Median", "StdDev")]
+[SimpleJob(RuntimeMoniker.Net80, baseline: true)]
+[SimpleJob(RuntimeMoniker.Net90)]
+[RPlotExporter]
 public class Program
 {
     public static void Main()

@@ -14,7 +14,7 @@ namespace SourceCrafter.DependencyInjection.Interop;
 
 using static ServiceDescriptor;
 
-delegate void DisposabilityBuilder(StringBuilder code, string indent = "");
+delegate void DisposabilityBuilder(StringBuilder code);
 
 internal class ServiceContainer
 {
@@ -438,21 +438,17 @@ internal class ServiceContainer
                 {
                     case ({ }, { }):
 
-                        code.Append(@"
-        if(isScoped)
-        {");
+                        disposeStatments(code);
 
-                        disposeStatments(code, "   ");
+                        if (hasScopedServices)
+                        {
+                            code.Append(@"
 
-                        code.Append(@"
-        }
-        else
-        {");
+        if(isScoped) return;
+");
+                        }
 
-                        singletonDisposeStatments(code, "    ");
-
-                        code.Append(@"
-        }");
+                        singletonDisposeStatments(code);
 
                         break;
 

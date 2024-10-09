@@ -27,7 +27,7 @@ namespace SourceCrafter.DependencyInjection.Tests
         }
     }
 
-    public class AuthService(IDatabase application, int count) : IAuthService//, IDisposable
+    public class AuthService(IDatabase application, int count) : IAuthService, IDisposable
     {
         public int O => count;
         public IDatabase Database { get; } = application;

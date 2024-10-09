@@ -252,6 +252,7 @@ static IService Get<TServiceType>(...) where IService : TServiceType, class /*or
     [Transient<AppSettings>]
     [Singleton<IDatabase, Database>]
     [Scoped<IAuthService, AuthService>]
+    public sealed partial class ServerSCDI;
 ```
 
 #### Benchmark methods
@@ -262,8 +263,6 @@ public void MrMeeseeksDIE()
 {
     var container = ServerMrMeeseeks.DIE_CreateContainer();
     var authService = container.Create();
-
-    authService.Database.TrySave(out var setting1);
 }
 
 [Benchmark]
@@ -272,8 +271,6 @@ public void Jab()
     var container = new Jab.Tests.ServerJab();
     var scope = container.CreateScope();
     var authService = scope.GetService<Jab.Tests.IAuthService>();
-
-    authService.Database.TrySave(out var setting1);
 }
 
 [Benchmark]
@@ -282,8 +279,6 @@ public void SourceCrafter_DependencyInjection()
     var container = new SourceCrafter.DependencyInjection.Tests.ServerSCDI();
     var scope = container.CreateScope();
     var authService = scope.GetAuthService();
-
-    authService.Database.TrySave(out var setting1);
 }
 ```
 

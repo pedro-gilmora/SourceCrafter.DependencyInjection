@@ -725,10 +725,10 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         code.Append(')');
     }
 
-    internal void BuildDisposeAsyncStatment(StringBuilder code, string indent)
+    internal void BuildDisposeAsyncStatment(StringBuilder code)
     {
-        code.AppendFormat(@"
-{0}        if (", indent);
+        code.Append(@"
+        if (");
 
         if (RequiresDisposabilityCast)
             code.Append(CacheField).Append(" is global::System.IAsyncDisposable ").Append(CacheField).Append("AsyncDisposable) await ")
@@ -741,10 +741,10 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
             .Append(".DisposeAsync();");
     }
 
-    internal void BuildDisposeStatment(StringBuilder code, string indent)
+    internal void BuildDisposeStatment(StringBuilder code)
     {
-        code.AppendFormat(@"
-{0}        ", indent);
+        code.Append(@"
+        ");
 
         if (RequiresDisposabilityCast)
             code.Append('(').Append(CacheField).Append(" as global::System.IDisposable)");
