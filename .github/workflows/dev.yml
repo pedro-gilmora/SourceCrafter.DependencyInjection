@@ -31,6 +31,7 @@ jobs:
         done
 
     - name: Notify Telegram
+      if: always()
       shell: pwsh      
       run: |
         $status = if ('${{ job.status }}' -eq 'failure') { 'failed' } else { 'successfully completed' }
