@@ -19,7 +19,7 @@ namespace SourceCrafter.DependencyInjection.Tests
     //[Scoped<IDatabase, Database>(Main.App)]
     [Scoped<IAuthService, AuthService>]
     //[Transient<string>(Main.App, nameof(Name))]
-    public partial class Server
+    public partial struct Server
     {
         internal static ValueTask<int> ResolveAsync(CancellationToken _)
         {
@@ -27,7 +27,7 @@ namespace SourceCrafter.DependencyInjection.Tests
         }
     }
 
-    public class AuthService(IDatabase application, int count) : IAuthService, IDisposable
+    public class AuthService(IDatabase application, int count) : IAuthService
     {
         public int O => count;
         public IDatabase Database { get; } = application;
@@ -38,12 +38,14 @@ namespace SourceCrafter.DependencyInjection.Tests
         }
     }
 
-    public interface IAuthService
+    public interface IAuthService : IDisposable
     {
         IDatabase Database { get; }
     }
 
-    public class Database(AppSettings settings, string connection) : IDatabase, IAsyncDisposable
+#pragma warning disable CS9113 // Parameter is unread.
+    public class Database(AppSettings settings, string connection) : IDatabase
+#pragma warning restore CS9113 // Parameter is unread.
     {
         //AppSettings config = config;
 
@@ -58,7 +60,7 @@ namespace SourceCrafter.DependencyInjection.Tests
         }
     }
 
-    public interface IDatabase
+    public interface IDatabase : IAsyncDisposable
     {
         void TrySave(out string setting1);
     }
@@ -70,7 +72,9 @@ namespace SourceCrafter.DependencyInjection.Tests
 
     public class AppSettings
     {
+#pragma warning disable CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable.
         public string Setting1 { get; set; }
         public string Setting2 { get; set; }
+#pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable.
     }
 }

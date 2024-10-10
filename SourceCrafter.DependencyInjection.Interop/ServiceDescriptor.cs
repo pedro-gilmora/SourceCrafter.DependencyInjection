@@ -137,7 +137,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
                 .Append(FullTypeName)
                 .Append("? ")
                 .Append(CacheField)
-                .Append(@";
+                .Append(@" = null;
 
     ")
                 .AppendLine(generatedCodeAttribute);
@@ -238,7 +238,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
         await __globalSemaphore.WaitAsync(cancellationToken ??= __globalCancellationTokenSrc.Token);
 
         try
-        {{
+        {
             return ");
 
                 code.Append(CacheField)
@@ -247,11 +247,11 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
                 AppendBuilder(code);
 
                 code.Append(@";
-        }}
+        }
         finally
-        {{
+        {
             __globalSemaphore.Release();
-        }}");
+        }");
 
             }
             else

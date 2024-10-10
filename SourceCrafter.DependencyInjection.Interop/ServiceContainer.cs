@@ -345,6 +345,8 @@ internal class ServiceContainer
         {
             ClassDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var argList } =>
                 ($"{mods} {keyword}".TrimStart(), $"{identifier}{argList}"),
+            StructDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var argList } =>
+                ($"{mods} {keyword}".TrimStart(), $"{identifier}{argList}"),
             _ => ("partial class ", "")
         };
 
@@ -356,6 +358,13 @@ internal class ServiceContainer
         var (disposability, hasDisposableScoped) = DisposableInfo;
 
         BuildDisposability(code, disposability);
+
+        if(_providerClass.TypeKind is TypeKind.Struct)
+        {
+            code.Append(@"
+    public ").Append(typeName).Append(@"() { }
+");
+        }
 
         code
             .Append(@"
@@ -409,7 +418,13 @@ internal class ServiceContainer
 
                     code.Append(@"
     ").AppendLine(_generatorGuid)
-                        .Append(@"    public virtual void Dispose()
+                        .Append(@"    public");
+
+                    if(_providerClass is { TypeKind: not TypeKind.Struct, IsSealed: false }) 
+                        code.Append(" virtual");
+                    
+
+                    code.Append(@" void Dispose()
     {");
 
                     break;
@@ -417,8 +432,16 @@ internal class ServiceContainer
                 case Disposability.AsyncDisposable:
 
                     code.Append(@"
-    ").AppendLine(_generatorGuid)
-                        .Append(@"    public virtual async global::System.Threading.Tasks.ValueTask DisposeAsync()
+    ").AppendLine(_generatorGuid);
+
+
+
+                    code.Append(@"    public");
+
+                    if (_providerClass is { TypeKind: not TypeKind.Struct, IsSealed: false })
+                        code.Append(" virtual");
+                    
+                    code.Append(@" async global::System.Threading.Tasks.ValueTask DisposeAsync()
     {");
 
                     break;

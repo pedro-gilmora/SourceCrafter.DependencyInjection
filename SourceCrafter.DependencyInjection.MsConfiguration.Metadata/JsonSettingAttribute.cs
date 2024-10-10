@@ -10,7 +10,7 @@ using System.IO;
 
 namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
 {
-    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Assembly, AllowMultiple = false)]
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Assembly, AllowMultiple = false)]
 #pragma warning disable CS9113 // Parameter is unread.
     public sealed class JsonConfigurationAttribute(
         string fileName = "appsettings",
@@ -34,7 +34,7 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
     ) 
         : DependencyAttribute(lifetime, nameFormat);
 
-    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Parameter, AllowMultiple = true)]
+    [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
     public sealed class JsonSettingAttribute<T>(
         string path,
         Lifetime lifetime = Lifetime.Singleton,
