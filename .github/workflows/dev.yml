@@ -60,6 +60,7 @@ jobs:
             chat_id = ${{ secrets.SC_CHATID }}
             text    = $message
             parse_mode = 'HTML'
+            message_thread_id = 4
         }
 
         Invoke-RestMethod -Uri $uri -Method Post -Body $body
