@@ -42,8 +42,6 @@ internal class ServiceContainer
 
     internal readonly DependencyMap servicesMap = new(new DependencyComparer<string>());
 
-    //readonly Map<ServiceDescriptor, Action<StringBuilder>> keyedMethods = new(new KeyedServiceComparer());
-
     CommaSeparateBuilder? interfaces = null;
 
     MemberBuilder?
@@ -197,7 +195,7 @@ internal class ServiceContainer
                         .PrimitiveDependencyShouldBeKeyed(lifetime, attrSyntax, typeName, exportTypeFullName));
             }
 
-            existingOrNew = new(depInfo.FinalType, exportTypeFullName, depInfo.Key, depInfo.IFaceType)
+            existingOrNew = new(depInfo.FinalType, depInfo.Key, depInfo.IFaceType)
             {
                 ServiceContainer = this,
                 OriginDefinition = attrSyntax,
@@ -310,7 +308,7 @@ internal class ServiceContainer
             servicesMap.GetValueOrAddDefault(
                 (Lifetime.Singleton, cancelTypeName, ""),
                 out _,
-                () => new(cancelType, cancelTypeName, "")
+                () => new(cancelType, "")
                 {
                     ServiceContainer = this,
                     IsResolved = true,
@@ -318,8 +316,6 @@ internal class ServiceContainer
                 });
         }
     }
-
-    //TODO: add cancel token
 
     public void Build(
         Dictionary<string, DependencyMap> containers,
@@ -362,10 +358,6 @@ internal class ServiceContainer
         BuildDisposability(code, disposability);
 
         code
-            //.Append(@" : ")
-            //.Append('I')
-            //.Append(typeName
-//{)
             .Append(@"
     public static string Environment => global::System.Environment.GetEnvironmentVariable(""DOTNET_ENVIRONMENT"") ?? ""Development"";");
 
@@ -518,80 +510,6 @@ internal class ServiceContainer
                 break;
         }
     }
-
-    /*
-    private void CheckUsages(ImmutableArray<InvocationExpressionSyntax> usages)
-    {
-        foreach (var invExpr in usages)
-        {
-            bool found = false;
-
-            if (((GenericNameSyntax)((MemberAccessExpressionSyntax)invExpr.Expression).Name)
-                    .TypeArgumentList
-                    .Arguments
-                    .FirstOrDefault() is not { } type)
-
-                continue;
-
-            var contextModel = _compilation.GetSemanticModel(invExpr.SyntaxTree);
-
-            var refType = contextModel.GetSymbolInfo(((MemberAccessExpressionSyntax)invExpr.Expression).Expression).Symbol switch
-            {
-                ILocalSymbol { Type: { } rType } => rType,
-                IFieldSymbol { Type: { } rType } => rType,
-                IPropertySymbol { Type: { } rType } => rType,
-                _ => null
-            };
-
-            if (refType is null || !SymbolEqualityComparer.Default.Equals(refType, _providerClass)) continue;
-
-            var typeSymbol = contextModel.GetTypeInfo(type).Type;
-
-            if (typeSymbol is null) continue;
-
-            var typeFullName = typeSymbol.ToGlobalNamespaced();
-
-            IFieldSymbol? key = null;
-            ITypeSymbol? keyType = null;
-
-            if (invExpr.ArgumentList.Arguments is [{ Expression: { } keyArg } arg])
-            {
-                keyType = contextModel.GetTypeInfo(keyArg).Type;
-
-                if (keyType?.TypeKind is not TypeKind.Enum)
-                {
-                    _diagnostics.TryAdd(
-                        ServiceContainerGeneratorDiagnostics.InvalidKeyType(arg.Expression));
-
-                    continue;
-                }
-                else if (contextModel.GetSymbolInfo(keyArg).Symbol is IFieldSymbol { IsConst: true } fieldValue)
-                {
-                    key = fieldValue;
-                }
-            }
-
-            discoveredServices.ForEach((DependecyKey itemK, ref ServiceDescriptor item) =>
-            {
-                if (item.ExportTypeName == typeFullName
-                    && ((item.Key, key) switch
-                    {
-                        ({ } itemKey, { }) => SymbolEqualityComparer.Default.Equals(itemK.Key, key),
-                        (var itemKey, _) => itemKey is null || SymbolEqualityComparer.Default.Equals(itemKey.Type, keyType)
-                    })
-                    && item.IsResolved)
-                {
-                    found = true;
-                }
-            });
-
-            if (!found)
-            {
-                _diagnostics.TryAdd(
-                    ServiceContainerGeneratorDiagnostics.UnresolvedDependency(invExpr, providerClassName, typeFullName, keyType, key));
-            }
-        }
-    }
-    */
 }
+
 internal record InvokeInfo(ITypeSymbol ContainerType, string Name, IdentifierNameSyntax MethodSyntax, bool IsNotScoped);

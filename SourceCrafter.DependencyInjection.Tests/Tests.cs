@@ -45,28 +45,28 @@ namespace SourceCrafter.DependencyInjection.Tests
 
         //setting1.Should().Be("Value1");
         //}
-        //[Fact]
-        //public async Task Test2()
-        //{
-            //await using Server serverContainer = new();
+        [Fact]
+        public async Task Test2()
+        {
+            await using Server serverContainer = new();
 
-            //serverContainer.GetDatabase().TrySave(out var setting1);
+            serverContainer.GetDatabase().TrySave(out var setting1);
 
-            //setting1.Should().Be("Value1");
+            setting1.Should().Be("Value1");
 
-            //// Checking non-static enum values ​​based on provided key
-            ////serverContainer.GetService<string>(GetApplication()).Should().Be("Server::Name");
+            // Checking non-static enum values ​​based on provided key
+            //serverContainer.GetService<string>(GetApplication()).Should().Be("Server::Name");
 
-            ////int transientInt = await serverContainer.;
+            //int transientInt = await serverContainer.;
 
-            //await using var scope = serverContainer.CreateScope();
+            await using var scope = serverContainer.CreateScope();
 
-            //// Async-resolved services
-            //using var authService = await scope.GetAuthServiceAsync();
+            // Async-resolved services
+            using var authService = await scope.GetAuthServiceAsync();
 
-            //authService.Database.TrySave(out setting1);
+            authService.Database.TrySave(out setting1);
 
-            //setting1.Should().Be("Value1");
-        //}
+            setting1.Should().Be("Value1");
+        }
     }
 }

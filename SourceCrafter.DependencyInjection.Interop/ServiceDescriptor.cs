@@ -16,7 +16,7 @@ internal delegate void ValueBuilder(StringBuilder code);
 internal delegate void MemberBuilder(StringBuilder code, bool isImplementation, string generatedCodeAttribute);
 internal delegate void ParamsBuilder(StringBuilder code);
 
-public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullName, string key, ITypeSymbol? _interface = null)
+public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol? _interface = null)
 {
     static readonly Lifetime[] lifetimes = [Lifetime.Singleton, Lifetime.Scoped, Lifetime.Transient];
 
@@ -28,7 +28,6 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         FactoryOrInstanceParamName = "factoryOrInstance",
         ImplParamName = "impl",
         IfaceParamName = "iface",
-        CacheParamName = "cache",
         SingletonAttr = "global::SourceCrafter.DependencyInjection.Attributes.SingletonAttribute",
         ScopedAttr = "global::SourceCrafter.DependencyInjection.Attributes.ScopedAttribute",
         TransientAttr = "global::SourceCrafter.DependencyInjection.Attributes.TransientAttribute",
@@ -58,10 +57,10 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
     public bool IsExternal;
     internal AttributeSyntax OriginDefinition = null!;
     internal ServiceContainer ServiceContainer = null!;
+    public string ExportTypeName = null!;
 
     public Disposability ContainerDisposability => ServiceContainer.disposability;
 
-    public string ExportTypeName;
     private bool? isFactory;
 
     private bool? isNamed;
@@ -539,7 +538,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
 
             var methodName = GetMethodName(isExternal, lifetime, depInfo, isAsync, container.methodsRegistry, container.methodNamesMap);
 
-            found = new(depInfo.FinalType, paramTypeName, depInfo.Key, null)
+            found = new(depInfo.FinalType, depInfo.Key, null)
             {
                 ServiceContainer = ServiceContainer,
                 Lifetime = lifetime,
@@ -835,14 +834,6 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
                             depInfo.DefaultParamValues = method.Parameters;
                             break;
                     }
-
-                    continue;
-
-                case CacheParamName:
-
-                    depInfo.IsCached |= arg is not null && bool.TryParse(arg.Expression.ToString(), out var _cache)
-                        ? _cache
-                        : param.HasExplicitDefaultValue && (bool)param.ExplicitDefaultValue!;
 
                     continue;
 
