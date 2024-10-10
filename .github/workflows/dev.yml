@@ -20,10 +20,12 @@ jobs:
 
     - name: Restore, Package and Test
       shell: pwsh
+      id: build
       run: .\Package.ps1 -clean false -test true
       
     - name: Publish generator and endpoints to Nuget
       if: github.ref_name == 'dev'
+      id: publish
       run: |        
         for package in $(find . -wholename '**/packaging/*.nupkg'); do
           # Execute nuget push for each package
@@ -34,17 +36,26 @@ jobs:
       if: always()
       shell: pwsh      
       run: |
-        $status = if ('${{ job.status }}' -eq 'failure') { 'failed' } else { 'successfully completed' }
-        $icon = if ('${{ job.status }}' -eq 'failure') { '⛔' } else { '✅' }
+        $status, $icon, $message = if ('${{ job.status }}' -eq 'failure') { 
+          'failed', '💥', '${{ steps.build.outputs.error }}\n${{ steps.build.publish.error }}'.Trim()
+        } else if ('${{ job.status }}' -eq 'success') { 
+          'successfully completed', '✅', '${{ github.event.head_commit.message }}' 
+        } else if ('${{ job.status }}' -eq 'success') { 
+          'cancelled', '⛔', 'User aborted the action' 
+        }
+         
+        $id = '${{ github.sha }}'.Substring(0,8)
+        
         $message = @"
         🚀$icon <b>${{ github.workflow }}</b> #${{ github.run_number }} Build $status
         👤 <b>Triggered by:</b> ${{ github.actor }}
         🌿 <b>Branch:</b> ${{ github.ref }}
-        🔗 <b>Commit:</b> [<code>${{ github.sha }}</code>] 
-        ${{ github.event.head_commit.message }}
+        🔗 <b>Change:</b> [<code>$id</code>] 
+        $message
         "@
 
         $uri = "https://api.telegram.org/bot${{ secrets.TGBOT_TOKEN }}/sendMessage"
+
         $body = @{
             chat_id = ${{ secrets.SC_CHATID }}
             text    = $message
