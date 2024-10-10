@@ -37,7 +37,7 @@ jobs:
       shell: pwsh      
       run: |
         $status, $icon, $message = if ('${{ job.status }}' -eq 'failure') { 
-          'failed', '💥', '${{ steps.build.outputs.error }}\n${{ steps.build.publish.error }}'.Trim()
+          'failed', '💥', 'Errors: ${{ steps.build.outputs.errors }}<br/>${{ steps.build.publish.errors }}'.Trim()
         } elseif ('${{ job.status }}' -eq 'success') { 
           'successfully completed', '✅', '${{ github.event.head_commit.message }}' 
         } else { 
