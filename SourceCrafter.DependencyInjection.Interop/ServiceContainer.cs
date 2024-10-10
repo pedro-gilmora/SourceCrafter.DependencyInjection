@@ -418,7 +418,7 @@ internal class ServiceContainer
                     code.Append(@"
     ").AppendLine(_generatorGuid)
                         .Append(@"    public virtual void Dispose()
-	{");
+    {");
 
                     break;
 

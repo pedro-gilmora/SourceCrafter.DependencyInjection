@@ -97,7 +97,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
     {
         (useIComma.Exchange(true) ? code.Append(", ") : code)
             .Append(@"
-	global::SourceCrafter.DependencyInjection.I");
+    global::SourceCrafter.DependencyInjection.I");
 
         if (IsKeyed) code.Append("Keyed");
 
@@ -199,16 +199,14 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
 ");
     }
 
-    void BuildResolverBody(StringBuilder code, int indentSeeding = 0)
+    void BuildResolverBody(StringBuilder code)
     {
-        string? indentSeed = indentSeeding == 0 ? null : new(' ', indentSeeding * 4);
-
         if (IsCached)
         {
             var checkNullOnValueType = (Interface ?? Type) is { IsValueType: true, NullableAnnotation: not NullableAnnotation.Annotated };
 
-            code.AppendFormat(@"
-		if (", indentSeed)
+            code.Append(@"
+        if (")
                 .Append(CacheField);
 
             if (checkNullOnValueType)
@@ -236,32 +234,32 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
 
             if (IsAsync)
             {
-                code.AppendFormat(@"
+                code.Append(@"
 
         await __globalSemaphore.WaitAsync(cancellationToken ??= __globalCancellationTokenSrc.Token);
 
         try
         {{
-            return ", indentSeed);
+            return ");
 
                 code.Append(CacheField)
                     .Append(@" ??= ");
 
                 AppendBuilder(code);
 
-                code.AppendFormat(@";
+                code.Append(@";
         }}
         finally
         {{
             __globalSemaphore.Release();
-        }}", indentSeed);
+        }}");
 
             }
             else
             {
-                code.AppendFormat(@"
+                code.Append(@"
 
-        lock(__lock) return ", indentSeed)
+        lock(__lock) return ")
                     .Append(CacheField)
                     .Append(@" ??= ");
 
@@ -272,8 +270,8 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string exportTypeFullNam
         }
         else
         {
-            code.AppendFormat(@"
-        return ", indentSeed);
+            code.Append(@"
+        return ");
 
             BuildInstance(code);
 
