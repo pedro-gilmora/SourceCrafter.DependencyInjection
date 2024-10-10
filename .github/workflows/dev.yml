@@ -38,9 +38,9 @@ jobs:
       run: |
         $status, $icon, $message = if ('${{ job.status }}' -eq 'failure') { 
           'failed', '💥', '${{ steps.build.outputs.error }}\n${{ steps.build.publish.error }}'.Trim()
-        } else if ('${{ job.status }}' -eq 'success') { 
+        } elseif ('${{ job.status }}' -eq 'success') { 
           'successfully completed', '✅', '${{ github.event.head_commit.message }}' 
-        } else if ('${{ job.status }}' -eq 'success') { 
+        } else { 
           'cancelled', '⛔', 'User aborted the action' 
         }
          
