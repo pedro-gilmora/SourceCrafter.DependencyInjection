@@ -12,36 +12,34 @@ namespace SourceCrafter.DependencyInjection.Tests
     [ServiceContainer]
     [JsonSetting<AppSettings>("AppSettings")]
     [JsonSetting<string>("ConnectionStrings::DefaultConnection", nameFormat: "GetConnectionString")]
-    //[JsonConfiguration]
-    ////[Singleton<Configuration>(factoryOrInstance: nameof(BuildConfiguration))]
     [Transient<int>("count", nameof(ResolveAsync))]
-    [Singleton<IDatabase, Database>]
-    //[Scoped<IDatabase, Database>(Main.App)]
     [Scoped<IAuthService, AuthService>]
-    //[Transient<string>(Main.App, nameof(Name))]
-    public partial struct Server
+    [Transient<EmployeeService>]
+    public sealed partial class Server
     {
-        internal static ValueTask<int> ResolveAsync(CancellationToken _)
+        private static ValueTask<int> ResolveAsync(CancellationToken _)
         {
             return ValueTask.FromResult(1);
         }
     }
 
-    public class AuthService(IDatabase application, int count) : IAuthService
+    public class AuthService([Singleton<Database>] IDatabase appDb, int count) : IAuthService
     {
         public int O => count;
-        public IDatabase Database { get; } = application;
+        public IDatabase Database { get; } = appDb;
 
-        public void Dispose()
+        public virtual void Dispose()
         {
             //Continue with HostEnvironment
         }
     }
 
-    public interface IAuthService : IDisposable
+    public interface IAuthService //: IDisposable
     {
         IDatabase Database { get; }
     }
+
+    public class EmployeeService(IAuthService authService);
 
 #pragma warning disable CS9113 // Parameter is unread.
     public class Database(AppSettings settings, string connection) : IDatabase

@@ -45,13 +45,13 @@ public class Program
         var authService = scope.GetService<Jab.Tests.IAuthService>();
     }
 
-    [Benchmark]
-    public async Task SourceCrafter_DependencyInjection()
-    {
-        await using var container = new SourceCrafter.DependencyInjection.Tests.ServerSCDI();
-        await using var scope = container.CreateScope();
-        var authService = scope.GetAuthService();
-    }
+    //[Benchmark]
+    //public async Task SourceCrafter_DependencyInjection()
+    //{
+    //    await using var container = new SourceCrafter.DependencyInjection.Tests.ServerSCDI();
+    //    await using var scope = container.CreateScope();
+    //    var authService = scope.GetAuthService();
+    //}
 }
 
 //public static class PureDI

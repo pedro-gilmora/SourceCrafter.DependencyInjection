@@ -6,7 +6,7 @@ using System.Collections.Generic;
 
 namespace SourceCrafter.DependencyInjection.Interop;
 
-public class DependencyComparer<T> : IEqualityComparer<(Lifetime, T, string)> where T : IEquatable<T>
+public sealed class DependencyComparer<T> : IEqualityComparer<(Lifetime, T, string)> where T : IEquatable<T>
 {
     public bool Equals((Lifetime, T, string) x, (Lifetime, T, string) y)
     {

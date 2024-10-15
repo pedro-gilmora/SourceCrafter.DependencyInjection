@@ -10,32 +10,32 @@ namespace SourceCrafter.DependencyInjection.Attributes
     public class ServiceContainerAttribute : Attribute;
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
-    public class SingletonAttribute<TImplementation>(string? key = null, string? factoryOrInstance = null, bool cache = false, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+    public class SingletonAttribute<TImplementation>(string key = "", string? factoryOrInstance = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct, AllowMultiple = true)]
-    public class SingletonAttribute<T, TImplementation>(string? key = null, string? factoryOrInstance = null, bool cache = false, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+    public class SingletonAttribute<T, TImplementation>(string key = "", string? factoryOrInstance = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
-    public class SingletonAttribute(string? key = null, Type? impl = null, Type? iface = null, string? factoryOrInstance = null, bool cache = false, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+    public class SingletonAttribute(string key = "", Type? impl = null, Type? iface = null, string? factoryOrInstance = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
-    public class ScopedAttribute<TImplementation>(string? key = null, string? factoryOrInstance = null, bool cache = false, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+    public class ScopedAttribute<TImplementation>(string key = "", string? factoryOrInstance = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct, AllowMultiple = true)]
-    public class ScopedAttribute<T, TImplementation>(string? key = null, string? factoryOrInstance = null, bool cache = false, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+    public class ScopedAttribute<T, TImplementation>(string key = "", string? factoryOrInstance = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
-    public class ScopedAttribute(string? key = null, Type? impl = null, Type? iface = null, string? factoryOrInstance = null, bool cache = false, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+    public class ScopedAttribute(string key = "", Type? impl = null, Type? iface = null, string? factoryOrInstance = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
-    public class TransientAttribute<TImplementation>(string? key = null, string? factoryOrInstance = null, bool cache = false, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+    public class TransientAttribute<TImplementation>(string key = "", string? factoryOrInstance = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct, AllowMultiple = true)]
-    public class TransientAttribute<T, TImplementation>(string? key = null, string? factoryOrInstance = null, bool cache = false, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+    public class TransientAttribute<T, TImplementation>(string key = "", string? factoryOrInstance = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
-    public class TransientAttribute(string? key = null, Type? impl = null, Type? iface = null, string? factoryOrInstance = null, bool cache = false, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+    public class TransientAttribute(string key = "", Type? impl = null, Type? iface = null, string? factoryOrInstance = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
  
-    public abstract class DependencyAttribute(Lifetime lifetime, string? key = null, string? factoryOrInstance = null, bool cache = false, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+    public abstract class DependencyAttribute(Lifetime lifetime, string key = "", string? factoryOrInstance = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
 }
 

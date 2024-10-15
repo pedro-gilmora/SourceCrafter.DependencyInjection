@@ -45,6 +45,8 @@ namespace SourceCrafter.DependencyInjection.Tests
 
         //setting1.Should().Be("Value1");
         //}
+
+
         [Fact]
         public async Task Test2()
         {
@@ -56,7 +58,9 @@ namespace SourceCrafter.DependencyInjection.Tests
 
             await using var scope = serverContainer.CreateScope();
 
-            using var authService = await scope.GetAuthServiceAsync();
+            var database = scope.GetDatabase();
+            var employeeService2 = await serverContainer.GetEmployeeServiceAsync();
+            var authService = await scope.GetAuthServiceAsync();
 
             authService.Database.TrySave(out setting1);
 

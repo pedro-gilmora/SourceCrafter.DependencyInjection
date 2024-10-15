@@ -14,35 +14,11 @@ namespace SourceCrafter.DependencyInjection.Interop;
 
 using static ServiceDescriptor;
 
-delegate void DisposabilityBuilder(StringBuilder code);
+delegate void DisposabilityBuilder(StringBuilder code, string? indent = "    ");
 
-internal class ServiceContainer
+internal sealed class ServiceContainer
 {
-    internal readonly string providerTypeName;
-
-    readonly ImmutableArray<AttributeData> attributes;
-
-    internal readonly SemanticModel _model;
-
-    internal readonly Set<Diagnostic> _diagnostics;
-
-    internal readonly string _generatorGuid;
-
-    internal readonly ImmutableArray<InvokeInfo> _serviceCalls;
-
-    internal readonly INamedTypeSymbol _providerClass;
-
-    internal readonly Compilation _compilation;
-
-    internal HashSet<string> methodsRegistry = new(StringComparer.Ordinal);
-
-    internal readonly HashSet<(string?, string)> interfacesRegistry = [];
-
-    internal readonly DependencyNamesMap methodNamesMap = new(new DependencyComparer<int>());
-
-    internal readonly DependencyMap servicesMap = new(new DependencyComparer<string>());
-
-    CommaSeparateBuilder? interfaces = null;
+    //CommaSeparateBuilder? interfaces = null;
 
     MemberBuilder?
         methods = null;
@@ -58,9 +34,48 @@ internal class ServiceContainer
         requiresLocker = false/*,
         hasAsyncService = false*/;
 
-    (Disposability, bool) DisposableInfo => servicesMap.Values
-        .Where(s => s is { IsCached: true, Lifetime: < Lifetime.Transient, Disposability: > Disposability.None })
-        .Aggregate((d: Disposability.None, isd: false), (s, i) => (i.Disposability > s.d ? i.Disposability : s.d, s.isd || i is { IsCached: true, Lifetime: Lifetime.Scoped }));
+    (Disposability, bool) DisposableInfo
+    {
+        get
+        {
+            (Disposability d, bool isd) result = default;
+
+            foreach (var value in ServicesMap.Values)
+            {
+                if (value is not { IsCached: true, Lifetime: < Lifetime.Transient, Disposability: > Disposability.None }) continue;
+
+                if (value.Disposability > result.d) result.d = value.Disposability;
+
+                if (!result.isd && value is { IsCached: true, Lifetime: Lifetime.Scoped }) result.isd = true;
+            }
+
+            return result;
+        }
+    }
+
+    internal readonly SemanticModel Model;
+
+    internal readonly string GeneratorGuid;
+
+    internal readonly string ProviderTypeName;
+
+    internal readonly Compilation Compilation;
+
+    internal readonly Set<Diagnostic> Diagnostics;
+
+    internal readonly INamedTypeSymbol ProviderClass;
+
+    readonly ImmutableArray<AttributeData> Attributes;
+
+    internal readonly ImmutableArray<InvokeInfo> ServiceCalls;
+
+    internal readonly HashSet<(string?, string)> InterfacesRegistry = [];
+
+    internal HashSet<string> MethodsRegistry = new(StringComparer.Ordinal);
+
+    internal readonly DependencyMap ServicesMap = new(new DependencyComparer<string>());
+
+    internal readonly DependencyNamesMap MethodNamesMap = new(new DependencyComparer<int>());
 
     internal Disposability disposability = 0;
 
@@ -84,149 +99,157 @@ internal class ServiceContainer
         string generatorGuid,
         ImmutableArray<InvokeInfo> serviceCalls)
     {
-        _providerClass = providerClass;
-        _compilation = compilation;
-        _model = model;
-        _diagnostics = diagnostics;
-        _generatorGuid = generatorGuid;
-        _serviceCalls = serviceCalls;
-        providerTypeName = _providerClass.ToGlobalNamespaced();
-        attributes = _providerClass.GetAttributes();
-        foreach (var attr in externals.Concat(attributes))
+        ProviderClass = providerClass;
+        Compilation = compilation;
+        Model = model;
+        Diagnostics = diagnostics;
+        this.GeneratorGuid = generatorGuid;
+        ServiceCalls = serviceCalls;
+        ProviderTypeName = ProviderClass.ToGlobalNamespaced();
+        Attributes = ProviderClass.GetAttributes();
+
+        foreach (var attr in externals.Concat(Attributes))
         {
             if (attr.AttributeClass is null) continue;
 
             ParseDependencyAttribute(
-                attr.AttributeClass,
-                (AttributeSyntax)attr.ApplicationSyntaxReference!.GetSyntax(),
-                attr.AttributeConstructor?.Parameters,
+                attr,
                 providerClass);
         }
 
-        foreach (var item in servicesMap.ValuesAsSpan()) ResolveService(item);
+        /*foreach (var item in servicesMap.Values) ResolveService(item)*/;
     }
 
-    internal void CheckMethodUsage(Lifetime lifetime, string methodName)
+    internal void CheckMethodUsage(bool isOrHasScopedDependencies, string methodName)
     {
-        if (lifetime is Lifetime.Scoped
-                    && _serviceCalls.FirstOrDefault(sc => SymbolEqualityComparer.Default.Equals(sc.ContainerType, _providerClass) && methodName == sc.Name && sc.IsNotScoped) is { } el)
+        if (isOrHasScopedDependencies &&
+            ServiceCalls.FirstOrDefault(sc =>
+                SymbolEqualityComparer.Default.Equals(sc.ContainerType, ProviderClass)
+                && methodName == sc.Name
+                && sc.NotFromScopedInstance) is { } el)
         {
-            _diagnostics.TryAdd(
-                ServiceContainerGeneratorDiagnostics.DependencyCallShouldBeScoped(providerTypeName, el.MethodSyntax));
+            Diagnostics.TryAdd(
+                ServiceContainerGeneratorDiagnostics.DependencyCallMustBeScoped(ProviderTypeName, el.MethodSyntax));
         }
     }
 
     private void ParseDependencyAttribute(
-        INamedTypeSymbol originalAttrClass,
-        AttributeSyntax attrSyntax,
-        ImmutableArray<IParameterSymbol>? parameters,
+        AttributeData attributeData,
         INamedTypeSymbol providerClass)
     {
         disposability = default;
-        INamedTypeSymbol attrClass = originalAttrClass;
+        INamedTypeSymbol? originalAtrClass = attributeData.AttributeClass;
+        INamedTypeSymbol attrClass = originalAtrClass!;
         var isExternal = false;
 
-        if (attrClass is null
-            || attrClass.Name.StartsWith("ServiceContainer")
-            || GetLifetimeFromCtor(ref attrClass, ref isExternal, attrSyntax) is not { } lifetime) return;
+        if (!Model.TryGetDependencyInfo(
+            attributeData,
+            ref isExternal,
+            "",
+            null,
+            out var lifetime,
+            out var finalType,
+            out var iFaceType,
+            out var implType,
+            out var factory,
+            out var factoryKind,
+            out var outKey,
+            out var nameFormat,
+            out var defaultParamValues,
+            out var isCached,
+            out var _disposability,
+            out var isValid,
+            out var attrSyntax)) return;
 
-
-        if (!TryGetDependencyInfo(
-                _model,
-                attrClass.TypeArguments,
-                attrSyntax.ArgumentList?.Arguments ?? default,
-                parameters,
-                null,
-                "",
-                out var depInfo)) return;
-
-        if (!depInfo.IsCached && lifetime is not Lifetime.Transient) depInfo.IsCached = true;
+        if (!isCached && lifetime is not Lifetime.Transient) isCached = true;
 
         if (HasNoType() || InterfaceRequiresInternalFactory()) return;
 
-        var isAsync = depInfo.FinalType.TryGetAsyncType(out var realParamType);
+        var isAsync = finalType.TryGetAsyncType(out var realParamType);
 
         if (isAsync)
         {
-            depInfo.FinalType = realParamType!;
+            finalType = realParamType!;
 
-            if(!requiresSemaphore) UpdateAsyncStatus();
+            if (!requiresSemaphore) UpdateAsyncStatus();
 
-            if (depInfo.FactoryKind is SymbolKind.Method
-                && !((IMethodSymbol)depInfo.Factory!).Parameters.Any(p => p.Type.ToDisplayString() is CancelTokenFQMetaName))
+            if (factoryKind is SymbolKind.Method
+                && !((IMethodSymbol)factory!).Parameters.Any(p => p.Type.ToDisplayString() is CancelTokenFQMetaName))
             {
-                _diagnostics.TryAdd(ServiceContainerGeneratorDiagnostics.CancellationTokenShouldBeProvided(depInfo.Factory, attrSyntax));
+                Diagnostics.TryAdd(ServiceContainerGeneratorDiagnostics.CancellationTokenShouldBeProvided(factory, attrSyntax));
             }
         }
 
         Disposability thisDisposability = Disposability.None;
 
-        if (depInfo.IsCached)
+        if (isCached)
         {
-            thisDisposability = depInfo.ImplType.GetDisposability();
+            thisDisposability = implType.GetDisposability();
 
             if (thisDisposability > disposability) disposability = thisDisposability;
 
-            if (depInfo.Disposability > disposability) disposability = depInfo.Disposability;
+            if (_disposability > disposability) disposability = _disposability;
         }
 
-        var typeName = (depInfo.ImplType ?? depInfo.FinalType).ToGlobalNamespaced();
+        var typeName = (implType ?? finalType).ToGlobalNamespaced();
 
-        var exportTypeFullName = depInfo.IFaceType?.ToGlobalNamespaced() ?? typeName;
+        var exportTypeFullName = iFaceType?.ToGlobalNamespaced() ?? typeName;
 
-        ref var existingOrNew = ref servicesMap.GetValueOrAddDefault((lifetime, exportTypeFullName, depInfo.Key), out var exists)!;
+        ref var existingOrNew = ref ServicesMap.GetValueOrAddDefault((lifetime, exportTypeFullName, outKey), out var exists)!;
 
-        string methodName = GetMethodName(isExternal, lifetime, depInfo, isAsync, methodsRegistry, methodNamesMap);
+        string methodName = GetMethodName(isExternal, lifetime, finalType, implType, factory, outKey, nameFormat, isCached, isAsync, MethodsRegistry, MethodNamesMap);
 
         if (exists)
         {
-            _diagnostics.TryAdd(
+            Diagnostics.TryAdd(
                 ServiceContainerGeneratorDiagnostics
-                    .DuplicateService(lifetime, depInfo.Key, attrSyntax, typeName, exportTypeFullName));
+                    .DuplicateService(lifetime, outKey, attrSyntax, typeName, exportTypeFullName));
 
             return;
         }
         else
         {
-            if (!isExternal && depInfo.ImplType!.IsPrimitive() && depInfo.Key is "")
+            if (!isExternal && implType!.IsPrimitive() && outKey is "")
             {
-                _diagnostics.TryAdd(
+                Diagnostics.TryAdd(
                     ServiceContainerGeneratorDiagnostics
                         .PrimitiveDependencyShouldBeKeyed(lifetime, attrSyntax, typeName, exportTypeFullName));
             }
 
-            existingOrNew = new(depInfo.FinalType, depInfo.Key, depInfo.IFaceType)
+            existingOrNew = new(finalType, outKey, iFaceType)
             {
                 ServiceContainer = this,
                 OriginDefinition = attrSyntax,
                 Lifetime = lifetime,
-                Key = depInfo.Key,
+                Key = outKey,
                 IsExternal = isExternal,
                 FullTypeName = typeName,
-                ExportTypeName = (depInfo.IFaceType ?? depInfo.ImplType ?? depInfo.FinalType).ToGlobalNamespaced(),
+                ExportTypeName = (iFaceType ?? implType ?? finalType).ToGlobalNamespaced(),
                 ResolverMethodName = methodName,
                 CacheField = "_" + methodName.Camelize(),
-                Factory = depInfo.Factory,
-                FactoryKind = depInfo.FactoryKind,
-                Disposability = (Disposability)Math.Max((byte)thisDisposability, (byte)depInfo.Disposability),
+                Factory = factory,
+                FactoryKind = factoryKind,
+                Disposability = (Disposability)Math.Max((byte)thisDisposability, (byte)_disposability),
                 IsResolved = true,
-                Attributes = depInfo.ImplType!.GetAttributes(),
-                RequiresDisposabilityCast = thisDisposability is Disposability.None && depInfo.Disposability is not Disposability.None,
+                Attributes = implType!.GetAttributes(),
+                RequiresDisposabilityCast = thisDisposability is Disposability.None && _disposability is not Disposability.None,
                 IsAsync = isAsync,
                 ContainerType = providerClass,
-                IsCached = depInfo.IsCached,
-                Params = Extensions.GetParameters(depInfo),
-                DefaultParamValues = depInfo.DefaultParamValues
+                IsCached = isCached,
+                Params = implType.GetParameters(),
+                DefaultParamValues = defaultParamValues
             };
+
+            ResolveService(existingOrNew);
         }
 
-        bool HasNoType() => depInfo is { ImplType: null, IFaceType: null };
+        bool HasNoType() => implType is null && iFaceType is null;
 
         bool InterfaceRequiresInternalFactory()
         {
-            if (depInfo is { IFaceType: not null, ImplType: null, Factory: null } && !isExternal)
+            if (iFaceType is not null && implType is null && factory is null && !isExternal)
             {
-                _diagnostics.TryAdd(
+                Diagnostics.TryAdd(
                     ServiceContainerGeneratorDiagnostics.InterfaceRequiresFactory(attrSyntax.Name));
 
                 return true;
@@ -236,24 +259,24 @@ internal class ServiceContainer
         }
     }
 
-    internal void ResolveService(ServiceDescriptor foundService)
+    internal void ResolveService(ServiceDescriptor service)
     {
-        if (foundService.Factory is null && foundService.Type.IsPrimitive()) return;
+        if (service is { Factory: null, IsAsync: false } && service.Type.IsPrimitive()) return;
 
-        foundService.CheckParamsDependencies(this, _serviceCalls);
+        service.CheckParamsDependencies();
 
-        if (foundService.NotRegistered || foundService.IsCancelTokenParam) return;
+        if (service.NotRegistered || service.IsCancelTokenParam) return;
 
-        if (interfacesRegistry.Add((foundService.Key, foundService.ExportTypeName)))
+        //if (InterfacesRegistry.Add((service.Key, service.ExportTypeName)))
+        //{
+        //    interfaces += service.AddInterface;
+        //}
+
+        if (service.Lifetime is Lifetime.Scoped && !hasScopedServices) hasScopedServices = true;
+
+        if (service.Lifetime is not Lifetime.Transient)
         {
-            interfaces += foundService.AddInterface;
-        }
-
-        if (foundService.Lifetime is Lifetime.Scoped && !hasScopedServices) hasScopedServices = true;
-
-        if (foundService.Lifetime is not Lifetime.Transient)
-        {
-            if (!requiresSemaphore && foundService.IsAsync)
+            if (!requiresSemaphore && service.IsAsync)
             {
                 UpdateAsyncStatus();
             }
@@ -262,54 +285,56 @@ internal class ServiceContainer
                 requiresLocker = true;
             }
 
-            switch (foundService.Disposability)
+            switch (service.Disposability)
             {
                 case Disposability.AsyncDisposable:
 
-                    if (foundService.Lifetime is Lifetime.Scoped)
+                    if (service.Lifetime is Lifetime.Scoped)
                     {
-                        disposeStatments += foundService.BuildDisposeAsyncStatment;
+                        disposeStatments += service.BuildDisposeAsyncStatment;
                     }
                     else
                     {
-                        singletonDisposeStatments += foundService.BuildDisposeAsyncStatment;
+                        singletonDisposeStatments += service.BuildDisposeAsyncStatment;
                     }
 
                     break;
                 case Disposability.Disposable:
 
-                    if (foundService.Lifetime is Lifetime.Scoped)
+                    if (service.Lifetime is Lifetime.Scoped)
                     {
-                        disposeStatments += foundService.BuildDisposeStatment;
+                        disposeStatments += service.BuildDisposeStatment;
                     }
                     else
                     {
-                        singletonDisposeStatments += foundService.BuildDisposeStatment;
+                        singletonDisposeStatments += service.BuildDisposeStatment;
                     }
                     break;
             }
         }
 
-        if (foundService.Disposability > disposability) disposability = foundService.Disposability;
+        if (service.Disposability > disposability) disposability = service.Disposability;
 
-        if (foundService is { IsExternal: true } or { IsFactory: true, IsCached: false } || foundService.Lifetime is Lifetime.Transient) return;
+        if (service is { IsExternal: true } or { IsFactory: true, IsCached: false } or { IsSimpleTransient: true }) return;
 
-        methods += foundService.BuildResolver;
+        methods += service.BuildMethod;
     }
 
     internal void UpdateAsyncStatus()
     {
         requiresSemaphore = true;
 
-        if (_compilation.GetTypeByMetadataName(CancelTokenFQMetaName) is { } cancelType)
+        if (Compilation.GetTypeByMetadataName(CancelTokenFQMetaName) is { } cancelType)
         {
             string cancelTypeName = cancelType.ToGlobalNamespaced();
 
-            servicesMap.GetValueOrAddDefault(
+            ServicesMap.TryInsert(
                 (Lifetime.Singleton, cancelTypeName, ""),
-                out _,
                 () => new(cancelType, "")
                 {
+                    Lifetime = Lifetime.Singleton,
+                    ExportTypeName = cancelTypeName,
+                    FullTypeName = cancelTypeName,
                     ServiceContainer = this,
                     IsResolved = true,
                     IsCancelTokenParam = true
@@ -321,18 +346,20 @@ internal class ServiceContainer
         Dictionary<string, DependencyMap> containers,
         ImmutableArray<ITypeSymbol> usages,
         Map<string, byte> uniqueName,
-        Action<string, string> addSource)
+        Action<string, string> addSource,
+        string? net9Lock,
+        SyntaxNode declaration)
     {
-        if (servicesMap.IsEmpty /*interfaces == null*/) return;
+        if (ServicesMap.IsEmpty /*interfaces == null*/) return;
 
-        containers[providerTypeName] = servicesMap;
+        containers[ProviderTypeName] = ServicesMap;
 
         StringBuilder code = new(@"#nullable enable
 ");
 
-        var fileName = _providerClass.ToMetadataLongName(uniqueName);
+        var fileName = ProviderClass.ToMetadataLongName(uniqueName);
 
-        if (_providerClass.ContainingNamespace is { IsGlobalNamespace: false } ns)
+        if (ProviderClass.ContainingNamespace is { IsGlobalNamespace: false } ns)
         {
             code.Append("namespace ")
                 .Append(ns.ToDisplayString()!)
@@ -341,16 +368,16 @@ internal class ServiceContainer
 ");
         }
 
-        var (modifiers, typeName) = _providerClass.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() switch
+        var (modifiers, typeName) = declaration switch
         {
             ClassDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var argList } =>
                 ($"{mods} {keyword}".TrimStart(), $"{identifier}{argList}"),
-            StructDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var argList } =>
-                ($"{mods} {keyword}".TrimStart(), $"{identifier}{argList}"),
-            _ => ("partial class ", "")
+            InterfaceDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var argList } =>
+                ($"{mods} {keyword}".TrimStart(), $"{identifier.ValueText[1..]}{argList}"),
+            _ => ("", "")
         };
 
-        code.AppendLine(_generatorGuid)
+        code.AppendLine(GeneratorGuid)
             .Append(modifiers)
             .AddSpace()
             .Append(typeName);
@@ -359,7 +386,7 @@ internal class ServiceContainer
 
         BuildDisposability(code, disposability);
 
-        if(_providerClass.TypeKind is TypeKind.Struct)
+        if (ProviderClass.TypeKind is TypeKind.Struct)
         {
             code.Append(@"
     public ").Append(typeName).Append(@"() { }
@@ -368,25 +395,26 @@ internal class ServiceContainer
 
         code
             .Append(@"
-    public static string Environment => global::System.Environment.GetEnvironmentVariable(""DOTNET_ENVIRONMENT"") ?? ""Development"";");
+    public static string Environment => global::System.Environment.GetEnvironmentVariable(""DOTNET_ENVIRONMENT"") ?? ""Development"";
+");
 
         if (requiresLocker)
         {
             code.Append(@"
-    static readonly object __lock = new object();
+    static readonly ").Append(net9Lock ?? "object").Append(@" __lock = new ();
 ");
         }
 
         if (requiresSemaphore)
         {
             code.Append(@"
-    private static readonly global::System.Threading.SemaphoreSlim __globalSemaphore = new global::System.Threading.SemaphoreSlim(1, 1);
+    private static readonly global::System.Threading.SemaphoreSlim __globalSemaphore = new (1, 1);
 
-    private static global::System.Threading.CancellationTokenSource __globalCancellationTokenSrc = new global::System.Threading.CancellationTokenSource();
+    private static global::System.Threading.CancellationTokenSource __globalCancellationTokenSrc = new ();
 ");
         }
 
-        methods?.Invoke(code, true, _generatorGuid);
+        methods?.Invoke(code, true);
 
         BuildDisposabilityMethods(code, typeName, disposability, hasDisposableScoped);
 
@@ -398,54 +426,31 @@ internal class ServiceContainer
     {
         if (disposability is not Disposability.None)
         {
-            if(hasScopedServices)
-                
+            if (hasScopedServices)
+
                 code.Append(@"
     private bool isScoped = false;
 
-    ")
-                .AppendLine(_generatorGuid)
-                .Append(@"    public ")
+    public ")
                 .Append(typeName)
                 .Append(@" CreateScope() => new ").Append(typeName).Append(@" { isScoped = true };
 ");
 
+            code.Append(@"
+    public ");
 
-            switch (disposability)
-            {
+            if (ProviderClass is { TypeKind: not TypeKind.Struct, IsSealed: false })
+                code.Append("virtual ");
 
-                case Disposability.Disposable:
+            if (disposability is Disposability.Disposable)
 
-                    code.Append(@"
-    ").AppendLine(_generatorGuid)
-                        .Append(@"    public");
-
-                    if(_providerClass is { TypeKind: not TypeKind.Struct, IsSealed: false }) 
-                        code.Append(" virtual");
-                    
-
-                    code.Append(@" void Dispose()
+                code.Append(@"void Dispose()
     {");
 
-                    break;
+            else
 
-                case Disposability.AsyncDisposable:
-
-                    code.Append(@"
-    ").AppendLine(_generatorGuid);
-
-
-
-                    code.Append(@"    public");
-
-                    if (_providerClass is { TypeKind: not TypeKind.Struct, IsSealed: false })
-                        code.Append(" virtual");
-                    
-                    code.Append(@" async global::System.Threading.Tasks.ValueTask DisposeAsync()
+                code.Append(@"async global::System.Threading.Tasks.ValueTask DisposeAsync()
     {");
-
-                    break;
-            }
 
             if (hasDisposableScoped)
             {
@@ -453,29 +458,33 @@ internal class ServiceContainer
                 {
                     case ({ }, { }):
 
+                        code.Append(@"
+        if(isScoped)
+        {");
+
                         disposeStatments(code);
 
-                        if (hasScopedServices)
-                        {
-                            code.Append(@"
-
-        if(isScoped) return;
-");
-                        }
+                        code.Append(@"
+        }
+        else
+        {");
 
                         singletonDisposeStatments(code);
+
+                        code.Append(@"
+        }");
 
                         break;
 
                     case ({ }, null):
 
-                        disposeStatments(code);
+                        disposeStatments(code, null);
 
                         break;
 
                     case (null, { }):
 
-                        if(hasScopedServices)
+                        if (hasScopedServices)
                         {
                             code.Append(@"
         if(isScoped) return;
@@ -483,12 +492,12 @@ internal class ServiceContainer
 
                         }
 
-                        singletonDisposeStatments(code);
+                        singletonDisposeStatments(code, null);
 
                         break;
                 }
             }
-            else if(singletonDisposeStatments is { })
+            else if (singletonDisposeStatments is { })
             {
                 if (hasScopedServices)
                 {
@@ -498,11 +507,10 @@ internal class ServiceContainer
 
                 }
 
-                singletonDisposeStatments(code);
+                singletonDisposeStatments(code, null);
             }
 
             code.Append(@"
-
     }
 ");
         }
@@ -535,4 +543,4 @@ internal class ServiceContainer
     }
 }
 
-internal record InvokeInfo(ITypeSymbol ContainerType, string Name, IdentifierNameSyntax MethodSyntax, bool IsNotScoped);
+internal record InvokeInfo(ITypeSymbol ContainerType, string Name, IdentifierNameSyntax MethodSyntax, bool NotFromScopedInstance);

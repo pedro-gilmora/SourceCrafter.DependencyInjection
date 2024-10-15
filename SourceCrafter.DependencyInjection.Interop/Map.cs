@@ -7,11 +7,10 @@ using System.Collections;
 
 namespace SourceCrafter.DependencyInjection.Interop;
 
-public delegate void RefItemResolver<TKey, TVal>(TKey _, ref TVal item);
-public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
+public class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
 {
     private int[]? _buckets;
-    private Entry<TKey, TVal>[]? _entries;
+    private Entry[]? _entries;
 #if TARGET_64BIT
     private ulong _fastModMultiplier;
 #endif
@@ -112,7 +111,7 @@ public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
     {
         int size = GetPrime(capacity);
         int[] buckets = new int[size];
-        var entries = new Entry<TKey, TVal>[size];
+        var entries = new Entry[size];
 
         // Assign member variables after both arrays allocated to guard against corruption from OOM if second fails
         _freeList = -1;
@@ -160,9 +159,9 @@ public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
         return candidate == 2;
     }
     // TODO: apply nullability attributes
-    public virtual ref TVal? GetValueOrAddDefault(TKey key, out bool exists, Func<TVal>? valueCreator = null)
+    public virtual ref TValue? GetValueOrAddDefault(TKey key, out bool exists)
     {
-        Entry<TKey, TVal>[]? entries = _entries!;
+        Entry[]? entries = _entries!;
 
         uint hashCode = (uint)_comparer.GetHashCode(key);
 
@@ -183,6 +182,7 @@ public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
             i = entries[i].next;
 
             collisionCount++;
+
             if (collisionCount > (uint)entries.Length)
             {
                 // The chain of entries forms a loop; which means a concurrent update has happened.
@@ -212,11 +212,10 @@ public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
             entries = _entries;
         }
 
-        ref Entry<TKey, TVal> entry = ref entries![index];
+        ref Entry entry = ref entries![index];
         entry.id = hashCode;
         entry.next = bucket - 1; // Value in _buckets is 1-based
         entry.Key = key;
-        entry.Value = valueCreator != null ? valueCreator() : default!;
         bucket = index + 1; // Value in _buckets is 1-based
         _version++;
 
@@ -224,8 +223,70 @@ public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
 
         return ref entry.Value!;
     }
+    // TODO: apply nullability attributes
+    public virtual bool TryInsert(TKey key, Func<TValue> valueCreator)
+    {
+        Entry[]? entries = _entries!;
 
-    public virtual bool TryGetValue(TKey key, out TVal val)
+        uint hashCode = (uint)_comparer.GetHashCode(key);
+
+        uint collisionCount = 0;
+        ref int bucket = ref GetBucket(hashCode);
+        int i = bucket - 1; // Value in _buckets is 1-based
+
+
+        while ((uint)i < (uint)entries.Length)
+        {
+            if (entries[i].id == hashCode && _comparer.Equals(key, entries[i].Key))
+            {
+                return false;
+            }
+
+            i = entries[i].next;
+
+            collisionCount++;
+
+            if (collisionCount > (uint)entries.Length)
+            {
+                // The chain of entries forms a loop; which means a concurrent update has happened.
+                // Break out of the loop and throw, rather than looping forever.
+                throw new NotSupportedException("Concurrent operations are not allowed");
+            }
+        }
+
+        int index;
+        if (_freeCount > 0)
+        {
+            index = _freeList;
+            Debug.Assert(StartOfFreeList - entries[_freeList].next >= -1, "shouldn't overflow because `next` cannot underflow");
+            _freeList = StartOfFreeList - entries[_freeList].next;
+            _freeCount--;
+        }
+        else
+        {
+            int count = _count;
+            if (count == entries.Length)
+            {
+                Resize();
+                bucket = ref GetBucket(hashCode);
+            }
+            index = count;
+            _count = count + 1;
+            entries = _entries;
+        }
+
+        ref Entry entry = ref entries![index];
+        entry.id = hashCode;
+        entry.next = bucket - 1; // Value in _buckets is 1-based
+        entry.Key = key;
+        entry.Value = valueCreator() ?? default!;
+        bucket = index + 1; // Value in _buckets is 1-based
+        _version++;
+
+        return true!;
+    }
+
+    public virtual bool TryGetValue(TKey key, out TValue val)
     {
         uint hashCode = (uint)_comparer.GetHashCode(key);
         int i = GetBucket(hashCode);
@@ -292,9 +353,9 @@ public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
         return false;
     }
 
-    public bool TryAdd(TKey key, TVal value)
+    public bool TryAdd(TKey key, TValue value)
     {
-        Entry<TKey, TVal>[]? entries = _entries!;
+        Entry[]? entries = _entries!;
 
         uint hashCode = (uint)_comparer.GetHashCode(key);
 
@@ -342,7 +403,7 @@ public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
             entries = _entries;
         }
 
-        ref Entry<TKey, TVal> entry = ref entries![index];
+        ref Entry entry = ref entries![index];
         entry.id = hashCode;
         entry.next = bucket - 1; // Value in _buckets is 1-based
         entry.Key = key;
@@ -361,7 +422,7 @@ public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
         Debug.Assert(!forceNewHashCodes || !typeof(TKey).IsValueType);
         Debug.Assert(newSize >= _entries!.Length);
 
-        var entries = new Entry<TKey, TVal>[newSize];
+        var entries = new Entry[newSize];
 
         int count = _count;
         Array.Copy(_entries, entries, count);
@@ -428,33 +489,47 @@ public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
         return highbits;
     }
 
-    public Span<Entry<TKey, TVal>> AsSpan()
-    {
-        return _entries.AsSpan(0, _count);
-    }
+    public ValueEnumerator Values => new (this);
 
-    public Span<TKey> KeysAsSpan()
+    public ref struct ValueEnumerator(Map<TKey, TValue> map, int i = -1)
     {
-        Span<TKey> _keys = new TKey[_count];
 
-        for (int i = 0; i < _count; i++)
+        public readonly TValue Current => map._entries![i].Value;
+
+        public readonly void Dispose() { }
+
+        public readonly ValueEnumerator GetEnumerator() => this;
+        
+        public bool MoveNext()
         {
-            _keys[i] = _entries![i].Key;
+            return ++i < map._count;
         }
 
-        return _keys;
+        public void Reset()
+        {
+            i = -1;
+        }
     }
 
-    public Span<TVal> ValuesAsSpan()
-    {
-        Span<TVal> _values = new TVal[_count];
+    public KeyEnumerator Keys => new(_entries!, _count);
 
-        for (int i = 0; i < _count; i++)
+    public ref struct KeyEnumerator(Entry[] vals, int count, int i = -1)
+    {
+        public readonly TKey Current => vals[i].Key;
+
+        public readonly void Dispose() { }
+
+        public readonly KeyEnumerator GetEnumerator() => this;
+
+        public bool MoveNext()
         {
-            _values[i] = _entries![i].Value;
+            return ++i < count;
         }
 
-        return _values;
+        public void Reset()
+        {
+            i = -1;
+        }
     }
 
     public void Clear()
@@ -472,16 +547,9 @@ public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
         }
     }
 
-    public void ForEach(RefItemResolver<TKey, TVal> iterator)
+    public ref TValue GetValueOrInserter(TKey key, out Action<TValue> insertor)
     {
-        for (int i = 0; i < _count; i++)
-        {
-            iterator(_entries![i].Key, ref _entries[i].Value);
-        }
-    }
-    public ref TVal GetValueOrInserter(TKey key, out Action<TVal> insertor)
-    {
-        Entry<TKey, TVal>[]? entries = _entries!;
+        Entry[]? entries = _entries!;
 
         uint hashCode = (uint)_comparer.GetHashCode(key);
 
@@ -535,7 +603,7 @@ public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
                 entries = _entries;
             }
 
-            ref Entry<TKey, TVal> entry = ref entries![index];
+            ref Entry entry = ref entries![index];
             entry.id = hashCode;
             entry.next = bucket - 1; // Value in _buckets is 1-based
             entry.Key = key;
@@ -544,73 +612,49 @@ public class Map<TKey, TVal> : IEnumerable<(TKey, TVal)>
             _version++;
         };
 
-        return ref (new TVal[1] { default! })[0];
+        return ref (new TValue[1] { default! })[0];
     }
 
-    public IEnumerator<(TKey, TVal)> GetEnumerator()
+    IEnumerator<(TKey, TValue)> IEnumerable<(TKey, TValue)>.GetEnumerator()
     {
-        if (_count == 0) return default(EmptyEnumerator);
-
-        return new Enumerator(_entries!, _count);
+        return new Enumerator(this);
     }
 
-    public IEnumerable<TKey> Keys
+    IEnumerator IEnumerable.GetEnumerator()
     {
-        get
+        return new Enumerator(this);
+    }
+
+    public sealed class Enumerator(Map<TKey, TValue> map) : IEnumerator<(TKey, TValue)>
+    {
+        int i = -1;
+        public (TKey, TValue) Current => map._entries![i];
+
+        object IEnumerator.Current => Current;
+
+        public bool MoveNext()
         {
-            if(_count == 0) yield break;
+            return i++ < map._count;
+        }
 
-            for (int i = 0; i < _count; i++) yield return _entries![i].Key; 
+        public void Reset()
+        {
+            i = 0;
+        }
+
+        public void Dispose()
+        {
+            throw new NotImplementedException();
         }
     }
 
-    public IEnumerable<TVal> Values
+    public struct Entry
     {
-        get
-        {
-            if (_count == 0) yield break;
+        public TKey Key;
+        public TValue Value;
+        internal int next;
+        internal uint id;
 
-            for (int i = 0; i < _count; i++) yield return _entries![i].Value;
-        }
+        public static implicit operator (TKey, TValue)(Entry entry) => (entry.Key, entry.Value);
     }
-
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
-
-    struct EmptyEnumerator : IEnumerator<(TKey, TVal)>
-    {
-        public readonly (TKey, TVal) Current => throw new NotImplementedException();
-
-        readonly object IEnumerator.Current => throw new NotImplementedException();
-
-        public void Dispose() => throw new NotImplementedException();
-
-        public readonly bool MoveNext() => false;
-
-        public void Reset() => throw new NotImplementedException();
-    }
-
-    struct Enumerator(Entry<TKey, TVal>[] entries, int count) : IEnumerator<(TKey, TVal)>
-    {
-        private int current = -1;
-
-        public readonly (TKey, TVal) Current => entries[current];
-
-        readonly object IEnumerator.Current => Current;
-
-        public readonly void Dispose() => throw new NotImplementedException();
-
-        public bool MoveNext() => ++current < count;
-
-        public void Reset() => current = -1;
-    }
-}
-
-public struct Entry<TKey, TValue>
-{
-    public TKey Key;
-    public TValue Value;
-    internal int next;
-    internal uint id;
-
-    public static implicit operator (TKey, TValue)(Entry<TKey, TValue> entry) => (entry.Key, entry.Value);
 }

@@ -4,12 +4,19 @@ using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
+using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
+using System.Xml.Linq;
 
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 using SourceCrafter.DependencyInjection.Interop;
+
+using static SourceCrafter.DependencyInjection.Interop.ServiceDescriptor;
 
 
 [assembly: InternalsVisibleTo("SourceCrafter.Bindings.UnitTests")]
@@ -59,8 +66,247 @@ namespace SourceCrafter.DependencyInjection
         public static string ToTypeNameFormat(this ITypeSymbol t) => t.ToDisplayString(_typeNameFormat);
 
         public static string ToNameOnly(this ISymbol t) => t.ToDisplayString(_symbolNameOnly);
+        internal static bool TryGetDependencyInfo(
+            this SemanticModel model,
+            AttributeData attrData,
+            ref bool isExternal,
+            string paramName,
+            ITypeSymbol? fallbackType,
+            out Lifetime lifetime,
+            out ITypeSymbol finalType,
+            out ITypeSymbol? iFaceType,
+            out ITypeSymbol implType,
+            out ISymbol? factory,
+            out SymbolKind factoryKind,
+            out string outKey,
+            out string? nameFormat,
+            out ImmutableArray<IParameterSymbol> defaultParamValues,
+            out bool isCached,
+            out Disposability disposability,
+            out bool isValid,
+            out AttributeSyntax attrSyntaxOut)
+        {
+            finalType = iFaceType = implType = default!;
+            factoryKind = default!;
+            isCached = isValid = default!;
+            defaultParamValues = [];
+            outKey = nameFormat = null!;
+            factory = default!;
+            disposability = Disposability.None;
+            lifetime = Lifetime.Transient;
 
+            attrSyntaxOut = null!;
 
+            if (attrData is { AttributeClass: { } attrClass, ApplicationSyntaxReference: { } attrSyntaxRef }
+                && attrSyntaxRef.GetSyntax() is AttributeSyntax { } attrSyntax
+                && model.GetSymbolInfo(attrSyntax).Symbol is IMethodSymbol { Parameters: var attrParams }
+                && !attrClass.Name.Equals("ServiceContainer")
+                && GetLifetimeFromCtor(ref attrClass, ref isExternal, attrSyntax, out lifetime))
+            {
+                attrSyntaxOut = attrSyntax;
+
+                if (attrData.AttributeClass!.TypeArguments.Length > 0 is { } isGeneric)
+                {
+                    switch (attrClass!.TypeArguments)
+                    {
+                        case [{ } t1, { } t2, ..]:
+
+                            iFaceType = t1;
+                            implType = t2;
+
+                            break;
+
+                        case [{ } t1]:
+
+                            implType = t1;
+
+                            break;
+                    }
+                }
+
+                foreach (var (param, arg) in GetAttrParamsMap(attrParams, attrSyntax.ArgumentList?.Arguments ?? []))
+                {
+                    switch (param.Name)
+                    {
+                        case ImplParamName when !isGeneric && arg is { Expression: TypeOfExpressionSyntax { Type: { } type } }:
+
+                            implType = (ITypeSymbol)model!.GetSymbolInfo(type).Symbol!;
+
+                            continue;
+
+                        case IfaceParamName when fallbackType?.TypeKind is not TypeKind.Interface && !isGeneric && arg is { Expression: TypeOfExpressionSyntax { Type: { } type } }:
+
+                            iFaceType = (ITypeSymbol)model!.GetSymbolInfo(type).Symbol!;
+
+                            continue;
+
+                        case KeyParamName when GetStrExpressionOrValue(model, param!, arg, out var keyValue):
+
+                            outKey = keyValue;
+
+                            continue;
+
+                        case NameFormatParamName when GetStrExpressionOrValue(model, param, arg, out var keyValue):
+
+                            nameFormat = keyValue;
+
+                            continue;
+
+                        case FactoryOrInstanceParamName
+
+                            when arg?.Expression is InvocationExpressionSyntax
+                            {
+                                Expression: IdentifierNameSyntax { Identifier.ValueText: "nameof" },
+                                ArgumentList.Arguments: [{ } methodRef]
+                            }:
+
+                            switch (model.GetSymbolInfo(methodRef.Expression))
+                            {
+                                case { Symbol: (IFieldSymbol or IPropertySymbol) and { IsStatic: true, Kind: { } kind } fieldOrProp }:
+                                    factory = fieldOrProp;
+                                    factoryKind = kind;
+                                    break;
+
+                                case { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [IMethodSymbol { ReturnsVoid: false, IsStatic: true } method] }:
+                                    factory = method;
+                                    factoryKind = SymbolKind.Method;
+                                    defaultParamValues = method.Parameters;
+                                    break;
+                            }
+
+                            continue;
+
+                        case "disposability" when param.HasExplicitDefaultValue:
+
+                            disposability = (Disposability)(byte)param.ExplicitDefaultValue!;
+
+                            continue;
+                    }
+                }
+
+                finalType = factoryKind switch
+                {
+                    SymbolKind.Method => ((IMethodSymbol)factory!).ReturnType,
+                    SymbolKind.Field => ((IFieldSymbol)factory!).Type,
+                    SymbolKind.Property => ((IPropertySymbol)factory!).Type,
+                    _ => iFaceType ?? implType ?? fallbackType!
+                };
+
+                if (fallbackType is { })
+                {
+                    if (fallbackType.TypeKind == TypeKind.Interface)
+                        iFaceType ??= fallbackType;
+                    else 
+                        implType ??= fallbackType;
+                }
+
+                outKey ??= paramName ?? "";
+
+                return isValid = finalType is not null && implType is not null;
+            }
+            return false;
+        }
+
+        static IEnumerable<(IParameterSymbol, AttributeArgumentSyntax?)> GetAttrParamsMap(
+            ImmutableArray<IParameterSymbol> paramSymbols,
+            SeparatedSyntaxList<AttributeArgumentSyntax> argsSyntax)
+        {
+            int i = 0;
+            foreach (var param in paramSymbols)
+            {
+                if (argsSyntax.Count > i && argsSyntax[i] is { NameColon: null, NameEquals: null } argSyntax)
+                {
+                    yield return (param, argSyntax);
+                }
+                else
+                {
+                    yield return (param, argsSyntax.FirstOrDefault(arg => param.Name == arg.NameColon?.Name.Identifier.ValueText));
+                }
+
+                i++;
+            }
+        }
+
+        private static bool GetStrExpressionOrValue(SemanticModel model, IParameterSymbol paramSymbol, AttributeArgumentSyntax? arg, out string value)
+        {
+            value = null!;
+
+            if (arg is not null)
+            {
+                if (model.GetSymbolInfo(arg.Expression).Symbol is IFieldSymbol
+                    {
+                        IsConst: true,
+                        Type.SpecialType: SpecialType.System_String,
+                        ConstantValue: { } val
+                    })
+                {
+                    value = val.ToString();
+                    return true;
+                }
+                else if (arg.Expression is LiteralExpressionSyntax { Token.ValueText: { } valueText } e
+                    && e.IsKind(SyntaxKind.StringLiteralExpression))
+                {
+                    value = valueText;
+                    return true;
+                }
+            }
+            else if (paramSymbol.HasExplicitDefaultValue)
+            {
+                value = paramSymbol.ExplicitDefaultValue?.ToString()!;
+                return value != null;
+            }
+
+            return false;
+        }
+
+        public static bool GetLifetimeFromCtor(ref INamedTypeSymbol attrClass, ref bool isExternal, AttributeSyntax attrSyntax, out Lifetime lifetime)
+        {
+            if (GetLifetimeFromSyntax(attrSyntax, out lifetime)) return true;
+
+            bool found;
+            do
+            {
+                (isExternal, (found, lifetime)) = attrClass.ToGlobalNonGenericNamespace() switch
+                {
+                    SingletonAttr => (isExternal, (true, Lifetime.Singleton)),
+                    ScopedAttr => (isExternal, (true, Lifetime.Scoped)),
+                    TransientAttr => (isExternal, (true, Lifetime.Transient)),
+                    { } val => (val is not DependencyAttr, GetFromCtorSymbol(attrClass))
+                };
+
+                if (found) return true;
+
+                isExternal = true;
+            }
+            while ((attrClass = attrClass?.BaseType!) is not null);
+
+            return false;
+
+            static (bool, Lifetime) GetFromCtorSymbol(INamedTypeSymbol attrClass)
+            {
+                foreach (var ctor in attrClass.Constructors)
+                    foreach (var param in ctor.Parameters)
+                        if (param.Name is "lifetime" && param.HasExplicitDefaultValue)
+                            return (true, (Lifetime)(byte)param.ExplicitDefaultValue!);
+
+                return (false, default);
+            }
+
+            static bool GetLifetimeFromSyntax(AttributeSyntax attribute, out Lifetime lifetime)
+            {
+                foreach (var arg in attribute.ArgumentList?.Arguments ?? [])
+                {
+                    if (arg is { NameColon.Name.Identifier.ValueText: "lifetime", Expression: MemberAccessExpressionSyntax { Name.Identifier.ValueText: { } memberName } }
+                        && Enum.TryParse(memberName, out lifetime))
+                    {
+                        return true;
+                    }
+                }
+
+                lifetime = default;
+                return false;
+            }
+        }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static string ToMetadataLongName(this ISymbol symbol)
@@ -85,16 +331,16 @@ namespace SourceCrafter.DependencyInjection
 
         public static string ToMetadataLongName(this ISymbol symbol, Map<string, byte> uniqueName)
         {
-            var e = ToMetadataLongName(symbol);
+            var existing = ToMetadataLongName(symbol);
 
-            ref var count = ref uniqueName.GetValueOrAddDefault(e, out var exists);
+            ref var count = ref uniqueName.GetValueOrAddDefault(existing, out var exists);
 
             if (exists)
             {
-                return e + "_" + (++count);
+                return existing + "_" + (++count);
             }
 
-            return e;
+            return existing;
         }
 
         public static string Capitalize(this string str)
@@ -140,9 +386,9 @@ namespace SourceCrafter.DependencyInjection
             return result[0..resultIndex].ToString();
         }
 
-        public static ImmutableArray<IParameterSymbol>? GetParameters(DependencySlimInfo depInfo)
+        public static ImmutableArray<IParameterSymbol> GetParameters(this ITypeSymbol implType)
         {
-            return depInfo.ImplType is INamedTypeSymbol { Constructors: var ctor, InstanceConstructors: var insCtor }
+            return implType is INamedTypeSymbol { Constructors: var ctor, InstanceConstructors: var insCtor }
                 ? ctor.OrderBy(d => !d.Parameters.IsDefaultOrEmpty).FirstOrDefault()?.Parameters
                     ?? insCtor.OrderBy(d => !d.Parameters.IsDefaultOrEmpty).FirstOrDefault()?.Parameters
                     ?? []
@@ -191,11 +437,6 @@ namespace SourceCrafter.DependencyInjection
 
         public static bool AllowsNull(this ITypeSymbol typeSymbol)
             => typeSymbol is { IsValueType: false, IsTupleType: false, IsReferenceType: true };
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static string Wordify(this string identifier, short upper = 0)
-            => ToJoined(identifier, " ", upper);
-
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static StringBuilder AddSpace(this StringBuilder sb, int count = 1) => sb.Append(new string(' ', count));
 
@@ -211,40 +452,12 @@ namespace SourceCrafter.DependencyInjection
             return code;
         }
 
-        public static string ToJoined(string identifier, string separator = "-", short casing = 0)
-        {
-            var buffer = new char[identifier.Length * (separator.Length + 1)];
-            var bufferIndex = 0;
-
-            for (int i = 0; i < identifier.Length; i++)
-            {
-                char ch = identifier[i];
-                bool isLetterOrDigit = char.IsLetterOrDigit(ch), isUpper = char.IsUpper(ch);
-
-                if (i > 0 && isUpper && char.IsLower(identifier[i - 1]))
-                {
-                    separator.CopyTo(0, buffer, bufferIndex, separator.Length);
-                    bufferIndex += separator.Length;
-                }
-                if (isLetterOrDigit)
-                {
-                    buffer[bufferIndex++] = (casing, isUpper) switch
-                    {
-                        (1, false) => char.ToUpperInvariant(ch),
-                        (-1, true) => char.ToLowerInvariant(ch),
-                        _ => ch
-                    };
-                }
-            }
-            return new string(buffer, 0, bufferIndex);
-        }
-
         public static bool TryGetAsyncType(this ITypeSymbol? typeSymbol, out ITypeSymbol? factoryType)
         {
-            switch((factoryType = typeSymbol)?.ToGlobalNonGenericNamespace())
+            switch ((factoryType = typeSymbol)?.ToGlobalNonGenericNamespace())
             {
                 case "global::System.Threading.Tasks.ValueTask" or "global::System.Threading.Tasks.Task"
-                    when factoryType is INamedTypeSymbol { TypeArguments:[{ } firstTypeArg] }:
+                    when factoryType is INamedTypeSymbol { TypeArguments: [{ } firstTypeArg] }:
 
                     factoryType = firstTypeArg;
                     return true;
@@ -327,12 +540,11 @@ namespace SourceCrafter.DependencyInjection
                 return idOut!;
             }
 
-            if(key is "")
+            if (key is "")
             {
-                if (!methodsRegistry.Add(idOut = id)) 
-                    methodsRegistry.Add(idOut = $"{lifeTime}{id}");
+                if (!methodsRegistry.Add(idOut = id)) methodsRegistry.Add(idOut = $"{lifeTime}{id}");
             }
-            else if(!(methodsRegistry.Add(idOut = key) 
+            else if (!(methodsRegistry.Add(idOut = key)
                 || methodsRegistry.Add(idOut = $"{key}{id}")
                 || methodsRegistry.Add(idOut = $"{lifeTime}{key}")))
             {

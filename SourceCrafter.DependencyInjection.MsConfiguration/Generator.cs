@@ -11,11 +11,10 @@ using static SourceCrafter.DependencyInjection.Extensions;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 [Generator]
-public class Generator : IIncrementalGenerator
+public sealed class Generator : IIncrementalGenerator
 {
     private const string IConfigurationType = "global::Microsoft.Extensions.Configuration.IConfiguration";
     internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
-    readonly static Guid generatorGuid = new("54B00B9C-7CF8-45B2-81FC-361B7F5026EB");
 
     static volatile bool isMsConfigInstalled = false;
 
@@ -150,14 +149,12 @@ using global::Microsoft.Extensions.Configuration;
                         //Register key to provide to settings
 
                         code.Append(@"
-    ").Append(generatedCodeAttribute).Append(@"
     private static ")
                             .Append(IConfigurationType)
                             .Append(@"? _")
                             .Append(fieldName)
                             .Append(@" = null;
 
-    ").Append(generatedCodeAttribute).Append(@"
     private static ")
                             .Append(IConfigurationType)
                             .Append(@" ")
@@ -252,9 +249,6 @@ using global::Microsoft.Extensions.Configuration;
             if (!isPrimitive)
             {
                 code.Append(@"
-    ")
-                    .Append(generatedCodeAttribute)
-                    .Append(@"
     private ");
 
 
@@ -269,8 +263,6 @@ using global::Microsoft.Extensions.Configuration;
 ");
             }
             code.Append(@"
-    ").Append(generatedCodeAttribute)
-.Append(@"
     private ");
 
             if (lifetime is Lifetime.Singleton)

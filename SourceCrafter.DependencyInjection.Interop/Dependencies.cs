@@ -23,7 +23,7 @@ enum DepsOps
     MarkAsResolved
 }
 
-public class Dependencies
+public sealed class Dependencies
 {
     internal static Dependencies Server = null!;
     static object _lock = new();
@@ -146,7 +146,7 @@ public class Dependencies
         Server?._containers.Clear();
     }
 
-    internal static bool EnsureDependenciesServer(SourceProductionContext p, Dictionary<string, DependencyMap> containers, out string error)
+    internal static bool TryBroadcastDependencies(SourceProductionContext p, Dictionary<string, DependencyMap> containers, out string error)
     {
         int attempts = 2;
         error = null!;

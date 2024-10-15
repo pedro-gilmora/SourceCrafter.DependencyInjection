@@ -122,7 +122,7 @@ internal static class ServiceContainerGeneratorDiagnostics
         string providerClassName)
     {
         DiagnosticDescriptor rule = new(
-            id: "SCDI03",
+            id: "SCDI07",
             title: "Dependency has unresolved types",
             messageFormat: "'{0}' has some unresolved types.",
             category: "SourceCrafter.DependencyInjection.Usage",
@@ -138,35 +138,37 @@ internal static class ServiceContainerGeneratorDiagnostics
     }
 
     internal static Diagnostic ParamInterfaceTypeWithoutImplementation(
-        SyntaxNode? parameter,
+        SyntaxNode? attrSyntax,
+        string interfaceName,
         string providerClassName)
     {
         DiagnosticDescriptor rule = new(
-            id: "SCDI03",
+            id: "SCDI08",
             title: "Dependency has unresolved types",
-            messageFormat: "'{0}' has some unresolved types.",
-            category: "SourceCrafter.DependencyInjection.Usage",
+            messageFormat: "Interface {0} has not registered implementation at container {1}",
+            category: "SourceCrafter.DependencyInjection.Definition",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true,
-            description: "Dependency has unresolved types. Make sure to register properly the required types for minimal parameterized constructors"
+            description: "Define a [LifeTime]<{0}, {0}Implementation> as decorator attribute over type {1} definition"
         );
 
         return Diagnostic.Create(
             rule,
-            parameter?.GetLocation(),
+            attrSyntax?.GetLocation(),
+            interfaceName,
             providerClassName);
     }
 
-    internal static Diagnostic DependencyCallShouldBeScoped(string providerName, IdentifierNameSyntax methodNameSyntax)
+    internal static Diagnostic DependencyCallMustBeScoped(string providerName, IdentifierNameSyntax methodNameSyntax)
     {
         DiagnosticDescriptor rule = new(
-            id: "SCDI03",
+            id: "SCDI09",
             title: "Resolver method called on non-scoped instance.",
-            messageFormat: $"Scoped resolver method [{providerName}.{methodNameSyntax.Identifier.ValueText}] should be called just through [{providerName}.CreateScope()]",
+            messageFormat: $"Method [{methodNameSyntax.Identifier.ValueText}] must be called from scoped instance using [{providerName}.CreateScope()]",
             category: "SourceCrafter.DependencyInjection.Usage",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true,
-            description: "Dependency has unresolved types. Make sure to register properly the required types for minimal parameterized constructors"
+            description: "Please, just use a CreateScope reference to call the indicated method"
         );
 
         return Diagnostic.Create(

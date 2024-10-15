@@ -52,10 +52,13 @@ public abstract class Set<TValue> : IEnumerable<TValue>
 
     public abstract IEnumerator<TValue> GetEnumerator();
 
-    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 }
 
-internal class Set<TKey, TValue>(Func<TValue, TKey> _keyGenerator) : Set<TValue>
+public class Set<TKey, TValue>(Func<TValue, TKey> _keyGenerator) : Set<TValue>
 {
     internal Func<TKey, int> getHashCode = null!;
     internal Func<TKey, TKey, bool> equals = null!;
@@ -500,6 +503,7 @@ internal class Set<TKey, TValue>(Func<TValue, TKey> _keyGenerator) : Set<TValue>
 #endif
     }
 
+#if TARGET_64BIT
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static uint FastMod(uint value, uint divisor, ulong multiplier)
     {
@@ -514,6 +518,7 @@ internal class Set<TKey, TValue>(Func<TValue, TKey> _keyGenerator) : Set<TValue>
         Debug.Assert(highbits == value % divisor);
         return highbits;
     }
+#endif
 
     public override void Clear()
     {
@@ -533,50 +538,38 @@ internal class Set<TKey, TValue>(Func<TValue, TKey> _keyGenerator) : Set<TValue>
         }
     }
 
+    public TValue this[int i] => i < _count ? _entries![i].Value : throw new ArgumentOutOfRangeException(nameof(i));
+
     public override IEnumerator<TValue> GetEnumerator()
     {
-        return _entries is null
-            ? EmptyEnumerator.Default
-            : new Enumerator(_entries, _count);
+        return new Enumerator(this);
     }
 
-    readonly struct EmptyEnumerator : IEnumerator<TValue>
-    {
-        internal readonly static EmptyEnumerator Default = new();
-        public readonly TValue Current => default!;
-
-        readonly object IEnumerator.Current => default!;
-
-        public readonly void Dispose() { }
-
-        public readonly bool MoveNext() => false;
-
-        public readonly void Reset() { }
-    }
-
-    struct Enumerator(Entry[] entries, int count) : IEnumerator<TValue>
+    public sealed class Enumerator(Set<TKey, TValue> set) : IEnumerator<TValue>
     {
         int i = -1;
 
-        public readonly TValue Current => entries[i].Value;
+        private readonly Set<TKey, TValue> set = set;
 
-        readonly object IEnumerator.Current => Current!;
+        public TValue Current => set._entries![i].Value;
 
-        public readonly void Dispose() { }
+        object IEnumerator.Current => Current!;
 
-        public bool MoveNext() => ++i < count;
+        public void Dispose() { }
+
+        public bool MoveNext() => ++i < set._count;
 
         public void Reset() => i = -1;
     }
 
-    struct Entry
+    public struct Entry 
     {
         public TKey Key;
         public TValue Value;
         internal int next;
         internal uint id;
 
-        public void Deconstruct(out TKey outKey, out TValue outValue) => (outKey, outValue) = (Key, Value);
+        public readonly void Deconstruct(out TKey outKey, out TValue outValue) => (outKey, outValue) = (Key, Value);
 
         public override readonly string ToString() => $"Key: {Key}, Value: {Value}";
     }

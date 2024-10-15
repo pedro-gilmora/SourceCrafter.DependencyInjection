@@ -13,7 +13,7 @@ using System.Collections.Immutable;
 using static Microsoft.Extensions.DependencyInjection.ServiceDescriptor;
 
 [Generator]
-public class Generator : IIncrementalGenerator
+public sealed class Generator : IIncrementalGenerator
 {
     private const string serviceContainerFullTypeName = "SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute";
     internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
@@ -42,36 +42,10 @@ public class Generator : IIncrementalGenerator
                     })
                 .SelectMany((info, _) => info)
                 .Collect();
-
         var scopedUsage = context.SyntaxProvider
                 .CreateSyntaxProvider<InvokeInfo>(
                     (syntax, _) => syntax is MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax },
-                    (gsc, _) =>
-                    {
-                        if (gsc.Node is MemberAccessExpressionSyntax 
-                            { Name: IdentifierNameSyntax 
-                                { Identifier.ValueText: { } name } method, 
-                                  Expression: IdentifierNameSyntax { } refVar })
-                        {
-                            if (gsc.SemanticModel.GetSymbolInfo(refVar).Symbol is ILocalSymbol { Type: { } containerType } local
-                                && containerType.GetAttributes()
-                                                .Any(attr => attr.AttributeClass?.ToGlobalNamespaced().EndsWith(serviceContainerFullTypeName) ?? false))
-                            {
-                                var isCtor = local.DeclaringSyntaxReferences
-                                    .Any(s =>
-                                        s.GetSyntax() is VariableDeclaratorSyntax
-                                        { Initializer.Value: ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax });
-
-                                return new(containerType, name, method, isCtor);
-                            }
-                            else if (gsc.SemanticModel.GetSymbolInfo(refVar).Symbol is ILocalSymbol { Type: { } containerType2 } parameter
-                                && containerType2.GetAttributes().Any(attr => attr.AttributeClass?.ToGlobalNamespaced().EndsWith(serviceContainerFullTypeName) ?? false))
-                            {
-                                return new(containerType2, name, method, false);
-                            }
-                        }
-                        return null!;
-                    })
+                    GetInvokeInfos)
                 .Where(info => info is not null)
                 .Collect();
 
@@ -88,20 +62,22 @@ public class Generator : IIncrementalGenerator
             .Combine(servicesContainers)
             .Combine(getExternal)
             .Combine(scopedUsage)
-            ,(p, info) =>
+            ,(context, info) =>
             {
                 var (((compilation, servicesContainers), externals), serviceCall) = info;
 
                 var errorsSb = new StringBuilder("/*").AppendLine();
 
+                var net9Lock = compilation.GetTypeByMetadataName("System.Threading.Lock")?.ToGlobalNamespaced();
+
                 int start = errorsSb.Length;
 
-                if (!Dependencies.EnsureDependenciesServer(p, containers, out string error)) 
+                if (!Dependencies.TryBroadcastDependencies(context, containers, out string error)) 
                 {
-                    p.ReportDiagnostic(
+                    context.ReportDiagnostic(
                         Diagnostic.Create(
                             new DiagnosticDescriptor(
-                                "SCDI0000",
+                                "SCDI00",
                                 "Dependencies server could not initiate.",
                                 $"Error: {error}",
                                 "Operability",
@@ -119,23 +95,41 @@ public class Generator : IIncrementalGenerator
 
                     Set<Diagnostic> diagnostics = Set<Diagnostic>.Create(e => e.Location.GetHashCode());
 
-                    foreach (var serviceContainer in servicesContainers)
+                    foreach (var (model, cls) in servicesContainers)
                     {
+                        var declaration = cls.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
+
+                        if (declaration is not ClassDeclarationSyntax or InterfaceDeclarationSyntax)
+                        {
+                            context.ReportDiagnostic(
+                                Diagnostic.Create(
+                                    new DiagnosticDescriptor(
+                                        "SCDI11",
+                                        "Structs are not supported as containers",
+                                        "",
+                                        "Design",
+                                        DiagnosticSeverity.Error,
+                                        true),
+                                    null));
+                            
+                            continue;
+                        }
+
                         ServiceContainer
                             .Parse(
                                 compilation,
-                                serviceContainer.SemanticModel,
-                                serviceContainer.Class,
+                                model,
+                                cls,
                                 diagnostics,
                                 externals,
                                 generatedCodeAttribute,
                                 serviceCall
-                                    .Where(usage => SymbolEqualityComparer.Default.Equals(usage.ContainerType, serviceContainer.Class))
+                                    .Where(usage => SymbolEqualityComparer.Default.Equals(usage.ContainerType, cls))
                                     .ToImmutableArray())
-                            .Build(containers, [], uniqueName, p.AddSource);
+                            .Build(containers, [], uniqueName, context.AddSource, net9Lock, declaration);
                     }
 
-                    foreach (var item in diagnostics) p.ReportDiagnostic(item);
+                    foreach (var item in ((Set<int, Diagnostic>)diagnostics)) context.ReportDiagnostic(item);
                 }
                 catch (Exception e)
                 {
@@ -144,9 +138,41 @@ public class Generator : IIncrementalGenerator
 
                 if (errorsSb.Length > start)
                 {
-                    p.AddSource("errors", errorsSb.Append("*/").ToString());
+                    context.AddSource("errors", errorsSb.Append("*/").ToString());
                 }
             });
+    }
+
+    private static InvokeInfo GetInvokeInfos(GeneratorSyntaxContext gsc, System.Threading.CancellationToken _)
+    {
+        if (gsc.Node is MemberAccessExpressionSyntax
+            {
+                Name: IdentifierNameSyntax
+                { Identifier.ValueText: { } name } method,
+                Expression: IdentifierNameSyntax { } refVar
+            })
+        {
+            if (gsc.SemanticModel.GetSymbolInfo(refVar).Symbol is ILocalSymbol { Type: { } containerType } local
+                && containerType.GetAttributes()
+                                .Any(attr => attr.AttributeClass?.ToGlobalNamespaced().EndsWith(serviceContainerFullTypeName) ?? false))
+            {
+                var isCtor = local.DeclaringSyntaxReferences
+                    .Any(s =>
+                    {
+                        var varDecl = (s.GetSyntax() as VariableDeclaratorSyntax)?.Initializer?.Value;
+                        return varDecl is ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax
+                            || (containerType.TypeKind is TypeKind.Struct && varDecl is DefaultExpressionSyntax);
+                    });
+
+                return new(containerType, name, method, isCtor);
+            }
+            else if (gsc.SemanticModel.GetSymbolInfo(refVar).Symbol is ILocalSymbol { Type: { } containerType2 } parameter
+                && containerType2.GetAttributes().Any(attr => attr.AttributeClass?.ToGlobalNamespaced().EndsWith(serviceContainerFullTypeName) ?? false))
+            {
+                return new(containerType2, name, method, false);
+            }
+        }
+        return null!;
     }
 
     private static string ParseToolAndVersion()

@@ -48,7 +48,7 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" PrivateAssets="all" GeneratePathProperty="true" />
 		<PackageReference Include="System.Diagnostics.Tools" Version="4.3.0" />
 		<PackageReference Include="System.Memory" Version="4.5.5" PrivateAssets="all" GeneratePathProperty="true" />
-		<PackageReference Include="System.Runtime.InteropServices" Version="4.3.0" />
+		<PackageReference Include="System.Runtime.InteropServices" PrivateAssets="all" Version="4.3.0" />
 	</ItemGroup>
 
 	<ItemGroup>
