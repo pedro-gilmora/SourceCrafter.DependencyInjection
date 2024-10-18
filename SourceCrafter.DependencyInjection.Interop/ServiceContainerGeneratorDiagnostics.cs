@@ -3,9 +3,6 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 using SourceCrafter.DependencyInjection.Interop;
 
-using System;
-using System.Linq;
-using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("SourceCrafter.DependencyInjection")]
@@ -102,7 +99,7 @@ internal static class ServiceContainerGeneratorDiagnostics
         return Diagnostic.Create(rule, arg.GetLocation());
     }
 
-    internal static Diagnostic InterfaceRequiresFactory(ExpressionSyntax node)
+    internal static Diagnostic InterfaceRequiresFactory(AttributeSyntax node)
     {
         DiagnosticDescriptor rule = new(
             id: "SCDI06",
@@ -111,7 +108,7 @@ internal static class ServiceContainerGeneratorDiagnostics
             category: "SourceCrafter.DependencyInjection.Usage",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true,
-            description: "Please provide a value for [factoryOrInstance] parameter"
+            description: "Please provide a value for [source] parameter"
         );
 
         return Diagnostic.Create(rule, node.GetLocation());
@@ -174,5 +171,26 @@ internal static class ServiceContainerGeneratorDiagnostics
         return Diagnostic.Create(
             rule,
             methodNameSyntax.GetLocation());
+    }
+
+    internal static Diagnostic FactoryReturnMismatch(IMethodSymbol method, ITypeSymbol type, ITypeSymbol returnType, AttributeSyntax attrSyntax)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI10",
+            title: "Return type doesn't match service {4} type",
+            messageFormat: "{0} {1} as return type for method {2}, should match {3} as service base {4}",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true
+        );
+
+        return Diagnostic.Create(
+            rule,
+            attrSyntax.GetLocation(),
+            returnType.TypeKind,
+            returnType.ToDisplayString(),
+            method.ToDisplayString(),
+            type.ToDisplayString(),
+            type.TypeKind is TypeKind.Interface || type.IsAbstract ? "base" : type.Kind.ToString().ToLower());
     }
 }

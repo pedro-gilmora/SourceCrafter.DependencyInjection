@@ -12,7 +12,7 @@ namespace SourceCrafter.DependencyInjection.Tests
     [ServiceContainer]
     [JsonSetting<AppSettings>("AppSettings")]
     [JsonSetting<string>("ConnectionStrings::DefaultConnection", nameFormat: "GetConnectionString")]
-    [Transient<int>("count", nameof(ResolveAsync))]
+    [Transient("count", source: nameof(ResolveAsync))]
     [Scoped<IAuthService, AuthService>]
     [Transient<EmployeeService>]
     public sealed partial class Server
@@ -39,7 +39,7 @@ namespace SourceCrafter.DependencyInjection.Tests
         IDatabase Database { get; }
     }
 
-    public class EmployeeService(IAuthService authService);
+    public class EmployeeService(IAuthService authService, IDatabase employeesDb);
 
 #pragma warning disable CS9113 // Parameter is unread.
     public class Database(AppSettings settings, string connection) : IDatabase

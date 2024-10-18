@@ -22,7 +22,7 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
         Disposability disposability = Disposability.Disposable
     )
         : SingletonAttribute<IConfiguration>(nameFormat);
-    //: SingletonAttribute<IConfiguration>(factoryOrInstance: nameof(ConfigurationResolver.GetJsonConfiguration));
+    //: SingletonAttribute<IConfiguration>(source: nameof(ConfigurationResolver.GetJsonConfiguration));
 
     [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false)]
     public sealed class JsonSettingAttribute(

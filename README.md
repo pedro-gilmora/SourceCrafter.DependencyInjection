@@ -121,7 +121,7 @@ You can control the lifecycle of services using the `Disposability` parameter, w
 
 ### 2. Factory Methods
 
-For advanced scenarios, you can specify factory methods or instances directly using the `factoryOrInstance` parameter in the attributes. This allows fine-grained control over how services are created and managed.
+For advanced scenarios, you can specify factory methods or instances directly using the `source` parameter in the attributes. This allows fine-grained control over how services are created and managed.
 
 ### 3. Caching
 

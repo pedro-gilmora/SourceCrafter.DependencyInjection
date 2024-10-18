@@ -104,7 +104,7 @@ public sealed class Generator : IIncrementalGenerator
                             context.ReportDiagnostic(
                                 Diagnostic.Create(
                                     new DiagnosticDescriptor(
-                                        "SCDI11",
+                                        "SCDI20",
                                         "Structs are not supported as containers",
                                         "",
                                         "Design",

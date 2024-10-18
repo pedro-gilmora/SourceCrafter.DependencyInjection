@@ -69,6 +69,7 @@ namespace SourceCrafter.DependencyInjection
         internal static bool TryGetDependencyInfo(
             this SemanticModel model,
             AttributeData attrData,
+            Set<Diagnostic> diagnostics,
             ref bool isExternal,
             string paramName,
             ITypeSymbol? fallbackType,
@@ -83,8 +84,9 @@ namespace SourceCrafter.DependencyInjection
             out ImmutableArray<IParameterSymbol> defaultParamValues,
             out bool isCached,
             out Disposability disposability,
-            out bool isValid,
-            out AttributeSyntax attrSyntaxOut)
+            out bool isAsync,
+            out AttributeSyntax attrSyntaxOut,
+            out bool isValid)
         {
             finalType = iFaceType = implType = default!;
             factoryKind = default!;
@@ -94,7 +96,7 @@ namespace SourceCrafter.DependencyInjection
             factory = default!;
             disposability = Disposability.None;
             lifetime = Lifetime.Transient;
-
+            isAsync = false;
             attrSyntaxOut = null!;
 
             if (attrData is { AttributeClass: { } attrClass, ApplicationSyntaxReference: { } attrSyntaxRef }
@@ -152,7 +154,7 @@ namespace SourceCrafter.DependencyInjection
 
                             continue;
 
-                        case FactoryOrInstanceParamName
+                        case SourceParamName
 
                             when arg?.Expression is InvocationExpressionSyntax
                             {
@@ -163,15 +165,25 @@ namespace SourceCrafter.DependencyInjection
                             switch (model.GetSymbolInfo(methodRef.Expression))
                             {
                                 case { Symbol: (IFieldSymbol or IPropertySymbol) and { IsStatic: true, Kind: { } kind } fieldOrProp }:
+
                                     factory = fieldOrProp;
                                     factoryKind = kind;
-                                    break;
+                                    
+                                    continue;
 
                                 case { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [IMethodSymbol { ReturnsVoid: false, IsStatic: true } method] }:
+
                                     factory = method;
                                     factoryKind = SymbolKind.Method;
                                     defaultParamValues = method.Parameters;
-                                    break;
+
+                                    isAsync = method.ReturnType.TryGetAsyncType(out var returnType);
+
+                                    if(returnType.TypeKind is TypeKind.Interface || returnType.IsAbstract) iFaceType ??= returnType;
+
+                                    else implType ??= returnType;
+
+                                    continue;
                             }
 
                             continue;
@@ -196,7 +208,7 @@ namespace SourceCrafter.DependencyInjection
                 {
                     if (fallbackType.TypeKind == TypeKind.Interface)
                         iFaceType ??= fallbackType;
-                    else 
+                    else
                         implType ??= fallbackType;
                 }
 
@@ -205,6 +217,18 @@ namespace SourceCrafter.DependencyInjection
                 return isValid = finalType is not null && implType is not null;
             }
             return false;
+        }
+
+        static bool IsRelatedTo(this ITypeSymbol type, ITypeSymbol other)
+        {
+            return SymbolEqualityComparer.Default.Equals(type, other) 
+                || type.HasBaseType(other)
+                || type.AllInterfaces.Any(type.HasBaseType);
+        }
+
+        static bool HasBaseType(this ITypeSymbol type, ITypeSymbol other)
+        {
+            return type is null || type.BaseType is null ? false : SymbolEqualityComparer.Default.Equals(type.BaseType, other) || HasBaseType(type.BaseType, other);
         }
 
         static IEnumerable<(IParameterSymbol, AttributeArgumentSyntax?)> GetAttrParamsMap(
@@ -452,7 +476,7 @@ namespace SourceCrafter.DependencyInjection
             return code;
         }
 
-        public static bool TryGetAsyncType(this ITypeSymbol? typeSymbol, out ITypeSymbol? factoryType)
+        public static bool TryGetAsyncType(this ITypeSymbol typeSymbol, out ITypeSymbol factoryType)
         {
             switch ((factoryType = typeSymbol)?.ToGlobalNonGenericNamespace())
             {

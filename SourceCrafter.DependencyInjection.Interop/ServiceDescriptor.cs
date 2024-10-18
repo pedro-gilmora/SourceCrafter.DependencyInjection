@@ -17,6 +17,7 @@ internal delegate void ValueBuilder(StringBuilder code);
 internal delegate void MemberBuilder(StringBuilder code, bool isImplementation);
 internal delegate void ParamsBuilder(StringBuilder code);
 
+enum GenericType { None, JustImplementationType, InterfaceAndImplememtation }
 public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol? _interface = null)
 {
     static readonly Lifetime[] lifetimes = [Lifetime.Singleton, Lifetime.Scoped, Lifetime.Transient];
@@ -26,7 +27,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
         EnumFQMetaName = "global::System.Enum",
         KeyParamName = "key",
         NameFormatParamName = "nameFormat",
-        FactoryOrInstanceParamName = "factoryOrInstance",
+        SourceParamName = "source",
         ImplParamName = "impl",
         IfaceParamName = "iface",
         SingletonAttr = "global::SourceCrafter.DependencyInjection.Attributes.SingletonAttribute",
@@ -125,7 +126,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
             ImmutableArray<IParameterSymbol> defaultParamValues = [];
             bool isCached = false;
             Disposability _disposability = Disposability.None;
-            bool isValid = false;
+            bool isValid, isAsync = isValid = false;
             AttributeSyntax attrSyntax = null!;
 
             if (paramTypeName.Equals("global::" + CancelTokenFQMetaName))
@@ -141,6 +142,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
                 {
                     if (ServiceContainer.Model.TryGetDependencyInfo(
                         attr,
+                        ServiceContainer.Diagnostics,
                         ref isExternal,
                         param.Name,
                         paramType,
@@ -155,8 +157,9 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
                         out defaultParamValues,
                         out isCached,
                         out _disposability,
-                        out isValid,
-                        out attrSyntax)) break;
+                        out isAsync,
+                        out attrSyntax,
+                        out isValid)) break;
                 }
 
                 if (!HasScopedDependencies && Lifetime is not Lifetime.Scoped && lifetime is Lifetime.Scoped)
@@ -205,12 +208,8 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
 
             if (!isCached && lifetime is not Lifetime.Transient) isCached = true;
 
-            var isAsync = finalType.TryGetAsyncType(out var realParamType);
-
             if (isAsync)
             {
-                finalType = realParamType!;
-
                 if (!IsAsync) IsAsync = true;
 
                 if (!ServiceContainer.requiresSemaphore) ServiceContainer.UpdateAsyncStatus();
@@ -304,7 +303,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
                 continue;
             }
 
-            string methodName = GetMethodName(isExternal, lifetime, finalType, implType, factory, outKey, nameFormat, isCached, isAsync, ServiceContainer.MethodsRegistry, ServiceContainer.MethodNamesMap);
+            var (backingFieldName, methodName) = GetMethodName(isExternal, lifetime, finalType, implType, factory, outKey, nameFormat, isCached, isAsync, ServiceContainer.MethodsRegistry, ServiceContainer.MethodNamesMap);
 
             found = new(finalType, outKey, null)
             {
@@ -315,7 +314,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
                 ExportTypeName = paramTypeName,
                 RequiresDisposabilityCast = thisDisposability is Disposability.None && _disposability is not Disposability.None,
                 ResolverMethodName = methodName,
-                CacheField = "_" + methodName.Camelize(),
+                CacheField = backingFieldName,
                 Factory = factory,
                 FactoryKind = factoryKind,
                 Disposability = (Disposability)Math.Max((byte)thisDisposability, (byte)_disposability),
@@ -639,7 +638,7 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
         code.Append(containingType.ToGlobalNamespaced()).Append('.');
     }
 
-    internal static string GetMethodName(
+    internal static (string, string) GetMethodName(
         bool isExternal,
         Lifetime lifetime,
         ITypeSymbol finalType,
@@ -652,16 +651,20 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
         HashSet<string> methodsRegistry,
         DependencyNamesMap dependencyRegistry)
     {
-        var identifier = nameOrFormat is not null
+        var methodName = nameOrFormat is not null
             ? string.Format(nameOrFormat, key.Pascalize()!).RemoveDuplicates()
             : Extensions.SanitizeTypeName(implType ?? finalType, methodsRegistry, dependencyRegistry, lifetime, key.Pascalize()!);
 
-        identifier = isExternal ? identifier : factory?.ToNameOnly() ?? ("Get" + identifier);
+        methodName = isExternal ? methodName : factory?.Name ?? methodName;
 
-        if (factory != null && isCached && !identifier.EndsWith("Cached") && !identifier.EndsWith("Cache")) identifier += "Cached";
-        if (!identifier.EndsWith("Async") && isAsync) identifier += "Async";
+        if (factory != null && isCached && !methodName.EndsWith("Cached") && !methodName.EndsWith("Cache")) methodName += "Cached";
+        if (!methodName.EndsWith("Async") && isAsync) methodName += "Async";
+        
+        var fieldName = "_" + methodName.Camelize();
 
-        return identifier;
+        if(!isExternal && factory is null) methodName = "Get" + methodName;
+
+        return (fieldName, methodName);
     }
 
 

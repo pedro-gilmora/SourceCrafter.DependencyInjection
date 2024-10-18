@@ -144,6 +144,7 @@ internal sealed class ServiceContainer
 
         if (!Model.TryGetDependencyInfo(
             attributeData,
+            Diagnostics,
             ref isExternal,
             "",
             null,
@@ -158,19 +159,16 @@ internal sealed class ServiceContainer
             out var defaultParamValues,
             out var isCached,
             out var _disposability,
-            out var isValid,
-            out var attrSyntax)) return;
+            out var isAsync,
+            out var attrSyntax,
+            out var isValid)) return;
 
         if (!isCached && lifetime is not Lifetime.Transient) isCached = true;
 
         if (HasNoType() || InterfaceRequiresInternalFactory()) return;
 
-        var isAsync = finalType.TryGetAsyncType(out var realParamType);
-
         if (isAsync)
         {
-            finalType = realParamType!;
-
             if (!requiresSemaphore) UpdateAsyncStatus();
 
             if (factoryKind is SymbolKind.Method
@@ -197,8 +195,6 @@ internal sealed class ServiceContainer
 
         ref var existingOrNew = ref ServicesMap.GetValueOrAddDefault((lifetime, exportTypeFullName, outKey), out var exists)!;
 
-        string methodName = GetMethodName(isExternal, lifetime, finalType, implType, factory, outKey, nameFormat, isCached, isAsync, MethodsRegistry, MethodNamesMap);
-
         if (exists)
         {
             Diagnostics.TryAdd(
@@ -207,41 +203,41 @@ internal sealed class ServiceContainer
 
             return;
         }
-        else
+
+        var (backingFieldName, methodName) = GetMethodName(isExternal, lifetime, finalType, implType, factory, outKey, nameFormat, isCached, isAsync, MethodsRegistry, MethodNamesMap);
+
+        if (!isExternal && implType!.IsPrimitive() && outKey is "")
         {
-            if (!isExternal && implType!.IsPrimitive() && outKey is "")
-            {
-                Diagnostics.TryAdd(
-                    ServiceContainerGeneratorDiagnostics
-                        .PrimitiveDependencyShouldBeKeyed(lifetime, attrSyntax, typeName, exportTypeFullName));
-            }
-
-            existingOrNew = new(finalType, outKey, iFaceType)
-            {
-                ServiceContainer = this,
-                OriginDefinition = attrSyntax,
-                Lifetime = lifetime,
-                Key = outKey,
-                IsExternal = isExternal,
-                FullTypeName = typeName,
-                ExportTypeName = (iFaceType ?? implType ?? finalType).ToGlobalNamespaced(),
-                ResolverMethodName = methodName,
-                CacheField = "_" + methodName.Camelize(),
-                Factory = factory,
-                FactoryKind = factoryKind,
-                Disposability = (Disposability)Math.Max((byte)thisDisposability, (byte)_disposability),
-                IsResolved = true,
-                Attributes = implType!.GetAttributes(),
-                RequiresDisposabilityCast = thisDisposability is Disposability.None && _disposability is not Disposability.None,
-                IsAsync = isAsync,
-                ContainerType = providerClass,
-                IsCached = isCached,
-                Params = implType.GetParameters(),
-                DefaultParamValues = defaultParamValues
-            };
-
-            ResolveService(existingOrNew);
+            Diagnostics.TryAdd(
+                ServiceContainerGeneratorDiagnostics
+                    .PrimitiveDependencyShouldBeKeyed(lifetime, attrSyntax, typeName, exportTypeFullName));
         }
+
+        existingOrNew = new(finalType, outKey, iFaceType)
+        {
+            ServiceContainer = this,
+            OriginDefinition = attrSyntax,
+            Lifetime = lifetime,
+            Key = outKey,
+            IsExternal = isExternal,
+            FullTypeName = typeName,
+            ExportTypeName = (iFaceType ?? implType ?? finalType).ToGlobalNamespaced(),
+            ResolverMethodName = methodName,
+            CacheField = backingFieldName,
+            Factory = factory,
+            FactoryKind = factoryKind,
+            Disposability = (Disposability)Math.Max((byte)thisDisposability, (byte)_disposability),
+            IsResolved = true,
+            Attributes = implType!.GetAttributes(),
+            RequiresDisposabilityCast = thisDisposability is Disposability.None && _disposability is not Disposability.None,
+            IsAsync = isAsync,
+            ContainerType = providerClass,
+            IsCached = isCached,
+            Params = implType.GetParameters(),
+            DefaultParamValues = defaultParamValues
+        };
+
+        ResolveService(existingOrNew);
 
         bool HasNoType() => implType is null && iFaceType is null;
 
@@ -250,7 +246,7 @@ internal sealed class ServiceContainer
             if (iFaceType is not null && implType is null && factory is null && !isExternal)
             {
                 Diagnostics.TryAdd(
-                    ServiceContainerGeneratorDiagnostics.InterfaceRequiresFactory(attrSyntax.Name));
+                    ServiceContainerGeneratorDiagnostics.InterfaceRequiresFactory(attrSyntax));
 
                 return true;
             }
