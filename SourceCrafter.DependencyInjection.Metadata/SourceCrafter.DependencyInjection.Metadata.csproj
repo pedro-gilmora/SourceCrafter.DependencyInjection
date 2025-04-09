@@ -4,7 +4,7 @@
 		<TargetFramework>netstandard2.0</TargetFramework>
 		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<!--<GeneratePackageOnBuild>true</GeneratePackageOnBuild>-->
-		<!--<Version>1.1.6</Version>-->
+		<!--<Version>1.1.4</Version>-->
 		<Authors>SourceCrafter</Authors>
 		<LangVersion>latest</LangVersion>
 		<Nullable>enable</Nullable>
@@ -13,15 +13,8 @@
 		<PackageOutputPath>../packaging</PackageOutputPath>
 	</PropertyGroup>
 
-
 	<ItemGroup>
-		<Compile Include="..\SourceCrafter.DependencyInjection.Shared\**\*.cs">
-			<Link>Shared\%(RecursiveDir)%(Filename)%(Extension)</Link>
-		</Compile>
-	</ItemGroup>
-	
-	<ItemGroup>
-		<None Include="JsonSettingAttribute.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SourceCrafter.DependencyInjection" buildAction="Compile" />
+		<None Include="..\SourceCrafter.DependencyInjection.Shared\**\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SourceCrafter.DependencyInjection" buildAction="Compile" />
 	</ItemGroup>
 
 </Project>

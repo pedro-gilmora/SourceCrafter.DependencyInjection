@@ -1,10 +1,7 @@
 ﻿using BenchmarkDotNet.Attributes;
-using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Jobs;
 
 using GettingStarted;
-
-using Microsoft.Diagnostics.Tracing.Parsers.Tpl;
 
 namespace Benchmarks;
 

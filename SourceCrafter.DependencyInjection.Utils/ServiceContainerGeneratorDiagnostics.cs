@@ -1,8 +1,5 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-
-using SourceCrafter.DependencyInjection.Interop;
-
 using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("SourceCrafter.DependencyInjection")]

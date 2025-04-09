@@ -4,25 +4,20 @@ using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
-using System.Reflection.Metadata;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Text;
-using System.Xml.Linq;
 
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-using SourceCrafter.DependencyInjection.Interop;
-
-using static SourceCrafter.DependencyInjection.Interop.ServiceDescriptor;
+using static SourceCrafter.DependencyInjection.ServiceDescriptor;
 
 
 [assembly: InternalsVisibleTo("SourceCrafter.Bindings.UnitTests")]
 namespace SourceCrafter.DependencyInjection
 {
-    public static class Extensions
+    internal static class Extensions
     {
         internal readonly static SymbolDisplayFormat
             _globalizedNamespace = new(
@@ -59,13 +54,13 @@ namespace SourceCrafter.DependencyInjection
                 genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters | SymbolDisplayGenericsOptions.IncludeVariance,
                 miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes | SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
-        public static string ToGlobalNamespaced(this ISymbol t) => t.ToDisplayString(_globalizedNamespace);
+        internal static string ToGlobalNamespaced(this ISymbol t) => t.ToDisplayString(_globalizedNamespace);
 
-        public static string ToGlobalNonGenericNamespace(this ISymbol t) => t.ToDisplayString(_globalizedNonGenericNamespace);
+        internal static string ToGlobalNonGenericNamespace(this ISymbol t) => t.ToDisplayString(_globalizedNonGenericNamespace);
 
-        public static string ToTypeNameFormat(this ITypeSymbol t) => t.ToDisplayString(_typeNameFormat);
+        internal static string ToTypeNameFormat(this ITypeSymbol t) => t.ToDisplayString(_typeNameFormat);
 
-        public static string ToNameOnly(this ISymbol t) => t.ToDisplayString(_symbolNameOnly);
+        internal static string ToNameOnly(this ISymbol t) => t.ToDisplayString(_symbolNameOnly);
         internal static bool TryGetDependencyInfo(
             this SemanticModel model,
             AttributeData attrData,
@@ -283,7 +278,7 @@ namespace SourceCrafter.DependencyInjection
             return false;
         }
 
-        public static bool GetLifetimeFromCtor(ref INamedTypeSymbol attrClass, ref bool isExternal, AttributeSyntax attrSyntax, out Lifetime lifetime)
+        internal static bool GetLifetimeFromCtor(ref INamedTypeSymbol attrClass, ref bool isExternal, AttributeSyntax attrSyntax, out Lifetime lifetime)
         {
             if (GetLifetimeFromSyntax(attrSyntax, out lifetime)) return true;
 
@@ -333,7 +328,7 @@ namespace SourceCrafter.DependencyInjection
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static string ToMetadataLongName(this ISymbol symbol)
+        internal static string ToMetadataLongName(this ISymbol symbol)
         {
             var ret = new StringBuilder();
 
@@ -353,7 +348,7 @@ namespace SourceCrafter.DependencyInjection
             return ret.ToString();
         }
 
-        public static string ToMetadataLongName(this ISymbol symbol, Map<string, byte> uniqueName)
+        internal static string ToMetadataLongName(this ISymbol symbol, Map<string, byte> uniqueName)
         {
             var existing = ToMetadataLongName(symbol);
 
@@ -367,17 +362,17 @@ namespace SourceCrafter.DependencyInjection
             return existing;
         }
 
-        public static string Capitalize(this string str)
+        internal static string Capitalize(this string str)
         {
             return (str is [{ } f, .. { } rest] ? char.ToUpper(f) + rest : str);
         }
 
-        public static string Camelize(this string str)
+        internal static string Camelize(this string str)
         {
             return (str is [{ } f, .. { } rest] ? char.ToLower(f) + rest : str);
         }
 
-        public static string? Pascalize(this string str)
+        internal static string? Pascalize(this string str)
         {
             if (string.IsNullOrEmpty(str))
                 return str;
@@ -410,7 +405,7 @@ namespace SourceCrafter.DependencyInjection
             return result[0..resultIndex].ToString();
         }
 
-        public static ImmutableArray<IParameterSymbol> GetParameters(this ITypeSymbol implType)
+        internal static ImmutableArray<IParameterSymbol> GetParameters(this ITypeSymbol implType)
         {
             return implType is INamedTypeSymbol { Constructors: var ctor, InstanceConstructors: var insCtor }
                 ? ctor.OrderBy(d => !d.Parameters.IsDefaultOrEmpty).FirstOrDefault()?.Parameters
@@ -419,7 +414,7 @@ namespace SourceCrafter.DependencyInjection
                 : [];
         }
 
-        public static bool IsPrimitive(this ITypeSymbol target, bool includeObject = true) =>
+        internal static bool IsPrimitive(this ITypeSymbol target, bool includeObject = true) =>
             (includeObject && target.SpecialType is SpecialType.System_Object)
                 || target.SpecialType is SpecialType.System_Enum
                     or SpecialType.System_Boolean
@@ -441,12 +436,12 @@ namespace SourceCrafter.DependencyInjection
                 || (target.SpecialType is SpecialType.System_Nullable_T
                     && IsPrimitive(((INamedTypeSymbol)target).TypeArguments[0]));
 
-        public static ITypeSymbol AsNonNullable(this ITypeSymbol type) =>
+        internal static ITypeSymbol AsNonNullable(this ITypeSymbol type) =>
             type.Name == "Nullable"
                 ? ((INamedTypeSymbol)type).TypeArguments[0]
                 : type.WithNullableAnnotation(NullableAnnotation.None);
 
-        public static void TryGetNullable(this ITypeSymbol type, out ITypeSymbol outType, out bool outIsNullable)
+        internal static void TryGetNullable(this ITypeSymbol type, out ITypeSymbol outType, out bool outIsNullable)
                     => (outType, outIsNullable) = type.SpecialType is SpecialType.System_Nullable_T
                         || type is INamedTypeSymbol { Name: "Nullable" }
                             ? (((INamedTypeSymbol)type).TypeArguments[0], true)
@@ -454,18 +449,18 @@ namespace SourceCrafter.DependencyInjection
                                 ? (type.WithNullableAnnotation(NullableAnnotation.None), true)
                                 : (type, false);
 
-        public static bool IsNullable(this ITypeSymbol typeSymbol)
+        internal static bool IsNullable(this ITypeSymbol typeSymbol)
             => typeSymbol.SpecialType is SpecialType.System_Nullable_T
                 || typeSymbol.NullableAnnotation == NullableAnnotation.Annotated
                 || typeSymbol is INamedTypeSymbol { Name: "Nullable" };
 
-        public static bool AllowsNull(this ITypeSymbol typeSymbol)
+        internal static bool AllowsNull(this ITypeSymbol typeSymbol)
             => typeSymbol is { IsValueType: false, IsTupleType: false, IsReferenceType: true };
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static StringBuilder AddSpace(this StringBuilder sb, int count = 1) => sb.Append(new string(' ', count));
+        internal static StringBuilder AddSpace(this StringBuilder sb, int count = 1) => sb.Append(new string(' ', count));
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static StringBuilder CaptureGeneratedString(this StringBuilder code, Action action, out string expression)
+        internal static StringBuilder CaptureGeneratedString(this StringBuilder code, Action action, out string expression)
         {
             int start = code.Length, end;
             action();
@@ -476,7 +471,7 @@ namespace SourceCrafter.DependencyInjection
             return code;
         }
 
-        public static bool TryGetAsyncType(this ITypeSymbol typeSymbol, out ITypeSymbol factoryType)
+        internal static bool TryGetAsyncType(this ITypeSymbol typeSymbol, out ITypeSymbol factoryType)
         {
             switch ((factoryType = typeSymbol)?.ToGlobalNonGenericNamespace())
             {
@@ -492,7 +487,7 @@ namespace SourceCrafter.DependencyInjection
             };
         }
 
-        public static Disposability GetDisposability(this ITypeSymbol type)
+        internal static Disposability GetDisposability(this ITypeSymbol type)
         {
             if (type is null) return Disposability.None;
 
@@ -513,13 +508,13 @@ namespace SourceCrafter.DependencyInjection
             return disposability;
         }
 
-        public static string RemoveDuplicates(this string? input)
+        internal static string RemoveDuplicates(this string? input)
         {
             if ((input = input?.Trim()) is null or "")
                 return "";
 
             var result = "";
-            int wordStart = 0;
+            var wordStart = 0;
 
             for (int i = 1; i < input.Length; i++)
             {
@@ -546,7 +541,7 @@ namespace SourceCrafter.DependencyInjection
             return result;
         }
 
-        public static string SanitizeTypeName(
+        internal static string SanitizeTypeName(
             ITypeSymbol type,
             HashSet<string> methodsRegistry,
             DependencyNamesMap dependencyRegistry,
@@ -601,7 +596,7 @@ namespace SourceCrafter.DependencyInjection
             }
         }
 
-        public static T Exchange<T>(ref this T oldVal, T newVal) where T : struct =>
+        internal static T Exchange<T>(ref this T oldVal, T newVal) where T : struct =>
                     oldVal.Equals(newVal) ? oldVal : ((oldVal, _) = (newVal, oldVal)).Item2;
     }
 }
@@ -609,10 +604,10 @@ namespace SourceCrafter.DependencyInjection
 
 namespace SourceCrafter.Bindings
 {
-    public static class CollectionExtensions<T>
+    internal static class CollectionExtensions<T>
     {
-        public static Collection<T> EmptyCollection => [];
-        public static ReadOnlyCollection<T> EmptyReadOnlyCollection => new([]);
+        internal static Collection<T> EmptyCollection => [];
+        internal static ReadOnlyCollection<T> EmptyReadOnlyCollection => new([]);
     }
 }
 

@@ -19,11 +19,13 @@
 				))
 			))
 		</PackageVersion>
-		<Company>AsereHighDev</Company>
 		<Nullable>enable</Nullable>
 		<IsRoslynComponent>true</IsRoslynComponent>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
-		<Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>
+		<Configurations>Debug;Release;Pack;DEBUG_SG;DISG_HOST;DISG</Configurations>
+		<DefineConstants>$(DefineConstants);DISG_HOST;DISG</DefineConstants>
+
+		<Company>AsereHighDev</Company>
 		<PackageOutputPath>../packaging</PackageOutputPath>
 		<Version>$(PackageVersion)</Version>
 		<Title>Truly compile-time depedency injection</Title>
@@ -45,28 +47,45 @@
 		  <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" PrivateAssets="all" GeneratePathProperty="true" />
 		<PackageReference Include="System.Diagnostics.Tools" Version="4.3.0" />
 		<PackageReference Include="System.Memory" Version="4.5.5" PrivateAssets="all" GeneratePathProperty="true" />
 		<PackageReference Include="System.Runtime.InteropServices" PrivateAssets="all" Version="4.3.0" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <ProjectReference Include="..\SourceCrafter.DependencyInjection.Interop\SourceCrafter.DependencyInjection.Interop.csproj" />
-	</ItemGroup>
-
-	<ItemGroup>
-	  <None Remove="bin\Debug\netstandard2.0\SourceCrafter.DependencyInjection.dll" />
+		<PackageReference Include="System.Threading.Channels" Version="8.0.0" />
 	</ItemGroup>
 
 	<ItemGroup>
 		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
-		<None Remove="bin\Debug\netstandard2.0\\SourceCrafter.DependencyInjection.Interop.dll" />
-		<None Include="$(OutputPath)\$(AssemblyName).Interop.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
+		<!--<None Remove="bin\Debug\netstandard2.0\\SourceCrafter.DependencyInjection.Interop.dll" />-->
+		<!--<None Include="$(OutputPath)\$(AssemblyName).Interop.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />-->
 		<None Include="..\README.md">
 		  <Pack>True</Pack>
 		  <PackagePath>\</PackagePath>
 		</None>
+	</ItemGroup>
+	
+	
+
+	<ItemGroup>
+		<Compile Include="..\SourceCrafter.DependencyInjection.Utils\**\*.cs">
+			<Link>Utils\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		</Compile>
+	</ItemGroup>
+
+	<ItemGroup>
+		<Compile Include="..\SourceCrafter.DependencyInjection.Shared\**\*.cs">
+			<Link>Shared\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		</Compile>
+	</ItemGroup>
+
+	<ItemGroup>
+		<Compile Include="..\SourceCrafter.DependencyInjection.Interop\**\*.cs">
+			<Link>Interop\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		</Compile>
+	</ItemGroup>
+	
+
+	<ItemGroup>
+	  <None Remove="bin\Debug\netstandard2.0\\SourceCrafter.DependencyInjection.dll" />
 	</ItemGroup>
 
 	<!--<PropertyGroup>

@@ -8,9 +8,8 @@ using System.Linq;
 using System.Text;
 
 using System;
-using System.IO;
 
-namespace SourceCrafter.DependencyInjection.Interop;
+namespace SourceCrafter.DependencyInjection;
 
 using static ServiceDescriptor;
 

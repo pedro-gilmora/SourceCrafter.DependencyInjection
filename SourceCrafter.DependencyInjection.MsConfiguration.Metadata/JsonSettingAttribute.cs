@@ -1,18 +1,10 @@
-﻿using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
-
-using SourceCrafter.DependencyInjection.Attributes;
-using SourceCrafter.DependencyInjection.Interop;
-using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
-
-using System;
-using System.IO;
+﻿using System;
 
 namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
 {
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Assembly, AllowMultiple = false)]
 #pragma warning disable CS9113 // Parameter is unread.
-    public sealed class JsonConfigurationAttribute(
+    internal sealed class JsonConfigurationAttribute(
         string fileName = "appsettings",
         string key = "",
         bool optional = true,
@@ -20,29 +12,26 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
         string nameFormat = "Get{0}Configuration",
         bool handleEnviroments = true,
         Disposability disposability = Disposability.Disposable
-    )
-        : SingletonAttribute<IConfiguration>(nameFormat);
+    ) : Attribute;
     //: SingletonAttribute<IConfiguration>(source: nameof(ConfigurationResolver.GetJsonConfiguration));
 
     [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false)]
-    public sealed class JsonSettingAttribute(
+    internal sealed class JsonSettingAttribute(
         string path, 
         Lifetime lifetime = Lifetime.Singleton,
         string key = "",
         string nameFormat = "Get{0}Settings",
         string configKey = ""
-    ) 
-        : DependencyAttribute(lifetime, nameFormat);
+    ) : Attribute;
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
-    public sealed class JsonSettingAttribute<T>(
+    internal sealed class JsonSettingAttribute<T>(
         string path,
         Lifetime lifetime = Lifetime.Singleton,
         string key = "",
         string nameFormat = "Get{0}Settings",
         string configKey = ""
-    )
-        : DependencyAttribute(lifetime, nameFormat);
+    ) : Attribute;
 #pragma warning restore CS9113 // Parameter is unread.
 
     //public class ConfigurationResolver

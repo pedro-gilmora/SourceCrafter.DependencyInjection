@@ -1,16 +1,13 @@
 ﻿using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
-using System.Reflection;
-using System.Reflection.Metadata;
 using System.Text;
 
-namespace SourceCrafter.DependencyInjection.Interop;
+namespace SourceCrafter.DependencyInjection;
 
 internal delegate void CommaSeparateBuilder(ref bool useIComma, StringBuilder code, string baseIndent);
 internal delegate void ValueBuilder(StringBuilder code);
@@ -18,7 +15,7 @@ internal delegate void MemberBuilder(StringBuilder code, bool isImplementation);
 internal delegate void ParamsBuilder(StringBuilder code);
 
 enum GenericType { None, JustImplementationType, InterfaceAndImplememtation }
-public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol? _interface = null)
+internal sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol? _interface = null)
 {
     static readonly Lifetime[] lifetimes = [Lifetime.Singleton, Lifetime.Scoped, Lifetime.Transient];
 
@@ -43,23 +40,23 @@ public sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbol?
     internal ITypeSymbol? Interface = _interface;
     internal ISymbol? Factory;
     internal SymbolKind FactoryKind;
-    public Lifetime Lifetime = Lifetime.Singleton;
-    public bool IsCached = true;
-    public string Key = key;
-    public Disposability Disposability;
+    internal Lifetime Lifetime = Lifetime.Singleton;
+    internal bool IsCached = true;
+    internal string Key = key;
+    internal Disposability Disposability;
     //internal ValueBuilder GenerateValue = null!;
     internal CommaSeparateBuilder? BuildParams = null!;
     internal SemanticModel TypeModel = null!;
-    public bool IsResolved;
+    internal bool IsResolved;
     internal ImmutableArray<AttributeData> Attributes = [];
     internal ITypeSymbol ContainerType = null!;
-    public bool NotRegistered = false;
+    internal bool NotRegistered = false;
     internal bool RequiresDisposabilityCast = false;
-    public bool IsCancelTokenParam;
-    public bool IsExternal;
+    internal bool IsCancelTokenParam;
+    internal bool IsExternal;
     internal AttributeSyntax OriginDefinition = null!;
     internal ServiceContainer ServiceContainer = null!;
-    public string ExportTypeName = null!;
+    internal string ExportTypeName = null!;
     private bool HasScopedDependencies;
     internal bool IsSimpleTransient;
 

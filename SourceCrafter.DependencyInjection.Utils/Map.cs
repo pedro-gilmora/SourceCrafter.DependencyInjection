@@ -5,9 +5,9 @@ using System.Runtime.CompilerServices;
 using System;
 using System.Collections;
 
-namespace SourceCrafter.DependencyInjection.Interop;
+namespace SourceCrafter.DependencyInjection;
 
-public class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
+internal class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
 {
     private int[]? _buckets;
     private Entry[]? _entries;

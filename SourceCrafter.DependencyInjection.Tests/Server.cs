@@ -1,9 +1,5 @@
-﻿using Microsoft.Extensions.Configuration;
-
-using SourceCrafter.DependencyInjection.Attributes;
+﻿using SourceCrafter.DependencyInjection.Attributes;
 using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
-
-using System.Text.RegularExpressions;
 
 [assembly: JsonConfiguration]
 

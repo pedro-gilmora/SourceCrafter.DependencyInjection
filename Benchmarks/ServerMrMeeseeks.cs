@@ -1,7 +1,5 @@
 ﻿using Benchmarks;
 
-using Microsoft.Extensions.Logging;
-
 using MrMeeseeks.DIE.Configuration.Attributes;
 
 namespace GettingStarted
