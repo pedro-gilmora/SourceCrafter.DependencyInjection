@@ -1,28 +1,28 @@
-﻿global using DependencyMap = SourceCrafter.DependencyInjection.Interop.Map<(SourceCrafter.DependencyInjection.Interop.Lifetime, string, string), SourceCrafter.DependencyInjection.Interop.ServiceDescriptor>;
-
+﻿#define DISG_HOST
 using Microsoft.CodeAnalysis;
 using System;
 using System.Linq;
 using System.Reflection;
 using System.Text;
-using System.Collections.Generic;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SourceCrafter.DependencyInjection;
-using SourceCrafter.DependencyInjection.Interop;
-using System.Collections.Immutable;
-using static Microsoft.Extensions.DependencyInjection.ServiceDescriptor;
+using System.Threading;
 
 [Generator]
 public sealed class Generator : IIncrementalGenerator
 {
+
+    private readonly DependencyMapDictionary containers = new(StringComparer.Ordinal);
+    private readonly CancellationTokenSource cancellationTokenSource = new();
+
+    ~Generator() {
+        containers.Clear();
+        cancellationTokenSource.Cancel();
+    }
+
     private const string serviceContainerFullTypeName = "SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute";
     internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
     internal readonly static Guid generatorGuid = new("31C54896-DE65-4FDC-8EBA-5A169A6E3CBB");
-
-    ~Generator()
-    {
-        Dependencies.Clear();
-    }
     //static DependenciesServer? server;
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -43,7 +43,7 @@ public sealed class Generator : IIncrementalGenerator
                 .SelectMany((info, _) => info)
                 .Collect();
         var scopedUsage = context.SyntaxProvider
-                .CreateSyntaxProvider<InvokeInfo>(
+                .CreateSyntaxProvider(
                     (syntax, _) => syntax is MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax },
                     GetInvokeInfos)
                 .Where(info => info is not null)
@@ -56,7 +56,7 @@ public sealed class Generator : IIncrementalGenerator
                 .Collect();
 
         // Different containers registry for dependencies providers
-        Dictionary<string, DependencyMap> containers = [];
+        var isServerRunning = false;
 
         context.RegisterSourceOutput(context.CompilationProvider
             .Combine(servicesContainers)
@@ -72,7 +72,7 @@ public sealed class Generator : IIncrementalGenerator
 
                 int start = errorsSb.Length;
 
-                if (!Dependencies.TryBroadcastDependencies(context, containers, out string error)) 
+                if (!isServerRunning && !Dependencies.TryBroadcastDependencies(cancellationTokenSource.Token, compilation.Assembly.Identity, containers, out string error))
                 {
                     context.ReportDiagnostic(
                         Diagnostic.Create(
@@ -85,8 +85,10 @@ public sealed class Generator : IIncrementalGenerator
                                 true),
                             null));
 
-                    return; 
+                    return;
                 }
+
+                isServerRunning = true;
 
                 try
                 {
@@ -123,9 +125,7 @@ public sealed class Generator : IIncrementalGenerator
                                 diagnostics,
                                 externals,
                                 generatedCodeAttribute,
-                                serviceCall
-                                    .Where(usage => SymbolEqualityComparer.Default.Equals(usage.ContainerType, cls))
-                                    .ToImmutableArray())
+                                [.. serviceCall.Where(usage => SymbolEqualityComparer.Default.Equals(usage.ContainerType, cls))])
                             .Build(containers, [], uniqueName, context.AddSource, net9Lock, declaration);
                     }
 

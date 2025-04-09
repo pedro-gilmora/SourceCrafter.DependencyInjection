@@ -6,8 +6,6 @@ using System.Reflection;
 using SourceCrafter.DependencyInjection;
 using System.Text;
 using System.Collections.Generic;
-using SourceCrafter.DependencyInjection.Interop;
-using static SourceCrafter.DependencyInjection.Extensions;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 [Generator]
@@ -74,12 +72,12 @@ public sealed class Generator : IIncrementalGenerator
     {
         if (!IsMsConfigInstalled(compilation, out var iConfigTypeSymbol)) return;
 
+        var identity = compilation.Assembly.Identity;
         var configTypeName = iConfigTypeSymbol.ToGlobalNamespaced();
 
+
         Map<(int, Lifetime, string?), string> dependencyRegistry = new(EqualityComparer<(int, Lifetime, string?)>.Default);
-
         HashSet<string> methodsRegistry = new(StringComparer.Ordinal);
-
         Map<string, string> files = new(StringComparer.Ordinal);
         HashSet<string> keys = new(StringComparer.Ordinal);
 
@@ -133,10 +131,6 @@ using global::Microsoft.Extensions.Configuration;
 
                         if (fileExists) continue;
 
-#if DEBUG_SG || DEBUG
-                        var method = Dependencies.GetDependency(containerTypeName, Lifetime.Singleton, configTypeName, key);
-
-#endif
                         var nameFormat = (string)configAttr.ConstructorArguments[4].Value!;
 
                         configMethodName = nameFormat.Replace("{0}", key).RemoveDuplicates();
@@ -212,7 +206,7 @@ using global::Microsoft.Extensions.Configuration;
                         || !files.TryGetValue(configKey, out var configMethodName)
                         || !(target is IAssemblySymbol || SymbolEqualityComparer.Default.Equals(target, container))) continue;
 
-                    BuildSetting(code, settingAttr, settingPath, configMethodName, settingAttr.AttributeClass!.TypeArguments[0]);
+                    BuildSetting(identity, containerTypeName, code, settingAttr, settingPath, configMethodName, settingAttr.AttributeClass!.TypeArguments[0]);
                 }
             }
             
@@ -226,7 +220,7 @@ using global::Microsoft.Extensions.Configuration;
                     || !files.TryGetValue(configKey, out var configMethodName)) continue;
 
 
-                    BuildSetting(code, settingAttr, settingPath, configMethodName, parameter.Type);
+                    BuildSetting(identity, containerTypeName, code, settingAttr, settingPath, configMethodName, parameter.Type);
                 }
             }
 
@@ -236,15 +230,20 @@ using global::Microsoft.Extensions.Configuration;
             context.AddSource($"{container.MetadataName}.msConfig", code.ToString());
         }
 
-        static void BuildSetting(StringBuilder code, AttributeData settingAttr, string settingPath, string configMethodName, ITypeSymbol type)
+        static void BuildSetting(AssemblyIdentity identity, string containerTypeName, StringBuilder code, AttributeData settingAttr, string settingPath, string configMethodName, ITypeSymbol type)
         {
             var isPrimitive = type.IsPrimitive();
 
             var lifetime = (Lifetime)(byte)settingAttr.ConstructorArguments[1].Value!;
             var nameFormat = (string)settingAttr.ConstructorArguments[3].Value!;
             var settingType = type.ToGlobalNamespaced();
-            var identifier = nameFormat.Replace("{0}", settingAttr.ConstructorArguments[2].Value?.ToString().Pascalize() ?? "").RemoveDuplicates()!;
-            var fieldIdentifier = "_" + identifier.Camelize();
+            var key = settingAttr.ConstructorArguments[2].Value?.ToString() ?? "";
+            var identifier = nameFormat.Replace("{0}", key.Pascalize()).RemoveDuplicates()!;
+            var fieldIdentifier = "_" + key;
+
+//#if DEBUG_SG || DEBUG
+//            var method = Dependencies.GetDependency(identity, containerTypeName, Lifetime.Singleton, settingType, key);
+//#endif
 
             if (!isPrimitive)
             {

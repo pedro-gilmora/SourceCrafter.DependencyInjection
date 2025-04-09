@@ -31,4 +31,9 @@
   <ItemGroup>
     <Compile Include="SourceCrafter.DependencyInjection\**\*.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>

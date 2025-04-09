@@ -1,19 +1,9 @@
 ﻿using Microsoft.CodeAnalysis;
 
-using SourceCrafter.DependencyInjection.Interop;
-
 using System;
-using System.Buffers;
-using System.Buffers.Text;
-using System.Collections.Generic;
-using System.IO;
-using System.IO.Pipes;
-using System.Net;
-using System.Net.Sockets;
-using System.Runtime.InteropServices.ComTypes;
+using System.IO.MemoryMappedFiles;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace SourceCrafter.DependencyInjection;
 
@@ -23,130 +13,12 @@ enum DepsOps
     MarkAsResolved
 }
 
-public sealed class Dependencies
+internal sealed class Dependencies
 {
-    internal static Dependencies Server = null!;
-    static object _lock = new();
 
-    //private readonly TcpListener server;
-    //private readonly CancellationTokenSource cancellationTokenSource;
-    internal Dictionary<string, DependencyMap> _containers = null!;
 
-    //internal DependenciesServer()
-    //{
-    //    cancellationTokenSource = new CancellationTokenSource();
-    //    //server = TcpListener.Create(9995);
-    //    server.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-    //    Start();
-    //}
-
-    //internal void Start()
-    //{
-    //    try
-    //    {
-    //        server.Start();
-    //        StartAsync();
-    //    }
-    //    catch (IOException)
-    //    {
-    //    }
-
-    //    async void StartAsync()
-    //    {
-    //        while (!cancellationTokenSource.IsCancellationRequested)
-    //        {
-    //            ProcessRequests(await server.AcceptTcpClientAsync());
-    //        }
-    //    }
-
-    //    void ProcessRequests(TcpClient client)
-    //    {
-    //        using (client)
-    //        {
-    //            using var stream = client.GetStream();
-    //            using var reader = new BinaryReader(stream);
-    //            using var writer = new BinaryWriter(stream);
-
-    //            switch ((DepsOps)reader.ReadByte())
-    //            {
-    //                case DepsOps.Get:
-    //                    GetDependency(reader, writer);
-    //                    break;
-    //                case DepsOps.MarkAsResolved:
-    //                    break;
-    //                default:
-    //                    writer.Write(false);
-    //                    break;
-    //            }
-    //        }
-    //    }
-    //}
-
-    //private void GetDependency(BinaryReader reader, BinaryWriter writer)
-    //{
-    //    try
-    //    {
-    //        var containerFullType = reader.ReadString();
-    //        var lifetime = (Lifetime)reader.ReadByte();
-    //        var type = reader.ReadString();
-    //        var key = reader.ReadString();
-
-    //        if (_containers.TryGetValue(containerFullType, out var map) && map.TryGetValue((lifetime, type, key), out var serviceDescriptor))
-    //        {
-    //            StringBuilder sb = new();
-
-    //            serviceDescriptor.BuildValue(sb);
-
-    //            writer.Write(BuildChunk(bw =>
-    //            {
-    //                bw.Write(true);
-    //                bw.Write(sb.ToString());
-    //                bw.Write((byte)serviceDescriptor.Disposability);
-    //                bw.Write((byte)serviceDescriptor.ServiceContainer.disposability);
-    //            }));
-    //        }
-    //        else
-    //        { 
-    //            writer.Write(false);
-    //        }
-    //    }
-    //    catch (IOException)
-    //    {
-
-    //    }
-    //}
-
-    //internal void Stop()
-    //{
-    //    try { server.Server.Disconnect(true); } catch {}
-    //    try { server.Stop(); } catch {}
-    //}
-
-    public static ServiceDescriptor? GetDependency(string containerTypeName, Lifetime lifetime, string typeName, string key)
-    {
-        return Server?._containers is { } _containers
-            && _containers.TryGetValue(containerTypeName, out var map) && map.
-            TryGetValue((lifetime, typeName, key), out var serviceDescriptor)
-                ? serviceDescriptor
-                : null;
-    }
-
-    //private static byte[] BuildChunk(Action<BinaryWriter> action)
-    //{
-    //    using MemoryStream ms = new();
-    //    using BinaryWriter bw = new(ms);
-
-    //    action(bw);
-
-    //    return ms.ToArray();
-    //}
-
-    internal static void Clear()
-    {
-        Server?._containers.Clear();
-    }
-
-    internal static bool TryBroadcastDependencies(SourceProductionContext p, Dictionary<string, DependencyMap> containers, out string error)
+#if DISG_HOST
+    internal static bool TryBroadcastDependencies(CancellationToken token, AssemblyIdentity contextId, DependencyMapDictionary containers, out string error)
     {
         int attempts = 2;
         error = null!;
@@ -154,10 +26,7 @@ public sealed class Dependencies
         while (attempts-- > -1)
             try
             {
-                if (Server is null)
-                    lock (_lock) (Server ??= new())._containers = containers;
-                else
-                    Server._containers = containers;
+                _ = System.Threading.Tasks.Task.Run(() => ServeDependencies(contextId, containers, token), token);
 
                 return true;
             }
@@ -172,9 +41,216 @@ public sealed class Dependencies
 
         return false;
     }
+
+    static void ServeDependencies(AssemblyIdentity asemblyInfo, DependencyMapDictionary containers, CancellationToken token)
+    {
+        #region Create server signal
+        var contextId = $"{asemblyInfo.Name}:{asemblyInfo.PublicKey}";
+
+        using var serverSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"DiSGen:{contextId}");
+        using var requestHeaderMmf = MemoryMappedFile.CreateOrOpen($"DiSGenEvt:{contextId}", 1024);
+
+        #endregion
+
+        while (!token.IsCancellationRequested)
+        {
+            using var requestHeaderAccesor = requestHeaderMmf.CreateViewAccessor();
+
+            if(!serverSignal.WaitOne()) continue;
+
+            try
+            {
+                var requestHeaderBuffer = new byte[1024];
+
+                requestHeaderAccesor.ReadArray(0, requestHeaderBuffer, 0, 1024);
+
+                var requestHeader = Encoding.Default.GetString(requestHeaderBuffer).TrimEnd('\0').Split(['|'], StringSplitOptions.RemoveEmptyEntries);
+                var requestId = requestHeader[0];
+                var requestLength = int.Parse(requestHeader[1]);
+                var requestBuffer = new byte[requestLength];
+#if DEBUG_SG
+                Trace.TraceInformation($"Opening DiSGenReq:{requestId}");
+#endif
+                using var requestMemoryMappedFile = MemoryMappedFile.OpenExisting($"DiSGenReq:{requestId}");
+                using var requestViewAccessor = requestMemoryMappedFile.CreateViewAccessor();
+                using var clientSignal = EventWaitHandle.OpenExisting($"DiSGenReqEvt:{requestId}");
+
+                requestViewAccessor.ReadArray(0, requestBuffer, 0, requestLength);
+
+                var request = Encoding.Default.GetString(requestBuffer).Split(['|'], StringSplitOptions.RemoveEmptyEntries);
+                string containerFullType = request[0];
+                Lifetime lifetime = Enum.TryParse(request[1], out Lifetime _lt) ? _lt : Lifetime.Transient;
+                string typeName = request[2];
+                string key = request.Length is 4 ? request[3] : "";
+
+#if DEBUG_SG
+                Trace.TraceInformation($"Create DiSGenRes:{requestId}");
+#endif
+                if (containers.TryGetValue(containerFullType, out var containerServices) && containerServices.TryGetValue((lifetime, typeName, key), out var serviceDescriptor))
+                {
+                    StringBuilder invocation = new();
+
+                    serviceDescriptor.BuildAsExternalValue(invocation);
+
+                    var responseBuffer = Encoding.Default.GetBytes($"{invocation}|{serviceDescriptor.Disposability}|{serviceDescriptor.ContainerDisposability}");
+
+                    using var responseMemoryMappedFile = MemoryMappedFile.CreateOrOpen($"DiSGenRes:{requestId}", responseBuffer.Length);
+                    using var responseViewAccessor = responseMemoryMappedFile.CreateViewAccessor();
+
+                    // Send response header (length) and data
+                    requestViewAccessor.WriteArray(0, BitConverter.GetBytes(responseBuffer.Length), 0, 4);
+                    responseViewAccessor.WriteArray(0, responseBuffer, 0, responseBuffer.Length);
+                    clientSignal.Set();
+                    clientSignal.WaitOne();
+                }
+                else
+                {
+                    using var responseMemoryMappedFile = MemoryMappedFile.CreateOrOpen($"DiSGenRes:{requestId}", 1);
+                    using var responseViewAccessor = responseMemoryMappedFile.CreateViewAccessor();
+
+                    // Sends not found
+                    requestViewAccessor.WriteArray(0, BitConverter.GetBytes(1), 0, 4);
+                    responseViewAccessor.WriteArray(0, [0], 0, 1);
+                    clientSignal.Set();
+                    clientSignal.WaitOne();
+                }
+
+#if DEBUG_SG
+                Trace.TraceInformation($"Server closing {requestId}DiSGenReq");
+#endif
+            }
+            catch(Exception e)
+            {
+#if DEBUG_SG
+                Trace.TraceError($"Server error: {e}");
+#endif
+            }
+        }
+    }
+
+#else
+
+    internal static DependencyResult? GetDependency(
+        AssemblyIdentity asemblyInfo,
+        string containerFullType,
+        Lifetime lifetime,
+        string typeName,
+        string key)
+    {
+        var contextId = $"{asemblyInfo.Name}:{asemblyInfo.PublicKey}";
+        using var serverSignal = EventWaitHandle.OpenExisting($"DiSGen:{contextId}");
+
+        try
+        {
+            #region Write header
+
+            using var requestHeader = MemoryMappedFile.OpenExisting($"DiSGenEvt:{contextId}");
+            var requestHeaderBuffer = new byte[1024];
+            var requestId = Guid.NewGuid();
+            var request = $"{containerFullType}|{lifetime}|{typeName}|{key}";
+            var requestMessage = Encoding.Default.GetBytes(request);
+
+            Encoding.Default.GetBytes($"{requestId}|{requestMessage.Length}").CopyTo(requestHeaderBuffer, 0);
+
+            using var serverViewAccessor = requestHeader.CreateViewAccessor();
+
+            serverViewAccessor.WriteArray(0, requestHeaderBuffer, 0, 1024);
+
+            var bufferLength = Math.Max(requestMessage.Length, 4);
+
+            #endregion
+
+            #region Send request
+
+#if DEBUG_SG
+            Trace.TraceInformation($"Client creating DiSGenReq:{requestId}");
+#endif
+            using var requestMemoryMappedFile = MemoryMappedFile.CreateOrOpen($"DiSGenReq:{requestId}", bufferLength);
+            using var clientSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"DiSGenReqEvt:{requestId}");
+
+            using var requestViewAccessor = requestMemoryMappedFile.CreateViewAccessor();
+
+            requestViewAccessor.WriteArray(0, requestMessage, 0, requestMessage.Length);
+
+            serverSignal.Set();
+
+            if (!clientSignal.WaitOne()) return null;
+
+            #endregion
+
+            #region Get response
+
+            try 
+	        {
+                var responseLengthBuffer = new byte[4];
+
+                requestViewAccessor.ReadArray(0, responseLengthBuffer, 0, 4);
+
+                var responseLength = BitConverter.ToInt32(responseLengthBuffer, 0);
+
+                var responseBuffer = new byte[responseLength];	 
+                var responseId = $"DiSGenRes:{requestId}";
+#if DEBUG_SG
+                Trace.TraceInformation($"Opening {responseId}");
+#endif
+                using var responseMemoryMappedFile = MemoryMappedFile.OpenExisting(responseId);
+                using var responseViewAccessor = responseMemoryMappedFile.CreateViewAccessor();
+                
+                responseViewAccessor.ReadArray(0, responseBuffer, 0, responseLength);
+
+                if(responseLength == 1 && !responseViewAccessor.ReadBoolean(0))
+                {
+#if DEBUG_SG
+                Trace.TraceInformation($"Not Found [{request}]");
+#endif
+                    return null;
+                }
+
+                var response = Encoding.Default.GetString(responseBuffer).Split(['|'], StringSplitOptions.RemoveEmptyEntries);
+
+                #endregion
+
+#if DEBUG_SG
+                Trace.TraceInformation($"Found [{string.Join(", ", response)}]");
+#endif
+
+                return new(response[0], 
+                    Enum.TryParse(response[1], out Disposability _lt) ? _lt : Disposability.None, 
+                    Enum.TryParse(response[2], out Disposability _lt2) ? _lt2 : Disposability.None);
+	        }
+	        catch (Exception e)
+	        {
+#if DEBUG_SG
+                Trace.TraceError($"Client error: {e}");
+#endif
+	        }
+            finally
+            {
+#if DEBUG_SG
+                Trace.TraceInformation($"Client closing DiSGenReq:{requestId}");
+#endif
+                clientSignal.Set();
+            }
+        }
+	    catch (Exception e)
+	    {
+#if DEBUG_SG
+            Trace.TraceError($"Client error: {e}");
+#endif
+	    }
+
+        return null;
+    }
+
+#endif
 }
 
-//public record DependencyResult(string Invocation, Disposability Disposability, Disposability ContainerDisposability);
+internal class DependencyResult(string invocation, Disposability disposability, Disposability containerDisposability)
+{
+    public readonly string Invocation = invocation;
+    public readonly Disposability Disposability = disposability;
+    public readonly Disposability ContainerDisposability = containerDisposability;
+}
 //public static class DependenciesClient
 //{
 //    public static DependencyResult? GetDependency(string containerTypeName, Lifetime lifetime, string type, string? key)
