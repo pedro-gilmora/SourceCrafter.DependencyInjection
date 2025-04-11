@@ -1,4 +1,5 @@
-﻿global using DependencyMap = SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Lifetime, string, string), SourceCrafter.DependencyInjection.ServiceDescriptor>;
+﻿global using DependecyKey = (SourceCrafter.DependencyInjection.Lifetime, string, string);
+global using DependencyMap = SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Lifetime, string, string), SourceCrafter.DependencyInjection.ServiceDescriptor>;
 global using DependencyNamesMap = SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Lifetime, int, string), string>;
 global using DependencyMapDictionary = System.Collections.Generic.Dictionary<string, SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Lifetime, string, string), SourceCrafter.DependencyInjection.ServiceDescriptor>>;
 

@@ -125,7 +125,7 @@ public sealed class Generator : IIncrementalGenerator
                                 externals,
                                 generatedCodeAttribute,
                                 [.. serviceCall.Where(usage => SymbolEqualityComparer.Default.Equals(usage.ContainerType, cls))])
-                            .Build(containers, [], uniqueName, context.AddSource, net9Lock, declaration);
+                            .Build(containers, uniqueName, context.AddSource, net9Lock, declaration);
                     }
 
                     foreach (var item in ((Set<int, Diagnostic>)diagnostics)) context.ReportDiagnostic(item);

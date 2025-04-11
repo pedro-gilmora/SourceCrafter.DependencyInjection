@@ -337,8 +337,7 @@ internal sealed class ServiceContainer
     }
 
     public void Build(
-        Dictionary<string, DependencyMap> containers,
-        ImmutableArray<ITypeSymbol> usages,
+        DependencyMapDictionary containers,
         Map<string, byte> uniqueName,
         Action<string, string> addSource,
         string? net9Lock,
@@ -410,26 +409,27 @@ internal sealed class ServiceContainer
 
         methods?.Invoke(code, true);
 
-        BuildDisposabilityMethods(code, typeName, disposability, hasDisposableScoped);
+        BuildDisposabilityMethods(code, disposability, hasDisposableScoped);
+
+        if (hasScopedServices)
+
+            code.Append(@"
+    private bool isScoped = false;
+
+    public ")
+            .Append(typeName)
+            .Append(@" CreateScope() => new ").Append(typeName).Append(@" { isScoped = true };
+");
 
         var codeStr = code.Append('}').ToString();
 
         addSource(fileName + ".generated", codeStr);
     }
-    private void BuildDisposabilityMethods(StringBuilder code, string typeName, Disposability disposability, bool hasDisposableScoped)
+
+    private void BuildDisposabilityMethods(StringBuilder code, Disposability disposability, bool hasDisposableScoped)
     {
         if (disposability is not Disposability.None)
         {
-            if (hasScopedServices)
-
-                code.Append(@"
-    private bool isScoped = false;
-
-    public ")
-                .Append(typeName)
-                .Append(@" CreateScope() => new ").Append(typeName).Append(@" { isScoped = true };
-");
-
             code.Append(@"
     public ");
 

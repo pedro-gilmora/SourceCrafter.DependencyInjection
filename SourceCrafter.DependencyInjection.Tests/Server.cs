@@ -30,12 +30,45 @@ namespace SourceCrafter.DependencyInjection.Tests
         }
     }
 
-    public interface IAuthService //: IDisposable
+    public interface IAuthService : IDisposable
     {
         IDatabase Database { get; }
     }
 
-    public class EmployeeService(IAuthService authService, IDatabase employeesDb);
+    public class EmployeeService(IAuthService authService, IDatabase employeesDb) : IDisposable
+    {
+        private bool disposedValue;
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (!disposedValue)
+            {
+                if (disposing)
+                {
+                    // TODO: dispose managed state (managed objects)
+                }
+
+                // TODO: free unmanaged resources (unmanaged objects) and override finalizer
+                // TODO: set large fields to null
+                disposedValue = true;
+            }
+        }
+
+        // // TODO: override finalizer only if 'Dispose(bool disposing)' has code to free unmanaged resources
+        // ~EmployeeService()
+        // {
+        //     // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+        //     Dispose(disposing: false);
+        // }
+
+        public void Dispose()
+        {
+            authService.Dispose();
+            // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
+            Dispose(disposing: true);
+            GC.SuppressFinalize(this);
+        }
+    }
 
 #pragma warning disable CS9113 // Parameter is unread.
     public class Database(AppSettings settings, string connection) : IDatabase
@@ -50,7 +83,7 @@ namespace SourceCrafter.DependencyInjection.Tests
 
         public ValueTask DisposeAsync()
         {
-            return default;
+            return ValueTask.CompletedTask;
         }
     }
 
