@@ -4,22 +4,28 @@
 		<TargetFramework>netstandard2.0</TargetFramework>
 		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<!--<GeneratePackageOnBuild>true</GeneratePackageOnBuild>-->
-		<!--<Version>1.1.4</Version>-->
+		<!--<Version>1.1.6</Version>-->
 		<Authors>SourceCrafter</Authors>
 		<LangVersion>latest</LangVersion>
 		<Nullable>enable</Nullable>
 		<Description>Helpers for SourceCrafter.DependencyInjection</Description>
 		<PackageTags>dependency-injection;source-generator</PackageTags>
 		<PackageOutputPath>../packaging</PackageOutputPath>
-		<Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>
 	</PropertyGroup>
+	
+	<ItemGroup>
+	  <None Remove="bin\Debug\netstandard2.0\SourceCrafter.DependencyInjection.Interop.dll" />
+		<Compile Remove="**\*.cs" />
+		<Compile Remove="obj\**" />
+	</ItemGroup>
 
 	<ItemGroup>
-		<None Include="..\SourceCrafter.DependencyInjection.Shared\**\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SourceCrafter.DependencyInjection" buildAction="Compile" />
+		<None Include="Code\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SourceCrafter.DependencyInjection" buildAction="Compile" />
+	</ItemGroup>
 
-		<Compile Include="Code\*.cs">
-			<Link>LinkedCode\%(Filename)%(Extension)</Link>
-		</Compile>
+	<ItemGroup>
+	  <EmbeddedResource Remove="obj\**" />
+	  <None Remove="obj\**" />
 	</ItemGroup>
 
 </Project>

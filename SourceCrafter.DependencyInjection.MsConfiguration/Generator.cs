@@ -241,9 +241,9 @@ using global::Microsoft.Extensions.Configuration;
             var identifier = nameFormat.Replace("{0}", key.Pascalize()).RemoveDuplicates()!;
             var fieldIdentifier = "_" + key;
 
-//#if DEBUG_SG || DEBUG
-//            var method = Dependencies.GetDependency(identity, containerTypeName, Lifetime.Singleton, settingType, key);
-//#endif
+#if DEBUG_SG || DEBUG
+            var method = Dependencies.GetDependency(identity, containerTypeName, Lifetime.Singleton, settingType, key);
+#endif
 
             if (!isPrimitive)
             {

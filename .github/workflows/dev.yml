@@ -1,4 +1,4 @@
-name: 'SourceCrafter.DependencyInjection: Build, Test & Deploy for .NET 8'
+name: 'SourceCrafter.DependencyInjection: Build, Test & Deploy for .NET 9'
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
 
 jobs:
   try-deliver:
-    name: '.NET 8 Build, Test & Deploy'
+    name: '.NET 9 Build, Test & Deploy'
     runs-on: 'ubuntu-latest'
 
     steps:      

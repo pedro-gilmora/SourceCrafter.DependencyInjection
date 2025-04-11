@@ -11,6 +11,7 @@
 		<Description>Helpers for SourceCrafter.DependencyInjection</Description>
 		<PackageTags>dependency-injection;source-generator</PackageTags>
 		<PackageOutputPath>../packaging</PackageOutputPath>
+		<Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>	
 	</PropertyGroup>
 
 

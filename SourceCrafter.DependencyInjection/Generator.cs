@@ -11,7 +11,6 @@ using System.Threading;
 [Generator]
 public sealed class Generator : IIncrementalGenerator
 {
-
     private readonly DependencyMapDictionary containers = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource cancellationTokenSource = new();
 
@@ -143,7 +142,7 @@ public sealed class Generator : IIncrementalGenerator
             });
     }
 
-    private static InvokeInfo GetInvokeInfos(GeneratorSyntaxContext gsc, System.Threading.CancellationToken _)
+    private static InvokeInfo GetInvokeInfos(GeneratorSyntaxContext gsc, CancellationToken _)
     {
         if (gsc.Node is MemberAccessExpressionSyntax
             {

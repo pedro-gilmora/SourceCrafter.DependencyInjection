@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -20,16 +20,20 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="8.0.2" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.10.0" />
-    <PackageReference Include="SourceCrafter.DependencyInjection" Version="1.25.99.6" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.Metadata" Version="1.25.99.6" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="1.25.99.6" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="1.25.99.6" />
     <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="..\SourceCrafter.DependencyInjection.Shared\**\*.cs">
+      <Link>SourceCrafter.DependencyInjection\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Compile>
+    <Compile Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\JsonSettingAttribute.cs">
+      <Link>SourceCrafter.DependencyInjection\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Compile>
     <Compile Include="SourceCrafter.DependencyInjection\**\*.cs" />
+    <ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" OutputItemType="Analyzer" />
+    <ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj" OutputItemType="Analyzer" />
   </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.json">

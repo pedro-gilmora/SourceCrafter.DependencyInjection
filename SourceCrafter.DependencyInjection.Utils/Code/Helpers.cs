@@ -64,7 +64,6 @@ namespace SourceCrafter.DependencyInjection
         internal static bool TryGetDependencyInfo(
             this SemanticModel model,
             AttributeData attrData,
-            Set<Diagnostic> diagnostics,
             ref bool isExternal,
             string paramName,
             ITypeSymbol? fallbackType,

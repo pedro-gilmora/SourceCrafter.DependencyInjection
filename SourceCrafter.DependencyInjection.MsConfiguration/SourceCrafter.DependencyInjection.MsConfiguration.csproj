@@ -61,7 +61,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<Compile Include="..\SourceCrafter.DependencyInjection.Interop\**\*.cs">
+		<Compile Include="..\SourceCrafter.DependencyInjection.Interop\Code\*.cs">
 			<Link>Interop\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
 	</ItemGroup>
@@ -73,7 +73,7 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<Compile Include="..\SourceCrafter.DependencyInjection.Utils\**\*.cs">
+		<Compile Include="..\SourceCrafter.DependencyInjection.Utils\Code\**\*.cs">
 			<Link>Utils\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
 	</ItemGroup>

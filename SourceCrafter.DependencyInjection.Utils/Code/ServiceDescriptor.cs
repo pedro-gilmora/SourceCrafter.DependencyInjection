@@ -57,7 +57,7 @@ internal sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbo
     internal AttributeSyntax OriginDefinition = null!;
     internal ServiceContainer ServiceContainer = null!;
     internal string ExportTypeName = null!;
-    private bool HasScopedDependencies;
+    internal bool HasScopedDependencies;
     internal bool IsSimpleTransient;
 
     int deepParamsCount = 0;
@@ -139,7 +139,6 @@ internal sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbo
                 {
                     if (ServiceContainer.Model.TryGetDependencyInfo(
                         attr,
-                        ServiceContainer.Diagnostics,
                         ref isExternal,
                         param.Name,
                         paramType,
@@ -691,9 +690,14 @@ internal sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbo
 
         code.Append(newIndentedLine).Append("    ");
 
+        BuildAsValue(code, newIndentedLine);
+    }
+
+    internal void BuildAsValue(StringBuilder code, string newIndentedLine = "", bool shouldAwait = true)
+    {
         if (IsFactory)
         {
-            if (IsAsync) code.Append("await ");
+            if (shouldAwait && IsAsync) code.Append("await ");
 
             BuildFactoryCaller(code, newIndentedLine);
         }
@@ -703,7 +707,7 @@ internal sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbo
         }
         else
         {
-            if (IsAsync) code.Append("await ");
+            if (shouldAwait && IsAsync) code.Append("await ");
 
             BuildCachedCaller(code);
         }

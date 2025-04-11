@@ -143,7 +143,6 @@ internal sealed class ServiceContainer
 
         if (!Model.TryGetDependencyInfo(
             attributeData,
-            Diagnostics,
             ref isExternal,
             "",
             null,

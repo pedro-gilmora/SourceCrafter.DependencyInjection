@@ -92,6 +92,8 @@ PACKER: Test project references where updated
             dotnet pack $PWD/SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj -c Release -p:PackageVersion=$version
             dotnet pack $PWD/SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -p:PackageVersion=$version
             dotnet pack $PWD/SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -p:PackageVersion=$version
+            dotnet pack $PWD/SourceCrafter.DependencyInjection.Interop/SourceCrafter.DependencyInjection.Interop.csproj -c Release -p:PackageVersion=$version
+            dotnet pack $PWD/SourceCrafter.DependencyInjection.Utils/SourceCrafter.DependencyInjection.Utils.csproj -c Release -p:PackageVersion=$version
         }
         catch
         {

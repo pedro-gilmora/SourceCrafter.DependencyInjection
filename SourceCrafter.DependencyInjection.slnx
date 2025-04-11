@@ -1,0 +1,29 @@
+<Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="DEBUG_SG" />
+    <BuildType Name="Release" />
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/Solution helpers/">
+    <File Path=".editorconfig" />
+    <File Path=".git/workflows/dotnet.yml" />
+    <File Path=".gitattributes" />
+    <File Path=".gitignore" />
+    <File Path="Package.ps1" />
+  </Folder>
+  <Project Path="Benchmarks/Benchmarks.csproj" />
+  <Project Path="SourceCrafter.DependencyInjection.Interop/SourceCrafter.DependencyInjection.Interop.csproj">
+    <BuildType Solution="DEBUG_SG|*" Project="Debug" />
+  </Project>
+  <Project Path="SourceCrafter.DependencyInjection.Metadata/SourceCrafter.DependencyInjection.Metadata.csproj" />
+  <Project Path="SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" />
+  <Project Path="SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj" />
+  <Project Path="SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj" />
+  <Project Path="SourceCrafter.DependencyInjection.Utils/SourceCrafter.DependencyInjection.Utils.csproj">
+    <BuildType Solution="DEBUG_SG|*" Project="Debug" />
+  </Project>
+  <Project Path="SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj" />
+</Solution>
