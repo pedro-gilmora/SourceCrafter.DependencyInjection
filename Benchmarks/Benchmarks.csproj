@@ -1,25 +1,25 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
-  <PropertyGroup>
+	<PropertyGroup>
 		<TargetFrameworks>net8.0;net9.0</TargetFrameworks>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-    <OutputType>Exe</OutputType>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<OutputType>Exe</OutputType>
 		<Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>
-    <!--<PublishAot>true</PublishAot>
+		<!--<PublishAot>true</PublishAot>
     <PublishReadyToRun>true</PublishReadyToRun>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>-->
-  </PropertyGroup>
+	</PropertyGroup>
 
-  <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="Jab" Version="0.10.2" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="MrMeeseeks.DIE" Version="3.3.1" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="Pure.DI" Version="2.1.36" OutputItemType="Analyzer" ReferenceOutputAssembly="true">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
-    <PackageReference Include="SourceCrafter.DependencyInjection" Version="0.24.286.55" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-  </ItemGroup>
+	<ItemGroup>
+		<PackageReference Include="BenchmarkDotNet" Version="0.14.0" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+		<PackageReference Include="Jab" Version="0.10.2" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+		<PackageReference Include="MrMeeseeks.DIE" Version="3.3.1" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+		<Compile Include="..\SourceCrafter.DependencyInjection.Shared\**\*.cs">
+			<Link>SourceCrafter.DependencyInjection\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		</Compile>
+		<Compile Include="SourceCrafter.DependencyInjection\**\*.cs" />
+		<ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" OutputItemType="Analyzer" />
+	</ItemGroup>
 
 </Project>

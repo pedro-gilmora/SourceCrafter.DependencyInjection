@@ -1,12 +1,11 @@
 ﻿namespace Benchmarks;
 
-public class AuthService(Database application) : IAuthService//, IDisposable
+public class AuthService(Database application) : IAuthService
 {
     public IDatabase Database { get; } = application;
 
     public void Dispose()
     {
-        //Continue with HostEnvironment
     }
 
     internal void Test()
@@ -15,7 +14,7 @@ public class AuthService(Database application) : IAuthService//, IDisposable
     }
 }
 
-public interface IAuthService
+public interface IAuthService: IDisposable
 {
     IDatabase Database { get; }
 }

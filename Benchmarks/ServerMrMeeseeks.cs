@@ -2,19 +2,16 @@
 
 using MrMeeseeks.DIE.Configuration.Attributes;
 
-namespace GettingStarted
-{
-    [TransientImplementationAggregation(typeof(AppSettings))]
-    [ScopeInstanceImplementationAggregation(typeof(Database))]
-    [ImplementationAggregation(typeof(AuthService))]
-    [ImplementationAggregation(typeof(ServerMrMeeseeks))]
-    [CreateFunction(typeof(ServerMrMeeseeks), "Create")]
+namespace Benchmarks;
 
-    public sealed partial class ServerMrMeeseeks
+[ImplementationAggregation(typeof(AppSettings))]
+[ImplementationAggregation(typeof(Database))]
+[ImplementationAggregation(typeof(AuthService))]
+[CreateFunction(typeof(AuthService), "GetAuthService")]
+public sealed partial class ServerMrMeeseeks
+{
+    internal static ValueTask<int> ResolveAsync(CancellationToken _)
     {
-        internal static ValueTask<int> ResolveAsync(CancellationToken _)
-        {
-            return ValueTask.FromResult(1);
-        }
+        return ValueTask.FromResult(1);
     }
 }

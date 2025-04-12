@@ -6,7 +6,7 @@
     [Scoped<IAuthService, AuthService>]
     public sealed partial class ServerJab;
 
-    public class AuthService(IDatabase application) : IAuthService//, IDisposable
+    public class AuthService(IDatabase application) : IAuthService
     {
         public IDatabase Database { get; } = application;
 
@@ -16,7 +16,7 @@
         }
     }
 
-    public interface IAuthService
+    public interface IAuthService : IDisposable
     {
         IDatabase Database { get; }
     }
