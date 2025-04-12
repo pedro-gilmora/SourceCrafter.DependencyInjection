@@ -52,25 +52,26 @@ internal sealed class Dependencies
         #region Create server signal
 
         using var serverSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"{DiSuffix}:{contextId}");
-        using var requestHeaderMmf = MemoryMappedFile.CreateOrOpen($"{DiSuffix}Evt:{contextId}", 1024);
-
+        
         #endregion
 
         try
         {
             while (!serverSignal.SafeWaitHandle.IsClosed && !token.IsCancellationRequested)
             {
-                using var requestHeaderStream = requestHeaderMmf.CreateViewStream();
+                using var requestHeaderMmf = MemoryMappedFile.CreateOrOpen($"{DiSuffix}Evt:{contextId}", 1024);
+                
+                if (!serverSignal.WaitOne(10)) continue;
 
-                if (!serverSignal.WaitOne(3000)) continue;
+                using var requestHeaderStream = requestHeaderMmf.CreateViewStream();
+                using BinaryReader requestHeaderReader = new (requestHeaderStream);
+                var requestId = new Guid(requestHeaderReader.ReadBytes(16));
+                var requestLength = requestHeaderReader.ReadInt64();
+                var requestBuffer = new byte[requestLength];
+                using var clientSignal = EventWaitHandle.OpenExisting($"{DiSuffix}ReqEvt:{requestId}");
 
                 try
                 {
-                    using BinaryReader requestHeaderReader = new (requestHeaderStream);
-                    var requestId = new Guid(requestHeaderReader.ReadBytes(16));
-                    var requestLength = requestHeaderReader.ReadInt64();
-                    var requestBuffer = new byte[requestLength];
-
 #if DEBUG_SG
                     Trace.TraceInformation($"Opening {DiSuffix}Req:{requestId}");
 #endif
@@ -85,7 +86,6 @@ internal sealed class Dependencies
 #endif
                     if (servicesContainers.TryGetValue(containerFullType, out var servicesContainer) && servicesContainer.TryGetValue((lifetime, typeName, key), out var serviceDescriptor))
                     {
-
                         using BinaryWriter requestWriter = new(requestStream);
                         using BinaryWriter responseWriter = new(new MemoryStream(), Encoding.Default, false);
 
@@ -102,16 +102,14 @@ internal sealed class Dependencies
                         responseWriter.BaseStream.Position = 0;
                         responseWriter.BaseStream.CopyTo(responseMemoryMappedFile.CreateViewStream());
 
-                        using var clientSignal = EventWaitHandle.OpenExisting($"{DiSuffix}ReqEvt:{requestId}");
 #if DEBUG_SG
                         Trace.TraceInformation($"Create {DiSuffix}Res:{requestId}");
 #endif
                         clientSignal.Set();
-
+                        clientSignal.WaitOne(10);
 #if DEBUG_SG
                         Trace.TraceInformation($"Notified to server {DiSuffix}Res:{requestId}");
 #endif
-                        clientSignal.WaitOne();
                     }
                     else
                     {
@@ -123,22 +121,24 @@ internal sealed class Dependencies
                         requestWriter.Write((long)1);
                         responseWriter.Write(false); // Not found flag
 
-                        using var clientSignal = EventWaitHandle.OpenExisting($"{DiSuffix}ReqEvt:{requestId}");
 
+#if DEBUG_SG
+                        Trace.TraceInformation($"Create {DiSuffix}Res:{requestId}");
+#endif
                         clientSignal.Set();
-                        clientSignal.WaitOne();
+                        clientSignal.WaitOne(10);
+#if DEBUG_SG
+                        Trace.TraceInformation($"Notified to server {DiSuffix}Res:{requestId}");
+#endif
                     }
 #if DEBUG_SG
                     Trace.TraceInformation($"Server closing {requestId}{DiSuffix}Req");
 #endif
                 }
-                catch (Exception e)
-                {
-#if DEBUG_SG
-                    Trace.TraceError($"Server error: {e}");
-#endif
-                    throw;
-                }
+			    finally
+			    {
+				    if (!clientSignal.SafeWaitHandle.IsClosed) clientSignal.Close();
+			    }
             }
 
             serverSignal.Close();
@@ -152,7 +152,6 @@ internal sealed class Dependencies
         finally
         {
             serverSignal.Close();
-            requestHeaderMmf.Dispose();
         }
     }
 
@@ -225,8 +224,7 @@ internal sealed class Dependencies
 
             requestHeaderWriter.Write(requestId.ToByteArray());
             requestHeaderWriter.Write(requestHeaderStream.Position);
-
-            // requestHeaderWriter.Flush();
+            requestHeaderWriter.Flush();
 
             #endregion
 
@@ -237,11 +235,12 @@ internal sealed class Dependencies
             using var requestMemoryMappedFile = MemoryMappedFile.CreateOrOpen($"{DiSuffix}Req:{requestId}", requestHeaderStream.Position);
             using var requestStream = requestMemoryMappedFile.CreateViewStream();
             using BinaryWriter requestWriter = new(requestStream);
-            using var clientSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"{DiSuffix}ReqEvt:{requestId}");
-
+            
             WriteRequest(requestWriter, containerFullType, lifetime, typeName, key);
+            requestHeaderWriter.Flush();
 
-            if (serverSignal.Set() && !clientSignal.WaitOne(3000)) return default;
+            using var clientSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"{DiSuffix}ReqEvt:{requestId}");
+            if (serverSignal.Set() && !clientSignal.WaitOne(10)) return default;
 
             #endregion
 
@@ -271,13 +270,6 @@ internal sealed class Dependencies
 
                 return metadata;
             }
-#if DEBUG_SG
-            catch (Exception e)
-            {
-                Trace.TraceError($"Client error: {e}");
-                throw;
-            }
-#endif
             finally
             {
 #if DEBUG_SG
@@ -287,8 +279,12 @@ internal sealed class Dependencies
             }
             #endregion
         }
-        catch (Exception e)
+        catch 
+#if DEBUG_SG
+        (Exception e)
+#endif
         {
+            serverSignal.Set();
 #if DEBUG_SG
             Trace.TraceError($"Client error: {e}");
 #endif
