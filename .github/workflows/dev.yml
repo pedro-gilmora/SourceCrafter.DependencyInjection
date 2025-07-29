@@ -21,7 +21,15 @@ jobs:
     - name: Restore, Package and Test
       shell: pwsh
       id: build
-      run: .\Package.ps1 -clean false -test true
+      run: |
+        try {
+          .\Package.ps1 -clean false -forcePack true -test true
+        } catch {
+          Write-Error @"
+        Restore, Package and Test errors: 
+        $($_.Exception.Message)
+        "@
+        }
       
     - name: Publish generator and endpoints to Nuget
       if: github.ref_name == 'dev'
@@ -29,7 +37,11 @@ jobs:
       run: |        
         for package in $(find . -wholename '**/packaging/*.nupkg'); do
           # Execute nuget push for each package
-          dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json"
+          output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error / { print }')
+
+          if [ "${#output}" -ne 0 ]; then
+            echo -e "Restore errors:
+          $output" >> errors.log
         done
 
     - name: Notify Telegram

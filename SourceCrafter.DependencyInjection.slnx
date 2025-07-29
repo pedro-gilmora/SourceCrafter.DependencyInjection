@@ -9,7 +9,7 @@
   </Configurations>
   <Folder Name="/Solution helpers/">
     <File Path=".editorconfig" />
-    <File Path=".git/workflows/dotnet.yml" />
+    <File Path=".github/workflows/dev.yml" />
     <File Path=".gitattributes" />
     <File Path=".gitignore" />
     <File Path="Package.ps1" />

@@ -8,7 +8,7 @@
     <IsTestProject>true</IsTestProject>
     <Configurations>Debug;Release;DEBUG_SG</Configurations>
     <IsPackable>false</IsPackable>
-    <RestoreAdditionalProjectSources>..\packaging</RestoreAdditionalProjectSources>
+    <RestoreAdditionalProjectSources>DILocalPackages</RestoreAdditionalProjectSources>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.0" />

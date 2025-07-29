@@ -32,6 +32,8 @@ function Get-Version {
     return $version
 }
 
+Write-Host "Current path: $PWD"
+
 Set-Location "$PWD"
 
 $testProjPath = "$PWD/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj"
@@ -46,7 +48,7 @@ $refs = $($testProjContent).GetElementsByTagName('PackageReference').
 
 $version = Get-Version
 
-Write-Host "CONFIG: version = $version, clean = $clean, pack = $pack, forcePack = $forcePack, test = $test, startingYear = $startingYear
+Write-Host "CONFIG: version = $version, clean = $clean, pack = $pack, forcePack = $forcePack, test = $test, startingYear = $startingYear, $$refs.Count = $($refs.Count)
 "
 
 if($refs.Count -gt 0 -or $forcePack -eq 'true')
@@ -69,6 +71,7 @@ PACKER: Test project references where updated
 "
         New-Item -ItemType Directory -Path "$PWD/packaging/"
     }
+
     if($clean -eq "true")
     {
         Write-Information "PACKER: Removing packages"
@@ -77,13 +80,22 @@ PACKER: Test project references where updated
 
     if($pack -eq 'true')
     {
+    Write-Output "
+PACKER: Initializing...
+"
         try
         {
             if(-not (dotnet nuget list source | Select-String -Pattern 'DILocalPackages'))
             {
+                Write-Output '
+    PACKER: Creating local source "DILocalPackages"...
+'
                 dotnet nuget add source "$PWD/packaging" -n DILocalPackages
             }
-        
+            
+            Write-Output '
+PACKER: Restoring...
+'        
             dotnet restore
 
             Write-Host "PACKER: Packaging projects
@@ -106,7 +118,7 @@ PACKER: Test project references where updated
 if($test -eq 'true')
 {
     Write-Output "
-PACKER: Testin projects
+PACKER: Testing projects
 "
     if($pack -ne 'true')
     {
