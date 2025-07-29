@@ -16,7 +16,7 @@ enum DepsOps
     MarkAsResolved
 }
 
-internal sealed class Dependencies
+internal sealed class Dependencies //: IDisposable
 {
     const string DiSuffix = "DI$Gen1";
 
@@ -48,110 +48,122 @@ internal sealed class Dependencies
     static void ServeDependencies(AssemblyIdentity asemblyInfo, DependencyMapDictionary servicesContainers, CancellationToken token)
     {
         var contextId = $"{asemblyInfo.Name}:{asemblyInfo.PublicKey}";
-
-        #region Create server signal
-
-        using var serverSignal = new EventWaitHandle(false, EventResetMode.AutoReset, $"{DiSuffix}:{contextId}");
-        
-        #endregion
+        var handleId = $"{DiSuffix}:{contextId}";
 
         try
         {
-            while (!serverSignal.SafeWaitHandle.IsClosed && !token.IsCancellationRequested)
+            #region Create server signal
+
+            if (!EventWaitHandle.TryOpenExisting(handleId, out var serverSignal))
             {
-                using var requestHeaderMmf = MemoryMappedFile.CreateOrOpen($"{DiSuffix}Evt:{contextId}", 1024);
-                
-                if (!serverSignal.WaitOne(10)) continue;
-
-                using var requestHeaderStream = requestHeaderMmf.CreateViewStream();
-                using BinaryReader requestHeaderReader = new (requestHeaderStream);
-                var requestId = new Guid(requestHeaderReader.ReadBytes(16));
-                var requestLength = requestHeaderReader.ReadInt64();
-                var requestBuffer = new byte[requestLength];
-                using var clientSignal = EventWaitHandle.OpenExisting($"{DiSuffix}ReqEvt:{requestId}");
-
-                try
-                {
-#if DEBUG_SG
-                    Trace.TraceInformation($"Opening {DiSuffix}Req:{requestId}");
-#endif
-                    using var requestMemoryMappedFile = MemoryMappedFile.OpenExisting($"{DiSuffix}Req:{requestId}");
-                    using var requestStream = requestMemoryMappedFile.CreateViewStream();
-                    using BinaryReader requestReader = new(requestStream);
-
-                    ReadRequest(requestReader, out var containerFullType, out var lifetime, out var typeName, out var key);
-
-#if DEBUG_SG
-                    Trace.TraceInformation($"Create {DiSuffix}Res:{requestId}");
-#endif
-                    if (servicesContainers.TryGetValue(containerFullType, out var servicesContainer) && servicesContainer.TryGetValue((lifetime, typeName, key), out var serviceDescriptor))
-                    {
-                        using BinaryWriter requestWriter = new(requestStream);
-                        using BinaryWriter responseWriter = new(new MemoryStream(), Encoding.Default, false);
-
-                        WriteServiceMetadata(responseWriter, serviceDescriptor);
-
-                        var responseLength = responseWriter.BaseStream.Length;
-                        using var responseMemoryMappedFile = MemoryMappedFile.CreateOrOpen($"{DiSuffix}Res:{requestId}", responseLength);
-
-#if DEBUG_SG
-                        Trace.TraceInformation($"Create {DiSuffix}Res:{requestId}");
-#endif
-
-                        requestWriter.Write(responseLength);
-                        responseWriter.BaseStream.Position = 0;
-                        responseWriter.BaseStream.CopyTo(responseMemoryMappedFile.CreateViewStream());
-
-#if DEBUG_SG
-                        Trace.TraceInformation($"Create {DiSuffix}Res:{requestId}");
-#endif
-                        clientSignal.Set();
-                        clientSignal.WaitOne(10);
-#if DEBUG_SG
-                        Trace.TraceInformation($"Notified to server {DiSuffix}Res:{requestId}");
-#endif
-                    }
-                    else
-                    {
-                        using BinaryWriter requestWriter = new(requestStream);
-                        using var responseMemoryMappedFile = MemoryMappedFile.CreateOrOpen($"{DiSuffix}Res:{requestId}", 1);
-                        using var responseStream = responseMemoryMappedFile.CreateViewStream();
-                        using BinaryWriter responseWriter = new(responseStream);
-                        
-                        requestWriter.Write((long)1);
-                        responseWriter.Write(false); // Not found flag
-
-
-#if DEBUG_SG
-                        Trace.TraceInformation($"Create {DiSuffix}Res:{requestId}");
-#endif
-                        clientSignal.Set();
-                        clientSignal.WaitOne(10);
-#if DEBUG_SG
-                        Trace.TraceInformation($"Notified to server {DiSuffix}Res:{requestId}");
-#endif
-                    }
-#if DEBUG_SG
-                    Trace.TraceInformation($"Server closing {requestId}{DiSuffix}Req");
-#endif
-                }
-			    finally
-			    {
-				    if (!clientSignal.SafeWaitHandle.IsClosed) clientSignal.Close();
-			    }
+                serverSignal = new EventWaitHandle(false, EventResetMode.AutoReset, handleId);
             }
 
-            serverSignal.Close();
-        }
-        catch (Exception e)
-        {
+            #endregion
+
+            try
+            {
+                while (!serverSignal.SafeWaitHandle.IsClosed && !token.IsCancellationRequested)
+                {
+                    using var requestHeaderMmf = MemoryMappedFile.CreateOrOpen($"{DiSuffix}Evt:{contextId}", 1024);
+
+                    if (!serverSignal.WaitOne(10)) continue;
+
+                    using var requestHeaderStream = requestHeaderMmf.CreateViewStream();
+                    using BinaryReader requestHeaderReader = new(requestHeaderStream);
+                    var requestId = new Guid(requestHeaderReader.ReadBytes(16));
+                    var requestLength = requestHeaderReader.ReadInt64();
+                    var requestBuffer = new byte[requestLength];
+                    using var clientSignal = EventWaitHandle.OpenExisting($"{DiSuffix}ReqEvt:{requestId}");
+
+                    try
+                    {
 #if DEBUG_SG
-            Trace.TraceError($"Server error: {e}");
+                        Trace.TraceInformation($"Opening {DiSuffix}Req:{requestId}");
 #endif
+                        using var requestMemoryMappedFile = MemoryMappedFile.OpenExisting($"{DiSuffix}Req:{requestId}");
+                        using var requestStream = requestMemoryMappedFile.CreateViewStream();
+                        using BinaryReader requestReader = new(requestStream);
+
+                        ReadRequest(requestReader, out var containerFullType, out var lifetime, out var typeName, out var key);
+
+#if DEBUG_SG
+                        Trace.TraceInformation($"Create {DiSuffix}Res:{requestId}");
+#endif
+                        if (servicesContainers.TryGetValue(containerFullType, out var servicesContainer) && servicesContainer.TryGetValue((lifetime, typeName, key), out var serviceDescriptor))
+                        {
+                            using BinaryWriter requestWriter = new(requestStream);
+                            using BinaryWriter responseWriter = new(new MemoryStream(), Encoding.Default, false);
+
+                            WriteServiceMetadata(responseWriter, serviceDescriptor);
+
+                            var responseLength = responseWriter.BaseStream.Length;
+                            using var responseMemoryMappedFile = MemoryMappedFile.CreateOrOpen($"{DiSuffix}Res:{requestId}", responseLength);
+
+#if DEBUG_SG
+                            Trace.TraceInformation($"Create {DiSuffix}Res:{requestId}");
+#endif
+
+                            requestWriter.Write(responseLength);
+                            responseWriter.BaseStream.Position = 0;
+                            responseWriter.BaseStream.CopyTo(responseMemoryMappedFile.CreateViewStream());
+
+#if DEBUG_SG
+                            Trace.TraceInformation($"Create {DiSuffix}Res:{requestId}");
+#endif
+                            clientSignal.Set();
+                            clientSignal.WaitOne(10);
+#if DEBUG_SG
+                            Trace.TraceInformation($"Notified to server {DiSuffix}Res:{requestId}");
+#endif
+                        }
+                        else
+                        {
+                            using BinaryWriter requestWriter = new(requestStream);
+                            using var responseMemoryMappedFile = MemoryMappedFile.CreateOrOpen($"{DiSuffix}Res:{requestId}", 1);
+                            using var responseStream = responseMemoryMappedFile.CreateViewStream();
+                            using BinaryWriter responseWriter = new(responseStream);
+
+                            requestWriter.Write((long)1);
+                            responseWriter.Write(false); // Not found flag
+
+
+#if DEBUG_SG
+                            Trace.TraceInformation($"Create {DiSuffix}Res:{requestId}");
+#endif
+                            clientSignal.Set();
+                            clientSignal.WaitOne(10);
+#if DEBUG_SG
+                            Trace.TraceInformation($"Notified to server {DiSuffix}Res:{requestId}");
+#endif
+                        }
+#if DEBUG_SG
+                        Trace.TraceInformation($"Server closing {requestId}{DiSuffix}Req");
+#endif
+                    }
+                    finally
+                    {
+                        if (!clientSignal.SafeWaitHandle.IsClosed) clientSignal.Close();
+                    }
+                }
+
+                serverSignal.Close();
+            }
+            catch (Exception e)
+            {
+#if DEBUG_SG
+                Trace.TraceError($"Server error: {e}");
+#endif
+            }
+            finally
+            {
+                serverSignal.Close();
+            }
+
         }
         finally
         {
-            serverSignal.Close();
+
         }
     }
 
@@ -199,6 +211,11 @@ internal sealed class Dependencies
 
         writer.Write(descriptor.CacheField);
         writer.Write(descriptor.ExportTypeName);
+    }
+
+    public void Dispose()
+    {
+        throw new NotImplementedException();
     }
 
 #else

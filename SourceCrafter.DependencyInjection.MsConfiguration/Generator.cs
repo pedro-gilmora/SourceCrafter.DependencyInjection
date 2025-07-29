@@ -237,13 +237,14 @@ using global::Microsoft.Extensions.Configuration;
             var lifetime = (Lifetime)(byte)settingAttr.ConstructorArguments[1].Value!;
             var nameFormat = (string)settingAttr.ConstructorArguments[3].Value!;
             var settingType = type.ToGlobalNamespaced();
+            var shortName = type.ToNameOnly();
             var key = settingAttr.ConstructorArguments[2].Value?.ToString() ?? "";
             var identifier = nameFormat.Replace("{0}", key.Pascalize()).RemoveDuplicates()!;
-            var fieldIdentifier = "_" + key;
+            var fieldIdentifier = "_" + (key is { Length: > 0 } ? key : char.ToLower(shortName[0]) + shortName[1..]);
 
-#if DEBUG_SG || DEBUG
-            var method = Dependencies.GetDependency(identity, containerTypeName, Lifetime.Singleton, settingType, key);
-#endif
+//#if DEBUG_SG || DEBUG
+//            var method = Dependencies.GetDependency(identity, containerTypeName, Lifetime.Singleton, settingType, key);
+//#endif
 
             if (!isPrimitive)
             {

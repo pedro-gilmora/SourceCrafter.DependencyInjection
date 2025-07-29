@@ -18,7 +18,7 @@ namespace SourceCrafter.DependencyInjection.Tests
 
             await using var scope = serverContainer.CreateScope();
 
-            var database = scope.GetDatabase();
+            var database = serverContainer.GetDatabase();
             var employeeService2 = await serverContainer.GetEmployeeServiceAsync();
             var authService = await scope.GetAuthServiceAsync();
 

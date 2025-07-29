@@ -11,11 +11,11 @@ public class Program
 {
     public static void Main()
     {
-        Pure.DI.DI.Setup("Server")
-            .Bind().As(Pure.DI.Lifetime.Transient).To<AppSettings>()
-            .Bind().As(Pure.DI.Lifetime.Singleton).To<Database>()
-            .Bind().As(Pure.DI.Lifetime.Scoped).To<AuthService>()
-            .Root<ManualServer>("Root");
+        //Pure.DI.DI.Setup("Server")
+        //    .Bind().As(Pure.DI.Lifetime.Transient).To<AppSettings>()
+        //    .Bind().As(Pure.DI.Lifetime.Singleton).To<Database>()
+        //    .Bind().As(Pure.DI.Lifetime.Scoped).To<AuthService>()
+        //    .Root<ManualServer>("Root");
 
         //new Program().Pure_DI();
 

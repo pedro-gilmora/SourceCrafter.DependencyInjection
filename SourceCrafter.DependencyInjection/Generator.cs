@@ -65,12 +65,6 @@ public sealed class Generator : IIncrementalGenerator
             {
                 var (((compilation, servicesContainers), externals), serviceCall) = info;
 
-                var errorsSb = new StringBuilder("/*").AppendLine();
-
-                var net9Lock = compilation.GetTypeByMetadataName("System.Threading.Lock")?.ToGlobalNamespaced();
-
-                int start = errorsSb.Length;
-
                 if (!isServerRunning && !Dependencies.TryBroadcastDependencies(cancellationTokenSource.Token, compilation.Assembly.Identity, containers, out string error))
                 {
                     context.ReportDiagnostic(
@@ -88,6 +82,12 @@ public sealed class Generator : IIncrementalGenerator
                 }
 
                 isServerRunning = true;
+
+                var errorsSb = new StringBuilder("/*").AppendLine();
+
+                var net9Lock = compilation.GetTypeByMetadataName("System.Threading.Lock")?.ToGlobalNamespaced();
+
+                int start = errorsSb.Length;
 
                 try
                 {
