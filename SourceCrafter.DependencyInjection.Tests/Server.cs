@@ -35,7 +35,9 @@ namespace SourceCrafter.DependencyInjection.Tests
         IDatabase Database { get; }
     }
 
+#pragma warning disable CS9113 // Parameter is unread.
     public class EmployeeService(IAuthService authService, IDatabase employeesDb) : IDisposable
+#pragma warning restore CS9113 // Parameter is unread.
     {
         private bool disposedValue;
 
@@ -63,7 +65,7 @@ namespace SourceCrafter.DependencyInjection.Tests
 
         public void Dispose()
         {
-            authService.Dispose();
+            authService.Dispose(); 
             // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
             Dispose(disposing: true);
             GC.SuppressFinalize(this);

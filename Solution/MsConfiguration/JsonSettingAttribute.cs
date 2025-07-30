@@ -4,7 +4,13 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
 {
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Assembly, AllowMultiple = false)]
 #pragma warning disable CS9113 // Parameter is unread.
-    internal sealed class JsonConfigurationAttribute(
+
+#if DISG_MSCONF_META
+    public
+#else
+    internal
+#endif
+    sealed class JsonConfigurationAttribute(
         string fileName = "appsettings",
         string key = "",
         bool optional = true,
@@ -16,7 +22,13 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
     //: SingletonAttribute<IConfiguration>(source: nameof(ConfigurationResolver.GetJsonConfiguration));
 
     [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false)]
-    internal sealed class JsonSettingAttribute(
+    
+#if DISG_MSCONF_META
+    public
+#else
+    internal 
+#endif
+    sealed class JsonSettingAttribute(
         string path, 
         Lifetime lifetime = Lifetime.Singleton,
         string key = "",
@@ -25,7 +37,13 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
     ) : Attribute;
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
-    internal sealed class JsonSettingAttribute<T>(
+    
+#if DISG_MSCONF_META
+    public
+#else
+    internal 
+#endif
+    sealed class JsonSettingAttribute<T>(
         string path,
         Lifetime lifetime = Lifetime.Singleton,
         string key = "",

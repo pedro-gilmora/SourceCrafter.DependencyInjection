@@ -41,16 +41,15 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="IndexRange" Version="1.0.3" PrivateAssets="all" GeneratePathProperty="true" />
+		<PackageReference Include="IndexRange" Version="1.0.3" PrivateAssets="all" />
 		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4">
 		  <PrivateAssets>all</PrivateAssets>
 		  <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
-		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" />
-		<PackageReference Include="System.Diagnostics.Tools" Version="4.3.0" />
-		<PackageReference Include="System.Memory" Version="4.5.5" PrivateAssets="all" GeneratePathProperty="true" />
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" PrivateAssets="all" />
+		<PackageReference Include="System.Diagnostics.Tools" Version="4.3.0" PrivateAssets="all" />
+		<PackageReference Include="System.Memory" Version="4.5.5" PrivateAssets="all" />
 		<PackageReference Include="System.Runtime.InteropServices" PrivateAssets="all" Version="4.3.0" />
-		<PackageReference Include="System.Threading.Channels" Version="8.0.0" />
 	</ItemGroup>
 
 	<ItemGroup>
@@ -67,16 +66,12 @@
 		<Compile Include="..\Solution\Utils\*.cs">
 			<Link>Utils\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
-		<Compile Include="..\Solution\Metadata\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/Metadata" BuildAction="Compile">
+		<Compile Include="..\Solution\Metadata\*.cs">
 			<Link>Metadata\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
 		<Compile Include="..\Solution\Interop\*.cs">
 			<Link>Interop\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
-	</ItemGroup>	
-
-	<ItemGroup>
-	  <None Remove="bin\Debug\netstandard2.0\SourceCrafter.DependencyInjection.dll" />
 	</ItemGroup>
 
 	<!--<ItemGroup Condition="$(Configuration) != 'Release'">

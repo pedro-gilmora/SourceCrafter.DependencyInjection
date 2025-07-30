@@ -1,5 +1,4 @@
-﻿#define DISG_HOST
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using System;
 using System.Linq;
 using System.Reflection;
