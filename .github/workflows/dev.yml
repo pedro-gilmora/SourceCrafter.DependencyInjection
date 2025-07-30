@@ -42,6 +42,7 @@ jobs:
           if [ "${#output}" -ne 0 ]; then
             echo -e "Restore errors:
           $output" >> errors.log
+          fi
         done
 
     - name: Notify Telegram
@@ -49,7 +50,7 @@ jobs:
       shell: pwsh      
       run: |
         $status, $icon, $message = if ('${{ job.status }}' -eq 'failure') { 
-          'failed', '💥', 'Errors: ${{ steps.build.outputs.errors }}<br/>${{ steps.build.publish.errors }}'.Trim()
+          'failed', '💥', 'Errors: ${{ steps.build.outputs.errors }}`n${{ steps.publish.outputs.errors }}'.Trim()
         } elseif ('${{ job.status }}' -eq 'success') { 
           'successfully completed', '✅', '${{ github.event.head_commit.message }}' 
         } else { 

@@ -70,8 +70,8 @@
 		<Compile Include="..\Solution\Utils\*.cs">
 			<Link>Utils\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
-		<Compile Include="..\Solution\MsConfiguration\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/MsConfiguration" BuildAction="Compile">
-			<Link>MsConfiguration\Metadata\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		<Compile Include="..\Solution\MsConfiguration\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/MsConfiguration/Metadata" BuildAction="Compile">
+			<Link>MsConfiguration\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
 	</ItemGroup>
 

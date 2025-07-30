@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -30,14 +30,13 @@
     </Compile>
     <Compile Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\JsonSettingAttribute.cs">
       <Link>SourceCrafter.DependencyInjection\%(RecursiveDir)%(Filename)%(Extension)</Link>
-    </Compile>    
+    </Compile>
     <Compile Include="..\SourceCrafter.DependencyInjection\**\*.cs" />
   </ItemGroup>
   <ItemGroup Condition="$(Configuration) == 'Release'">
-		<PackageReference Include="SourceCrafter.DependencyInjection" Version="1.25.211.6" OutputItemType="Analyzer"/>
-		<PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="1.25.211.6" OutputItemType="Analyzer"/>
+    <PackageReference Include="SourceCrafter.DependencyInjection" Version="1.25.211.7" OutputItemType="Analyzer" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="1.25.211.7" OutputItemType="Analyzer" />
   </ItemGroup>
-	
   <ItemGroup>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
