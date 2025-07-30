@@ -10,7 +10,9 @@ param(
     [Parameter(Mandatory=$false)]
     [string]$test = "false",
     [Parameter(Mandatory=$false)]
-    [string]$startingYear = "2024"
+    [string]$startingYear = "2024",
+    [Parameter(Mandatory=$false)]
+    [string]$specificVersion = $null
 )
 
 function Get-Version {
@@ -46,7 +48,7 @@ $refs = $($testProjContent).GetElementsByTagName('PackageReference').
         $_.GetAttribute('Include').StartsWith('SourceCrafter.DependencyInjection') -and $_.GetAttribute('Version') -ne $version
     })
 
-$version = Get-Version
+$version = if ($specificVersion) { $specificVersion } else { Get-Version }
 
 Write-Host "CONFIG: version = $version, clean = $clean, pack = $pack, forcePack = $forcePack, test = $test, startingYear = $startingYear, $$refs.Count = $($refs.Count)
 "
