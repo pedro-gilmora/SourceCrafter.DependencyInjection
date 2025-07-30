@@ -62,21 +62,15 @@
 		  <PackagePath>\</PackagePath>
 		</None>
 	</ItemGroup>
-	
+
 	<ItemGroup>
-		<Compile Include="..\SourceCrafter.DependencyInjection.Utils\Code\**\*.cs">
+		<Compile Include="..\Solution\Utils\*.cs">
 			<Link>Utils\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
-	</ItemGroup>
-
-	<ItemGroup>
-		<Compile Include="..\SourceCrafter.DependencyInjection.Shared\**\*.cs">
-			<Link>Shared\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		<Compile Include="..\Solution\Metadata\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/Metadata" BuildAction="Compile">
+			<Link>Metadata\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
-	</ItemGroup>
-
-	<ItemGroup>
-		<Compile Include="..\SourceCrafter.DependencyInjection.Interop\Code\*.cs">
+		<Compile Include="..\Solution\Interop\*.cs">
 			<Link>Interop\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
 	</ItemGroup>	
@@ -84,6 +78,10 @@
 	<ItemGroup>
 	  <None Remove="bin\Debug\netstandard2.0\SourceCrafter.DependencyInjection.dll" />
 	</ItemGroup>
+
+	<!--<ItemGroup Condition="$(Configuration) != 'Release'">
+		<None Include="..\Solution\Metadata\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/Metadata" BuildAction="Compile"/>
+	</ItemGroup>-->
 
 	<!--<PropertyGroup>
 		<GetTargetPathDependsOn>$(GetTargetPathDependsOn);GetDependencyTargetPaths</GetTargetPathDependsOn>

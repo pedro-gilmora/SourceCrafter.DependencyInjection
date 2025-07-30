@@ -14,16 +14,25 @@
     <File Path=".gitignore" />
     <File Path="Package.ps1" />
   </Folder>
+  <Folder Name="/Solution helpers/Configuration/">
+    <File Path="Solution/MsConfiguration/JsonSettingAttribute.cs" />
+  </Folder>
+  <Folder Name="/Solution helpers/Interop/">
+    <File Path="Solution/Utils/GlobalUsings.cs" />
+    <File Path="Solution/Utils/Helpers.cs" />
+    <File Path="Solution/Utils/Map.cs" />
+    <File Path="Solution/Utils/ServiceContainer.cs" />
+    <File Path="Solution/Utils/ServiceContainerGeneratorDiagnostics.cs" />
+    <File Path="Solution/Utils/ServiceDescriptor.cs" />
+    <File Path="Solution/Utils/Set.cs" />
+  </Folder>
+  <Folder Name="/Solution helpers/Shared/">
+    <File Path="Solution/Interop/Dependencies.cs" />
+    <File Path="Solution/Interop/ServiceMetadata.cs" />
+    <File Path="Solution/Metadata/Attributes.cs" />
+  </Folder>
   <Project Path="Benchmarks/Benchmarks.csproj" />
-  <Project Path="SourceCrafter.DependencyInjection.Interop/SourceCrafter.DependencyInjection.Interop.csproj">
-    <BuildType Solution="DEBUG_SG|*" Project="Debug" />
-  </Project>
-  <Project Path="SourceCrafter.DependencyInjection.Metadata/SourceCrafter.DependencyInjection.Metadata.csproj" />
-  <Project Path="SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" />
   <Project Path="SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj" />
   <Project Path="SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj" />
-  <Project Path="SourceCrafter.DependencyInjection.Utils/SourceCrafter.DependencyInjection.Utils.csproj">
-    <BuildType Solution="DEBUG_SG|*" Project="Debug" />
-  </Project>
   <Project Path="SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj" />
 </Solution>

@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -8,7 +8,7 @@
     <IsTestProject>true</IsTestProject>
     <Configurations>Debug;Release;DEBUG_SG</Configurations>
     <IsPackable>false</IsPackable>
-    <RestoreAdditionalProjectSources>DILocalPackages</RestoreAdditionalProjectSources>
+    <RestoreAdditionalProjectSources>../packaging</RestoreAdditionalProjectSources>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
@@ -24,17 +24,20 @@
     <PackageReference Include="xunit" Version="2.5.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
   </ItemGroup>
-  <ItemGroup>
+  <ItemGroup Condition="$(Configuration) != 'Release'">
     <Compile Include="..\SourceCrafter.DependencyInjection.Shared\**\*.cs">
       <Link>SourceCrafter.DependencyInjection\%(RecursiveDir)%(Filename)%(Extension)</Link>
     </Compile>
     <Compile Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\JsonSettingAttribute.cs">
       <Link>SourceCrafter.DependencyInjection\%(RecursiveDir)%(Filename)%(Extension)</Link>
-    </Compile>
-    <Compile Include="SourceCrafter.DependencyInjection\**\*.cs" />
-    <ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" OutputItemType="Analyzer" />
-    <ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj" OutputItemType="Analyzer" />
+    </Compile>    
+    <Compile Include="..\SourceCrafter.DependencyInjection\**\*.cs" />
   </ItemGroup>
+  <ItemGroup Condition="$(Configuration) == 'Release'">
+		<PackageReference Include="SourceCrafter.DependencyInjection" Version="1.25.211.6" OutputItemType="Analyzer"/>
+		<PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="1.25.211.6" OutputItemType="Analyzer"/>
+  </ItemGroup>
+	
   <ItemGroup>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

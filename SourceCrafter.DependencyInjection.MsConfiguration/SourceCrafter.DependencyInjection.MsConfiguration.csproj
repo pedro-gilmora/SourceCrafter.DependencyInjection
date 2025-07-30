@@ -61,20 +61,17 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<Compile Include="..\SourceCrafter.DependencyInjection.Interop\Code\*.cs">
+		<Compile Include="..\Solution\Interop\*.cs">
 			<Link>Interop\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
-	</ItemGroup>
-
-	<ItemGroup>
-		<Compile Include="..\SourceCrafter.DependencyInjection.Shared\**\*.cs">
-			<Link>Shared\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		<Compile Include="..\Solution\Metadata\*.cs">
+			<Link>Metadata\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
-	</ItemGroup>
-
-	<ItemGroup>
-		<Compile Include="..\SourceCrafter.DependencyInjection.Utils\Code\**\*.cs">
+		<Compile Include="..\Solution\Utils\*.cs">
 			<Link>Utils\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		</Compile>
+		<Compile Include="..\Solution\MsConfiguration\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/MsConfiguration" BuildAction="Compile">
+			<Link>MsConfiguration\Metadata\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
 	</ItemGroup>
 
