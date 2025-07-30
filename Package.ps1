@@ -57,8 +57,8 @@ if($refs.Count -gt 0 -or $forcePack -eq 'true')
 {    
     $refs.Foreach({ 
         Write-Output "
-PACKER: Updating package: $($_.GetAttribute('Include')) from version $version"
-        $_.SetAttribute('Version', $version)
+PACKER: Updating package: $($_.GetAttribute('Include')) to version $version"
+        $_.SetAttribute('Version', "[$version]")
         Write-Output $_.OuterXml
     })
 
