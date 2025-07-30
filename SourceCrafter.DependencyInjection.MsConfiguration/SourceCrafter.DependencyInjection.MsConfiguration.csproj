@@ -23,6 +23,7 @@
 		<Nullable>enable</Nullable>
 		<IsRoslynComponent>true</IsRoslynComponent>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>
 		<DefineConstants>$(DefineConstants);DISG</DefineConstants>
 		<PackageOutputPath>../packaging</PackageOutputPath>
@@ -70,7 +71,7 @@
 		<Compile Include="..\Solution\Utils\*.cs">
 			<Link>Utils\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
-		<Compile Include="..\Solution\MsConfiguration\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/MsConfiguration/Metadata" BuildAction="Compile">
+		<Compile Include="..\Solution\MsConfiguration\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/MsConfiguration" BuildAction="Compile">
 			<Link>MsConfiguration\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
 	</ItemGroup>

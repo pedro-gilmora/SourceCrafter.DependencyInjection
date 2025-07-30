@@ -24,7 +24,7 @@
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<Configurations>Debug;Release;Pack;DEBUG_SG;DISG_HOST;DISG</Configurations>
 		<DefineConstants>$(DefineConstants);DISG_HOST;DISG</DefineConstants>
-
+		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<Company>AsereHighDev</Company>
 		<PackageOutputPath>../packaging</PackageOutputPath>
 		<Version>$(PackageVersion)</Version>
