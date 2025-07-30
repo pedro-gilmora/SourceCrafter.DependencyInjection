@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -25,22 +25,19 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
   </ItemGroup>
   <ItemGroup Condition="$(Configuration) == 'Release'">
-    <PackageReference Include="SourceCrafter.DependencyInjection" Version="1.25.211.7" OutputItemType="Analyzer" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="1.25.211.7" OutputItemType="Analyzer" />
+    <PackageReference Include="SourceCrafter.DependencyInjection" Version="1.25.211.8" OutputItemType="Analyzer" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="1.25.211.8" OutputItemType="Analyzer" />
   </ItemGroup>
-
-	<ItemGroup Condition="$(Configuration) != 'Release'">
+  <ItemGroup Condition="$(Configuration) != 'Release'">
     <ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj" OutputItemType="Analyzer" />
-		<ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" OutputItemType="Analyzer" />
-	
-		<Compile Include="..\Solution\Metadata\*.cs">
-			<Link>Metadata\%(RecursiveDir)%(Filename)%(Extension)</Link>
-		</Compile>
-		<Compile Include="..\Solution\MsConfiguration\*.cs">
-			<Link>MsConfiguration\%(RecursiveDir)%(Filename)%(Extension)</Link>
-		</Compile>
-	</ItemGroup>
-	
+    <ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" OutputItemType="Analyzer" />
+    <Compile Include="..\Solution\Metadata\*.cs">
+      <Link>Metadata\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Compile>
+    <Compile Include="..\Solution\MsConfiguration\*.cs">
+      <Link>MsConfiguration\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Compile>
+  </ItemGroup>
   <ItemGroup>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
