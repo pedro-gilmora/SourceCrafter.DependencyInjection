@@ -1,23 +1,20 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
-	<PropertyGroup>
-		<TargetFrameworks>net8.0;net9.0</TargetFrameworks>
-		<ImplicitUsings>enable</ImplicitUsings>
-		<Nullable>enable</Nullable>
-		<OutputType>Exe</OutputType>
-		<Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>
-		<!--<PublishAot>true</PublishAot>
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <OutputType>Exe</OutputType>
+    <Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>
+    <!--<PublishAot>true</PublishAot>
     <PublishReadyToRun>true</PublishReadyToRun>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>-->
-		<RestoreAdditionalProjectSources>../packaging</RestoreAdditionalProjectSources>
-	</PropertyGroup>
-
-	<ItemGroup>
-		<PackageReference Include="BenchmarkDotNet" Version="0.14.0" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-		<PackageReference Include="Jab" Version="0.10.2" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-		<PackageReference Include="MrMeeseeks.DIE" Version="3.3.1" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-		<PackageReference Include="SourceCrafter.DependencyInjection" Version="[1.25.211.106]" OutputItemType="Analyzer" />
-		<PackageReference Include="SourceCrafter.DependencyInjection.Metadata" Version="[1.25.211.106]" />
-	</ItemGroup>
-
+    <RestoreAdditionalProjectSources>../packaging</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+    <PackageReference Include="Jab" Version="0.10.2" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+    <PackageReference Include="MrMeeseeks.DIE" Version="3.3.1" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
+    <PackageReference Include="SourceCrafter.DependencyInjection" Version="[1.25.213.18]" OutputItemType="Analyzer" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.Metadata" Version="[1.25.213.18]" />
+  </ItemGroup>
 </Project>

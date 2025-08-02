@@ -38,32 +38,43 @@ Write-Host "Current path: $PWD"
 
 Set-Location "$PWD"
 
-$testProjPath = "$PWD/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj"
-
-$testProjContent = [xml]$(Get-Content $testProjPath)
-
-# Get all 'PackageReference' nodes
-$refs = $($testProjContent).GetElementsByTagName('PackageReference').
-    Where({ 
-        $_.GetAttribute('Include').StartsWith('SourceCrafter.DependencyInjection') -and $_.GetAttribute('Version') -ne $version
-    })
-
 $version = if ($specificVersion) { $specificVersion } else { Get-Version }
 
-Write-Host "CONFIG: version = $version, clean = $clean, pack = $pack, forcePack = $forcePack, test = $test, startingYear = $startingYear, $$refs.Count = $($refs.Count)
+Write-Host "CONFIG: version = $version, clean = $clean, pack = $pack, forcePack = $forcePack, test = $test, startingYear = $startingYear
 "
 
-if($refs.Count -gt 0 -or $forcePack -eq 'true')
+$hasCounts = $false
+
+foreach($projName in "SourceCrafter.DependencyInjection.Tests,Benchmarks".Split(","))
+{
+    Write-Host "[$item]: Project definition update
+" 
+    $projPath = "$PWD/$projName/$projName.csproj"
+
+    $projContent = [xml]$(Get-Content $projPath)
+
+    # Get all 'PackageReference' nodes
+    $refs = $($projContent).GetElementsByTagName('PackageReference').
+        Where({ 
+            $_.GetAttribute('Include').StartsWith('SourceCrafter.DependencyInjection') -and $_.GetAttribute('Version') -ne $version
+        })
+
+    if($refs.Count -gt 0){
+        $hasCounts = $true
+
+        $refs.Foreach({ 
+            Write-Output "
+REFERENCE: Updating package: $($_.GetAttribute('Include')) to version $version"
+            $_.SetAttribute('Version', "[$version]")
+            Write-Output $_.OuterXml
+        })
+
+        $projContent.Save($projPath)
+    }
+}
+
+if($hasCounts -or $forcePack -eq 'true')
 {    
-    $refs.Foreach({ 
-        Write-Output "
-PACKER: Updating package: $($_.GetAttribute('Include')) to version $version"
-        $_.SetAttribute('Version', "[$version]")
-        Write-Output $_.OuterXml
-    })
-
-    $testProjContent.Save($testProjPath)
-
     Write-Output "
 PACKER: Test project references where updated
 "
