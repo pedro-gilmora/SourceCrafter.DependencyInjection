@@ -1,28 +1,41 @@
 ﻿using Microsoft.CodeAnalysis;
-using System.Collections.Immutable;
-using System;
-using System.Linq;
-using System.Reflection;
-using SourceCrafter.DependencyInjection;
-using System.Text;
-using System.Collections.Generic;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+
+using SourceCrafter.DependencyInjection;
+using SourceCrafter.DependencyInjection.Attributes;
+using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
+
+using System;
+using System.Collections.Generic;
+using System.Collections.Immutable;
+using System.Diagnostics;
+using System.IO.MemoryMappedFiles;
+using System.IO.Pipes;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Net.Sockets;
+using System.Reflection;
+using System.Text;
+using System.Threading;
+using System.Xml.Linq;
 
 [Generator]
 public sealed class Generator : IIncrementalGenerator
 {
     private const string IConfigurationType = "global::Microsoft.Extensions.Configuration.IConfiguration";
+    private const string FullyQualifiedMetadataName = "SourceCrafter.DependencyInjection.MsConfiguration.Metadata.JsonSettingAttribute";
     internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
 
     static volatile bool isMsConfigInstalled = false;
 
-    
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
 #if DEBUG_SG
-        System.Diagnostics.Debugger.Launch();
+        //System.Diagnostics.Debugger.Launch();
 #endif
+
         var servicesContainers = context.SyntaxProvider
                 .ForAttributeWithMetadataName("SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute",
                     (node, a) => true,
@@ -30,7 +43,7 @@ public sealed class Generator : IIncrementalGenerator
                 .Collect();
 
         var settings = context.SyntaxProvider
-                .ForAttributeWithMetadataName("SourceCrafter.DependencyInjection.MsConfiguration.Metadata.JsonSettingAttribute",
+                .ForAttributeWithMetadataName(FullyQualifiedMetadataName,
                     (node, a) => true,
                     (t, c) => (t.Attributes, (IParameterSymbol)t.TargetSymbol))
                 .Collect();
@@ -74,15 +87,17 @@ public sealed class Generator : IIncrementalGenerator
 
         var identity = compilation.Assembly.Identity;
         var configTypeName = iConfigTypeSymbol.ToGlobalNamespaced();
+#if DISG
+        Trace.WriteLine($"SCMSCONFDI: Building {"key".GetHashCode()}");
+#endif
 
 
-        Map<(int, Lifetime, string?), string> dependencyRegistry = new(EqualityComparer<(int, Lifetime, string?)>.Default);
-        HashSet<string> methodsRegistry = new(StringComparer.Ordinal);
-        Map<string, string> files = new(StringComparer.Ordinal);
+        Map<string, string> methods = new(StringComparer.Ordinal);
         HashSet<string> keys = new(StringComparer.Ordinal);
 
         foreach (var (model, container) in containers)
         {
+
             var attrs = container.GetAttributes();
 
             var containerTypeName = container.ToGlobalNamespaced();
@@ -106,10 +121,12 @@ using global::Microsoft.Extensions.Configuration;
             {
                 ClassDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var argList } =>
                     ($"{mods} {keyword}".TrimStart(), $"{identifier}{argList}"),
-                StructDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var argList } =>
-                    ($"{mods} {keyword}".TrimStart(), $"{identifier}{argList}"),
-                _ => ("partial class ", "")
+                InterfaceDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var argList } =>
+                    ($"{mods} {keyword}".TrimStart(), $"{identifier.ValueText[1..]}{argList}"),
+                _ => ("", "")
             };
+
+            if (typeName.Length == 0) return;
 
             code.Append(modifiers)
                 .AddSpace()
@@ -127,7 +144,7 @@ using global::Microsoft.Extensions.Configuration;
                     {
                         var key = (configAttr.ConstructorArguments[1].Value?.ToString() ?? "").Trim();
 
-                        ref var configMethodName = ref files.GetValueOrAddDefault(key, out var fileExists);
+                        ref var configMethodName = ref methods.GetValueOrAddDefault(key, out var fileExists);
 
                         if (fileExists) continue;
 
@@ -139,8 +156,6 @@ using global::Microsoft.Extensions.Configuration;
                         var optional = configAttr.ConstructorArguments[2].Value?.ToString().ToLower();
                         var reloadOnChange = configAttr.ConstructorArguments[3].Value?.ToString().ToLower();
                         var handleEnviroments = (bool)configAttr.ConstructorArguments[5].Value!;
-
-                        //Register key to provide to settings
 
                         code.Append(@"
     private static ")
@@ -163,7 +178,7 @@ using global::Microsoft.Extensions.Configuration;
                             .Append(fieldName)
                             .Append(@";
 
-        lock (__lock)
+        lock (___lock)
         {
             return ")
                             .Append(@"_")
@@ -203,22 +218,25 @@ using global::Microsoft.Extensions.Configuration;
                     if (settingAttr.ConstructorArguments[0].Value is not string { Length: > 0 } settingPath
                         || !keys.Add(settingPath)
                         || (settingAttr.ConstructorArguments[4].Value?.ToString() ?? "").Trim() is not { } configKey
-                        || !files.TryGetValue(configKey, out var configMethodName)
-                        || !(target is IAssemblySymbol || SymbolEqualityComparer.Default.Equals(target, container))) continue;
+                        || !methods.TryGetValue(configKey, out var configMethodName)
+                        || !(target is IAssemblySymbol || SymbolEqualityComparer.Default.Equals(target, container)))
+
+                        continue;
 
                     BuildSetting(identity, containerTypeName, code, settingAttr, settingPath, configMethodName, settingAttr.AttributeClass!.TypeArguments[0]);
                 }
             }
-            
+
             foreach (var (settingAttrs, parameter) in settings)
             {
                 foreach (var settingAttr in settingAttrs)
                 {
                     if (settingAttr.ConstructorArguments[0].Value is not string { Length: > 0 } settingPath
-                    || !keys.Add(settingPath)
-                    || (settingAttr.ConstructorArguments[4].Value?.ToString() ?? "").Trim() is not { } configKey
-                    || !files.TryGetValue(configKey, out var configMethodName)) continue;
+                        || !keys.Add(settingPath)
+                        || (settingAttr.ConstructorArguments[4].Value?.ToString() ?? "").Trim() is not { } configKey
+                        || !methods.TryGetValue(configKey, out var configMethodName))
 
+                        continue;
 
                     BuildSetting(identity, containerTypeName, code, settingAttr, settingPath, configMethodName, parameter.Type);
                 }
@@ -237,14 +255,18 @@ using global::Microsoft.Extensions.Configuration;
             var lifetime = (Lifetime)(byte)settingAttr.ConstructorArguments[1].Value!;
             var nameFormat = (string)settingAttr.ConstructorArguments[3].Value!;
             var settingType = type.ToGlobalNamespaced();
-            var shortName = type.ToNameOnly();
+            var shortName = type.ToTypeNameFormat();
             var key = settingAttr.ConstructorArguments[2].Value?.ToString() ?? "";
             var identifier = nameFormat.Replace("{0}", key.Pascalize()).RemoveDuplicates()!;
             var fieldIdentifier = "_" + (key is { Length: > 0 } ? key : char.ToLower(shortName[0]) + shortName[1..]);
+            bool nullable = (bool)settingAttr.ConstructorArguments[5].Value!;
 
-//#if DEBUG_SG || DEBUG
-//            var method = Dependencies.GetDependency(identity, containerTypeName, Lifetime.Singleton, settingType, key);
-//#endif
+#if DEBUG_SG
+            Trace.WriteLine($"SCMSCONFDI: Building {shortName}{key.GetHashCode()}{SymbolEqualityComparer.Default.GetHashCode(type)}");
+#endif
+            //#if DEBUG_SG || DEBUG
+            //            var method = Dependencies.GetDependency(identity, containerTypeName, Lifetime.Singleton, settingType, key);
+            //
 
             if (!isPrimitive)
             {
@@ -262,6 +284,7 @@ using global::Microsoft.Extensions.Configuration;
                     .Append(@" = null;
 ");
             }
+
             code.Append(@"
     private ");
 
@@ -280,7 +303,11 @@ using global::Microsoft.Extensions.Configuration;
                     .Append(settingType)
                     .Append(@">(""")
                     .Append(settingPath)
-                    .Append(@""");");
+                    .Append(@""")");
+
+                if (type.AllowsNull() && !nullable) code.Append('!');
+
+                code.Append(';');
             }
             else
             {
@@ -290,7 +317,11 @@ using global::Microsoft.Extensions.Configuration;
         if (")
                     .Append(fieldIdentifier)
                     .Append(@" is null)
-            lock (__lock)     
+            lock (__");
+
+                if (lifetime is Lifetime.Singleton) code.Append("_");
+
+                code.Append(@"lock)     
                 return ")
                     .Append(fieldIdentifier)
                     .Append(@" ??= BuildSetting();
@@ -355,9 +386,9 @@ internal class JsonConfigProviderComparer : IEqualityComparer<(ImmutableArray<At
 {
     public bool Equals((ImmutableArray<AttributeData> attrs, ISymbol target) x, (ImmutableArray<AttributeData> attrs, ISymbol target) y)
     {
-        if(x.attrs.Length != y.attrs.Length) return false;
+        if (x.attrs.Length != y.attrs.Length) return false;
 
-        if(x.attrs.Length == 0) return true;
+        if (x.attrs.Length == 0) return true;
 
         int count = x.attrs.Length;
 

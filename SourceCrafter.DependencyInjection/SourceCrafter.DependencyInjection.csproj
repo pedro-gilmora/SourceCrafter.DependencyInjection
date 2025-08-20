@@ -24,7 +24,7 @@
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<Configurations>Debug;Release;Pack;DEBUG_SG;DISG_HOST;DISG</Configurations>
 		<DefineConstants>$(DefineConstants);DISG_HOST;DISG</DefineConstants>
-		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<IncludeBuildOutput Condition="$(Configuration) == 'Release'">false</IncludeBuildOutput>
 		<Company>AsereHighDev</Company>
 		<PackageOutputPath>../packaging</PackageOutputPath>
 		<Version>$(PackageVersion)</Version>
@@ -53,9 +53,8 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />
-		<!--<None Remove="bin\Debug\netstandard2.0\\SourceCrafter.DependencyInjection.Interop.dll" />-->
-		<!--<None Include="$(OutputPath)\$(AssemblyName).Interop.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="true" />-->
+		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+		<None Include="$(NuGetPackageRoot)\sharedmemory\**\netstandard2.0\*.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
 		<None Include="..\README.md">
 		  <Pack>True</Pack>
 		  <PackagePath>\</PackagePath>
@@ -63,6 +62,9 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<Compile Include="..\Solution\Base\*.cs">
+			<Link>Base\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		</Compile>
 		<Compile Include="..\Solution\Utils\*.cs">
 			<Link>Utils\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
@@ -74,6 +76,9 @@
 		</Compile>
 	</ItemGroup>
 
+	<ItemGroup>
+	  <None Remove="D:\packages\NuGet\cache\sharedmemory\2.3.2\lib\netstandard2.0\**" />
+	</ItemGroup>
 	<!--<ItemGroup Condition="$(Configuration) != 'Release'">
 		<None Include="..\Solution\Metadata\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/Metadata" BuildAction="Compile"/>
 	</ItemGroup>-->
@@ -87,5 +92,5 @@
 			<TargetPathWithTargetPlatformMoniker Include="$(OutputPath)\SourceCrafter.DependencyInjection.Interop.dll" IncludeRuntimeDependency="true" />
 		</ItemGroup>
 	</Target>-->
-	
+
 </Project>

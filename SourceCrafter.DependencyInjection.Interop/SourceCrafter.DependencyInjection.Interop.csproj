@@ -19,24 +19,25 @@
 				))
 			))
 		</PackageVersion>
-		<Company>AsereHighDev</Company>
 		<Nullable>enable</Nullable>
 		<IsRoslynComponent>true</IsRoslynComponent>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
-		<IncludeBuildOutput Condition="$(Configuration) == 'Release'">false</IncludeBuildOutput>
-		<Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>
-		<DefineConstants>$(DefineConstants);DISG</DefineConstants>
+		<Configurations>Debug;Release;Pack;DEBUG_SG;DISG_HOST;DISG</Configurations>
+		<DefineConstants>$(DefineConstants);DISG_HOST;DISG</DefineConstants>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
+		<Company>AsereHighDev</Company>
 		<PackageOutputPath>../packaging</PackageOutputPath>
 		<Version>$(PackageVersion)</Version>
+		<Title>Truly compile-time depedency injection</Title>
+		<Description>Base Compile-time dependency injection library utilizing attributes to simplify and automate service registration</Description>
+		<PackageProjectUrl>https://github.com/pedro-gilmora/SourceCrafter.DependencyInjection/</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/pedro-gilmora/SourceCrafter.DependencyInjection/</RepositoryUrl>
+		<PackageTags>compile-time, dependency injection</PackageTags>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
 	  <Optimize>True</Optimize>
 	</PropertyGroup>
-
-	<ItemGroup>
-	  <Compile Remove="Helpers.cs" />
-	</ItemGroup>
 
 	<ItemGroup>
 		<PackageReference Include="IndexRange" Version="1.0.3" PrivateAssets="all" />
@@ -45,35 +46,29 @@
 		  <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" PrivateAssets="all" />
-		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" PrivateAssets="all" />
 		<PackageReference Include="System.Diagnostics.Tools" Version="4.3.0" PrivateAssets="all" />
 		<PackageReference Include="System.Memory" Version="4.5.5" PrivateAssets="all" />
-		<PackageReference Include="System.Runtime.InteropServices" Version="4.3.0" PrivateAssets="all" />
-		<PackageReference Include="System.Text.Json" Version="8.0.5" PrivateAssets="all" />
+		<PackageReference Include="System.Runtime.InteropServices" PrivateAssets="all" Version="4.3.0" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-		<None Include="$(NuGetPackageRoot)\sharedmemory\**\netstandard2.0\*.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-	</ItemGroup>
-
-	<ItemGroup>
-		<Compile Include="..\Solution\Interop\*.cs">
-			<Link>Interop\%(RecursiveDir)%(Filename)%(Extension)</Link>
-		</Compile>
-		<Compile Include="..\Solution\Metadata\*.cs">
-			<Link>Metadata\%(RecursiveDir)%(Filename)%(Extension)</Link>
-		</Compile>
-		<Compile Include="..\Solution\MsConfiguration\*.cs">
-			<Link>MsConfiguration\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		<Compile Include="..\Solution\Base\*.cs">
+			<Link>Base\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
 		<Compile Include="..\Solution\Utils\*.cs">
 			<Link>Utils\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
-		<Compile Include="..\Solution\Base\*.cs">
-			<Link>Base\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		<Compile Include="..\Solution\Metadata\*.cs">
+			<Link>Metadata\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		</Compile>
+		<Compile Include="..\Solution\Interop\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/Interop/" BuildAction="Compile">
+			<Link>Interop\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
 	</ItemGroup>
+
+	<!--<ItemGroup Condition="$(Configuration) != 'Release'">
+		<None Include="..\Solution\Metadata\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/Metadata" BuildAction="Compile"/>
+	</ItemGroup>-->
 
 	<!--<PropertyGroup>
 		<GetTargetPathDependsOn>$(GetTargetPathDependsOn);GetDependencyTargetPaths</GetTargetPathDependsOn>
@@ -82,8 +77,7 @@
 	<Target Name="GetDependencyTargetPaths">
 		<ItemGroup>
 			<TargetPathWithTargetPlatformMoniker Include="$(OutputPath)\SourceCrafter.DependencyInjection.Interop.dll" IncludeRuntimeDependency="true" />
-			<TargetPathWithTargetPlatformMoniker Include="$(OutputPath)\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.dll" IncludeRuntimeDependency="true" />
 		</ItemGroup>
 	</Target>-->
-
+	
 </Project>

@@ -547,7 +547,7 @@ internal class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
         }
     }
 
-    public ref TValue GetValueOrInserter(TKey key, out Action<TValue> insertor)
+    public ref TValue GetValueOrInserter(TKey key, out Action<TValue> inserter)
     {
         Entry[]? entries = _entries!;
 
@@ -562,7 +562,7 @@ internal class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
         {
             if (entries[i].id == hashCode && _comparer.Equals(key, entries[i].Key))
             {
-                insertor = null!;
+                inserter = null!;
                 return ref entries[i].Value;
             }
 
@@ -577,7 +577,7 @@ internal class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
             }
         }
 
-        insertor = item =>
+        inserter = item =>
         {
             hashCode = (uint)_comparer.GetHashCode(key);
             var entries = _entries!;
@@ -612,7 +612,7 @@ internal class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
             _version++;
         };
 
-        return ref (new TValue[1] { default! })[0];
+        return ref (new TValue[1])[0];
     }
 
     IEnumerator<(TKey, TValue)> IEnumerable<(TKey, TValue)>.GetEnumerator()
@@ -625,26 +625,21 @@ internal class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
         return new Enumerator(this);
     }
 
-    public sealed class Enumerator(Map<TKey, TValue> map) : IEnumerator<(TKey, TValue)>
+    struct Enumerator(Map<TKey, TValue> map) : IEnumerator<(TKey, TValue)>
     {
         int i = -1;
-        public (TKey, TValue) Current => map._entries![i];
+        readonly (TKey, TValue) IEnumerator<(TKey, TValue)>.Current => map._entries![i];
 
-        object IEnumerator.Current => Current;
+        readonly object IEnumerator.Current => map._entries![i];
 
-        public bool MoveNext()
+        bool IEnumerator.MoveNext() => i++ < map._count;
+
+        void IEnumerator.Reset() => i = 0;
+
+        void IDisposable.Dispose()
         {
-            return i++ < map._count;
-        }
-
-        public void Reset()
-        {
-            i = 0;
-        }
-
-        public void Dispose()
-        {
-            throw new NotImplementedException();
+            map = null!;
+            i = -1;
         }
     }
 

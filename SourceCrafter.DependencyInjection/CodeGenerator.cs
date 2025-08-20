@@ -1,19 +1,30 @@
 ﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+
+using SourceCrafter.DependencyInjection;
+using SourceCrafter.DependencyInjection.Attributes;
+
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Metadata;
+using System.Reflection.PortableExecutable;
+using System.Security.Claims;
 using System.Text;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using SourceCrafter.DependencyInjection;
 using System.Threading;
 
 [Generator]
-public sealed class Generator : IIncrementalGenerator
+public sealed class CodeGenerator : IIncrementalGenerator
 {
+
     private readonly DependencyMapDictionary containers = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource cancellationTokenSource = new();
 
-    ~Generator() {
+    ~CodeGenerator()
+    {
         containers.Clear();
         cancellationTokenSource.Cancel();
     }
@@ -54,33 +65,34 @@ public sealed class Generator : IIncrementalGenerator
                 .Collect();
 
         // Different containers registry for dependencies providers
-        var isServerRunning = false;
+        //var isServerRunning = false;
 
         context.RegisterSourceOutput(context.CompilationProvider
             .Combine(servicesContainers)
             .Combine(getExternal)
             .Combine(scopedUsage)
-            ,(context, info) =>
+            , (context, info) =>
             {
                 var (((compilation, servicesContainers), externals), serviceCall) = info;
 
-                if (!isServerRunning && !Dependencies.TryBroadcastDependencies(cancellationTokenSource.Token, compilation.Assembly.Identity, containers, out string error))
-                {
-                    context.ReportDiagnostic(
-                        Diagnostic.Create(
-                            new DiagnosticDescriptor(
-                                "SCDI00",
-                                "Dependencies server could not initiate.",
-                                $"Error: {error}",
-                                "Operability",
-                                DiagnosticSeverity.Info,
-                                true),
-                            null));
+                //if (!isServerRunning && !Dependencies.TryBroadcastDependencies(cancellationTokenSource.Token, compilation.Assembly.Identity, containers, out string error))
+                //{
+                //    context.ReportDiagnostic(
+                //        Diagnostic.Create(
+                //            new DiagnosticDescriptor(
+                //                "SCDI00",
+                //                "Dependencies server could not initiate.",
+                //                $"Error: {error}",
+                //                "Operability",
+                //                DiagnosticSeverity.Info,
+                //                true),
+                //            compilation.Assembly.Locations.FirstOrDefault()));
+                //}
+#if DISG
+                Trace.WriteLine($"SCDI: Building {"key".GetHashCode()}");
+#endif
 
-                    return;
-                }
-
-                isServerRunning = true;
+                //isServerRunning = true;
 
                 var errorsSb = new StringBuilder("/*").AppendLine();
 
@@ -91,15 +103,16 @@ public sealed class Generator : IIncrementalGenerator
                 try
                 {
                     // Uniqueness in generated names
-                    Map<string, byte> uniqueName = new(StringComparer.Ordinal);
+                    Map<string, byte> uniqueNames = new(StringComparer.Ordinal);
 
                     Set<Diagnostic> diagnostics = Set<Diagnostic>.Create(e => e.Location.GetHashCode());
 
                     foreach (var (model, cls) in servicesContainers)
                     {
                         var declaration = cls.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
+                        var clsId = SymbolEqualityComparer.Default.GetHashCode(cls);
 
-                        if (declaration is not ClassDeclarationSyntax or InterfaceDeclarationSyntax)
+                        if (declaration is not (ClassDeclarationSyntax or InterfaceDeclarationSyntax))
                         {
                             context.ReportDiagnostic(
                                 Diagnostic.Create(
@@ -111,23 +124,30 @@ public sealed class Generator : IIncrementalGenerator
                                         DiagnosticSeverity.Error,
                                         true),
                                     null));
-                            
+
                             continue;
                         }
 
-                        ServiceContainer
-                            .Parse(
-                                compilation,
-                                model,
-                                cls,
-                                diagnostics,
-                                externals,
-                                generatedCodeAttribute,
-                                [.. serviceCall.Where(usage => SymbolEqualityComparer.Default.Equals(usage.ContainerType, cls))])
-                            .Build(containers, uniqueName, context.AddSource, net9Lock, declaration);
+                        var thisServiceCalls = Set<InvokeInfo>.Create(ii => (ii.ContainerTypeId, ii.Name, ii.NotFromScopedInstance));
+
+                        foreach (var item in serviceCall.Where(usage => usage.ContainerTypeId == clsId))
+                        {
+                            thisServiceCalls.TryAdd(item);
+                        }
+
+                        new ServiceContainer(
+                            compilation,
+                            model,
+                            cls,
+                            diagnostics,
+                            externals,
+                            generatedCodeAttribute,
+                            thisServiceCalls
+                        )
+                            .Build(containers, uniqueNames, context.AddSource, net9Lock, declaration);
                     }
 
-                    foreach (var item in ((Set<int, Diagnostic>)diagnostics)) context.ReportDiagnostic(item);
+                    foreach (var item in (Set<int, Diagnostic>)diagnostics) context.ReportDiagnostic(item);
                 }
                 catch (Exception e)
                 {
@@ -144,33 +164,33 @@ public sealed class Generator : IIncrementalGenerator
     private static InvokeInfo GetInvokeInfos(GeneratorSyntaxContext gsc, CancellationToken _)
     {
         if (gsc.Node is MemberAccessExpressionSyntax
-            {
-                Name: IdentifierNameSyntax
-                { Identifier.ValueText: { } name } method,
-                Expression: IdentifierNameSyntax { } refVar
-            })
+                {
+                    Name: IdentifierNameSyntax
+                    { Identifier.ValueText: { } name } method,
+                    Expression: IdentifierNameSyntax { } refVar
+                }
+            && gsc.SemanticModel.GetSymbolInfo(refVar).Symbol switch
+                {
+                    ILocalSymbol local => (_ref: local, type: local.Type),
+                    IParameterSymbol parameter => (_ref: parameter, type: parameter.Type),
+                    _ => (_ref: default(ISymbol)!, type: default(ITypeSymbol)!)
+                } 
+                is ({ } _ref, var type)
+            && type.GetAttributes().Any(IsGeneratedServiceContainer))
         {
-            if (gsc.SemanticModel.GetSymbolInfo(refVar).Symbol is ILocalSymbol { Type: { } containerType } local
-                && containerType.GetAttributes()
-                                .Any(attr => attr.AttributeClass?.ToGlobalNamespaced().EndsWith(serviceContainerFullTypeName) ?? false))
-            {
-                var isCtor = local.DeclaringSyntaxReferences
-                    .Any(s =>
-                    {
-                        var varDecl = (s.GetSyntax() as VariableDeclaratorSyntax)?.Initializer?.Value;
-                        return varDecl is ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax
-                            || (containerType.TypeKind is TypeKind.Struct && varDecl is DefaultExpressionSyntax);
-                    });
+            var clsId = SymbolEqualityComparer.Default.GetHashCode(type);
 
-                return new(containerType, name, method, isCtor);
-            }
-            else if (gsc.SemanticModel.GetSymbolInfo(refVar).Symbol is ILocalSymbol { Type: { } containerType2 } parameter
-                && containerType2.GetAttributes().Any(attr => attr.AttributeClass?.ToGlobalNamespaced().EndsWith(serviceContainerFullTypeName) ?? false))
-            {
-                return new(containerType2, name, method, false);
-            }
+            var isCtor = _ref.DeclaringSyntaxReferences.Any(s => s.GetSyntax() is VariableDeclaratorSyntax { 
+                Initializer.Value: ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax 
+            });
+
+            return new(clsId, name, method, isCtor);
         }
+
         return null!;
+
+        static bool IsGeneratedServiceContainer(AttributeData attrData) =>
+            attrData.AttributeClass?.ToGlobalNamespaced().EndsWith(serviceContainerFullTypeName) ?? false;
     }
 
     private static string ParseToolAndVersion()

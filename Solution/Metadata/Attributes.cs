@@ -1,5 +1,6 @@
 ﻿#pragma warning disable CS9113
 using System;
+using System.Diagnostics;
 
 namespace SourceCrafter.DependencyInjection
 {
@@ -101,7 +102,7 @@ namespace SourceCrafter.DependencyInjection
 #if DISG_META
         public
 #else
-        internal 
+        internal
 #endif
         abstract class DependencyAttribute(Lifetime lifetime, string key = "", string? source = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
     }
