@@ -17,7 +17,7 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
         string key = "",
         bool optional = true,
         bool reloadOnChange = true,
-        string nameFormat = "Get{0}Configuration",
+        string nameFormat = "{0}Configuration",
         bool handleEnviroments = true,
         Disposability disposability = Disposability.Disposable
     ) : Attribute;
@@ -35,7 +35,7 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
         Lifetime lifetime = Lifetime.Singleton,
         //DI service key
         string key = "",
-        string nameFormat = "Get{0}Settings",
+        string nameFormat = "{0}Settings",
         string configKey = "",
         bool nullable = false
     ) : Attribute;
@@ -52,7 +52,7 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
         Lifetime lifetime = Lifetime.Singleton,
         //DI service key
         string key = "",
-        string nameFormat = "Get{0}Settings",
+        string nameFormat = "{0}Settings",
         string configKey = "",
         bool nullable = false
     ) : Attribute;

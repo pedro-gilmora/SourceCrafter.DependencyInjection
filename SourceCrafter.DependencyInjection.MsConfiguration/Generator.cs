@@ -164,13 +164,15 @@ using global::Microsoft.Extensions.Configuration;
                             .Append(fieldName)
                             .Append(@" = null;
 
-    private static ")
+    private ")
                             .Append(IConfigurationType)
                             .Append(@" ")
                             .Append(configMethodName)
-                            .Append(@"()
+                            .Append(@"
     {
-        if(")
+        get
+        {
+            if(")
                             .Append(@"_")
                             .Append(fieldName)
                             .Append(@" is not null) return ")
@@ -178,9 +180,11 @@ using global::Microsoft.Extensions.Configuration;
                             .Append(fieldName)
                             .Append(@";
 
-        lock (___lock)
-        {
-            return ")
+            lock (this)
+            {
+                var fileName = global::System.IO.Path.GetFullPath(""").Append(fileName).Append(@""");
+
+                return ")
                             .Append(@"_")
                             .Append(fieldName)
                             .Append(@" ??= new global::Microsoft.Extensions.Configuration.ConfigurationBuilder()");
@@ -188,22 +192,17 @@ using global::Microsoft.Extensions.Configuration;
                         if (handleEnviroments)
                         {
                             code.Append(@"
-                .AddJsonFile($""{(global::System.IO.Path.GetFullPath(""")
-                                .Append(fileName)
-                                .Append(@"""))}.{Environment}.json"", true, ")
-                                .Append(reloadOnChange)
-                                .Append(")");
+                    .AddJsonFile($""{fileName}.{EnvironmentName}.json"", true, ").Append(reloadOnChange).Append(")");
                         }
 
                         code.Append(@"
-                .AddJsonFile(global::System.IO.Path.GetFullPath(""")
-                            .Append(fileName)
-                            .Append(@".json""), ")
+                    .AddJsonFile($""{fileName}.json"", ")
                             .Append(optional)
                             .Append(@", ")
                             .Append(reloadOnChange)
                             .Append(@")
-                .Build();
+                    .Build();
+            }
         }
     }
 ");
@@ -281,15 +280,15 @@ using global::Microsoft.Extensions.Configuration;
                     .Append(settingType)
                     .Append(@"? ")
                     .Append(fieldIdentifier)
-                    .Append(@" = null;
+                    .Append(@" = default;
 ");
             }
 
             code.Append(@"
     private ");
 
-            if (lifetime is Lifetime.Singleton)
-                code.Append("static ");
+            //if (lifetime is Lifetime.Singleton)
+            //    code.Append("static ");
 
             code.Append(settingType)
                 .AddSpace()
@@ -297,9 +296,9 @@ using global::Microsoft.Extensions.Configuration;
 
             if (isPrimitive)
             {
-                code.Append(@"() => ")
+                code.Append(@" => ")
                     .Append(configMethodName)
-                    .Append(@"().GetValue<")
+                    .Append(@".GetValue<")
                     .Append(settingType)
                     .Append(@">(""")
                     .Append(settingPath)
@@ -311,30 +310,33 @@ using global::Microsoft.Extensions.Configuration;
             }
             else
             {
+                //");
+
+                //if (lifetime is Lifetime.Singleton) code.Append("_");
+
+                //code.Append(@"lock)
                 code
-                    .Append(@"()
+                    .Append(@"
     {
-        if (")
+        get
+        {
+            if (")
                     .Append(fieldIdentifier)
-                    .Append(@" is null)
-            lock (__");
+                    .Append(@" is not null) return ")
+                    .Append(fieldIdentifier)
+                    .Append(@";
+            
+            lock (this)     
 
-                if (lifetime is Lifetime.Singleton) code.Append("_");
-
-                code.Append(@"lock)     
-                return ")
+            return ")
                     .Append(fieldIdentifier)
                     .Append(@" ??= BuildSetting();
 
-        return ")
-                    .Append(fieldIdentifier)
-                    .Append(@";
-
-        ")
+            ")
                     .Append(settingType)
                     .Append(@" BuildSetting()
-        {
-            ")
+            {
+                ")
                     .Append(settingType)
                     .Append(" setting = new ")
                     .Append(settingType)
@@ -342,11 +344,12 @@ using global::Microsoft.Extensions.Configuration;
 
                 code.Append(@"
 
-            ").Append(configMethodName).Append(@"() 
-                .GetSection(""").Append(settingPath).Append(@""")                
-                .Bind(setting);
+                ").Append(configMethodName).Append(@"
+                    .GetSection(""").Append(settingPath).Append(@""")                
+                    .Bind(setting);
 
-            return setting;
+                return setting;
+            }
         }
     }
 ");

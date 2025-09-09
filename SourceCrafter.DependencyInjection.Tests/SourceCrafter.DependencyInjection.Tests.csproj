@@ -25,10 +25,10 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
   </ItemGroup>
   <ItemGroup Condition="$(Configuration) == 'Release'">
-    <PackageReference Include="SourceCrafter.DependencyInjection" Version="[1.25.217.40]" OutputItemType="Analyzer" PrivateAssets="all" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.Metadata" Version="[1.25.217.40]" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="[1.25.217.40]" OutputItemType="Analyzer" PrivateAssets="all" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="[1.25.217.40]" />
+    <PackageReference Include="SourceCrafter.DependencyInjection" Version="[1.25.257.49]" OutputItemType="Analyzer" PrivateAssets="all" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.Metadata" Version="[1.25.257.49]" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration" Version="[1.25.257.49]" OutputItemType="Analyzer" PrivateAssets="all" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.MsConfiguration.Metadata" Version="[1.25.257.49]" />
   </ItemGroup>
   <ItemGroup Condition="$(Configuration) != 'Release'">
     <ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj" OutputItemType="Analyzer" />
