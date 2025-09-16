@@ -6,15 +6,21 @@ using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
 namespace SourceCrafter.DependencyInjection.Tests
 {
     [ServiceContainer]
-    [Transient<AppSettings>]
+    [JsonSetting<AppSettings>("AppSettings")]
     [Scoped("count", source: nameof(CountAsync))]
     [Scoped("reqId", source: nameof(ResolveRequestIdTask))]
     [Singleton<IDatabase, Database>]
     [Scoped<IAuthService, AuthService>]
     [Scoped<EmployeeController>]
-    public partial class Server
+    public partial class Server : IServiceProvider
     {
         static Task<int> CountAsync() => Task.FromResult(1);
+
+        public object? GetService(Type serviceType)
+        {
+            throw new NotImplementedException();
+        }
+
         static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
     }
 

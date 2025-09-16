@@ -1,7 +1,5 @@
 ﻿//namespace System.Runtime.CompilerServices;
-
-using global::System.ComponentModel;
-
+using DependencyKey = (Lifetime lifetime, int typeHash, int keyHash);
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -14,17 +12,11 @@ using System;
 
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Collections.Specialized;
-using System.Diagnostics;
-using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
-using System.Security.Permissions;
 using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
 
 [Generator]
 public sealed class CodeGenerator : IIncrementalGenerator
@@ -63,7 +55,7 @@ public sealed class CodeGenerator : IIncrementalGenerator
                 .Collect();
         var scopedUsage = context.SyntaxProvider
                 .CreateSyntaxProvider(
-                    (syntax, _) => syntax is MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax },
+                    (syntax, _) => syntax is MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax { }, Name.Identifier.ValueText: "GetService" or "GetRequiredService" },
                     GetInvokeInfos)
                 .Where(info => info is not null)
                 .Collect();
@@ -85,7 +77,7 @@ public sealed class CodeGenerator : IIncrementalGenerator
             {
                 try
                 {
-                    var (((compilation, servicesContainers), externals), serviceCall) = info;
+                    var (((compilation, servicesContainers), externals), serviceCalls) = info;
 
                     HashSet<Diagnostic> diagnostics = new(new DiagnosticLocationComparer());
                     Map<string, byte> uniqueNames = new(StringComparer.Ordinal);
@@ -95,8 +87,16 @@ public sealed class CodeGenerator : IIncrementalGenerator
 
                     foreach (var (model, cls) in servicesContainers)
                     {
-                        TryGenerateContainer(compilation, model, cls, diagnostics, uniqueNames, ref addExtensions, cancelTokenType, context.AddSource);
+                        TryGenerateContainer(compilation, model, cls, diagnostics, uniqueNames, serviceCalls, ref addExtensions, cancelTokenType, context.AddSource);
                     }
+
+                    context.AddSource("Utils.g", @"
+namespace System.Runtime.CompilerServices
+{
+    [AttributeUsage(AttributeTargets.Method)]
+    public sealed class InterceptsLocationAttribute(int version, string data) : global::System.Attribute { }
+}");
+
 
                     if (addExtensions)
                     {
@@ -160,17 +160,21 @@ internal static class Extensions
         INamedTypeSymbol providerType,
         HashSet<Diagnostic> diagnostics,
         Map<string, byte> uniqueNames,
+        ImmutableArray<InvokeInfo> serviceCalls,
         ref bool addExtensions,
         INamedTypeSymbol cancelTokenType,
         Action<string, string> addSource)
     {
         var declaration = providerType.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
         var providerTypeId = SymbolEqualityComparer.Default.GetHashCode(providerType);
-        var providerId = SymbolEqualityComparer.Default.GetHashCode(providerType);
+        var providerFullTypeName = providerType.ToGlobalNamespaced();
+        //var providerId = SymbolEqualityComparer.Default.GetHashCode(providerType);
         var compilationId = compilation.GetHashCode();
         var providerTypeName = providerType.ToGlobalNamespaced();
         var attributes = providerType.GetAttributes();
-        var hasScopedDependencies = false;
+        bool
+            hasScopedDependencies = false,
+            useInterceptors = providerType.AllInterfaces.Any(i => i.ToGlobalNamespaced() == "global::System.IServiceProvider");
 
         HashSet<string> externalAssemblies = [];
         StringBuilder code = new();
@@ -179,12 +183,14 @@ internal static class Extensions
             Key = (Lifetime.Transient, SymbolEqualityComparer.Default.GetHashCode(cancelTokenType), Helpers.EmptyStringHashCode),
             BuildValue = _ => code.Append("cancellationToken")
         };
-        var defaultKeyComparer = EqualityComparer<(Lifetime lifetime, int typeHash, int keyHash)>.Default;
-        Map<(Lifetime lifetime, int typeHash, int keyHash), ResolverBuilder> dependencyAsValueBuilders = new(defaultKeyComparer);
-        Map<(Lifetime lifetime, int typeHash, int keyHash), string> methodNamesMap = new(defaultKeyComparer);
+        var defaultKeyComparer = EqualityComparer<DependencyKey>.Default;
+        Map<DependencyKey, ResolverBuilder> dependencyAsValueBuilders = new(defaultKeyComparer);
+        Map<DependencyKey, string> methodNamesMap = new(defaultKeyComparer);
         HashSet<string> methodsRegistry = [];
         ImmutableArray<Lifetime> lifeTimes = [Lifetime.Singleton, Lifetime.Scoped, Lifetime.Transient];
         List<Action<List<Action>, List<DisposeBuilder>, List<DisposeBuilder>>> dependencyBuilders = [];
+        Set<Interceptors> interceptors = Set<Interceptors>.Create(i => i.Key);
+
 
         Disposability
             containerDisposability = Disposability.None,
@@ -231,7 +237,7 @@ internal static class Extensions
                     asyncType = default,
                     initialAsyncType = default;
 
-                (Lifetime lifetime, int typeHash, int keyHash) key = default;
+                DependencyKey key = default;
 
                 ImmutableArray<IParameterSymbol>
                     defaultParamValues = [],
@@ -250,7 +256,7 @@ internal static class Extensions
                     factory = null;
                 SymbolKind
                     factoryKind = default;
-                Map<(Lifetime lifetime, int typeHash, int keyHash), AsyncLocalResolver>
+                Map<DependencyKey, AsyncLocalResolver>
                     asyncLocalResolvers = new(defaultKeyComparer);
                 List<ParamBuildOptions>
                     appendParams = [];
@@ -336,7 +342,12 @@ internal static class Extensions
 
                 //$"{key}: {existingOrNewValueBuilder}".Dump();
 
-                if (isSimpleTransient) return true;
+                if (isSimpleTransient)
+                {
+                    (backingFieldName, methodName) = GetResolverName();
+                    TryRegisterInterceptorMethod(key);
+                    return true;
+                }
 
                 var paramsToResolve = prms.Length;
 
@@ -362,7 +373,7 @@ internal static class Extensions
                     ResolverBuilder foundService = null!;
                     var foundAsyncType = AsyncType.None;
                     HashSet<(int, bool)> existingAsyncDepsCalls = [];
-                    (Lifetime lifetime, int typeHash, int keyHash) resolvedKey = default;
+                    DependencyKey resolvedKey = default;
 
                     if (prm.GetAttributes() is { Length: > 0 } paramAttrs)
                     {
@@ -601,6 +612,8 @@ internal static class Extensions
 
                 existingOrNewValueBuilder.AsyncType = asyncType;
 
+                TryRegisterInterceptorMethod(key);
+
                 return true;
 
                 void BuildParams(
@@ -636,6 +649,74 @@ internal static class Extensions
                         }
 
                         pos++;
+                    }
+                }
+
+                void TryRegisterInterceptorMethod(DependencyKey key)
+                {
+                    foreach (var item in serviceCalls)
+                    {
+                        if (item.ContainerTypeId != providerTypeId) continue;
+
+                        ITypeSymbol returnType = item.ReturnType;
+
+                        returnType.TryGetAsyncType(out var type);
+
+                        var typeHashCode = type.ToGlobalNamespaced().GetHashCode();
+
+                        foreach (var lifetime in lifeTimes)
+                        {
+                            if ((lifetime, typeHashCode, item.KeyHash) != key) continue;
+
+                            ref var interceptor = ref interceptors.GetValueRefOrAddDefault(key, out var exists);
+
+                            interceptor ??= new()
+                            {
+                                Key = key,
+                                BuildMethod = () =>
+                                {
+                                    code.Append(@"
+    public static ");
+                                    switch (asyncType)
+                                    {
+                                        case AsyncType.None:
+                                            code.Append(exportTypeFullName);
+                                            break;
+                                        case AsyncType.ValueTask:
+                                            code.Append("global::System.Threading.Tasks.ValueTask<").Append(exportTypeFullName).Append(">");
+                                            break;
+                                        case AsyncType.Task:
+                                            code.Append("global::System.Threading.Tasks.Task<").Append(exportTypeFullName).Append(">");
+                                            break;
+                                    }
+
+                                    code.Append(" Call").Append(lifetime.ToString()).Append(methodName).Append(@"(this global::System.IServiceProvider provider)
+        => ");
+
+                                    if (isCached)
+                                    {
+                                        code.Append("((").Append(providerFullTypeName);
+
+                                        if (lifetime is Lifetime.Scoped) code.Append(".Scoped");
+
+                                        code.Append(")provider).");
+
+                                        BuildCachedCaller();
+                                    }
+                                    else
+                                    {
+                                        BuildInstance(false);
+                                    }
+
+                                    code.Append(@";
+");
+                                }
+                            };
+
+                            var interceptorLocation = item.Interceptor;
+                            if (!interceptors.Any(i => i.Locations.Contains(interceptorLocation))) interceptor.Locations.Add(interceptorLocation);
+                            return;
+                        }
                     }
                 }
 
@@ -1425,7 +1506,7 @@ internal static class Extensions
                 code.Append(scopedDisposability > Disposability.Disposable ? "global::System.Threading.Tasks.ValueTask " : "void ")
                     .Append(scopedDisposeMethodName).Append("() => ");
 
-                if (!hasOnlyScoped) code.Append("Scoped");
+                code.Append(hasOnlyScoped ? "base." : "Scoped");
 
                 code.Append(scopedDisposeMethodName).Append(@"();");
 
@@ -1518,9 +1599,25 @@ internal static class Extensions
         }
 
         code.Append(@"
-}");
+}
+");
+
+        if (interceptors.Count > 0)
+        {
+            code.Append(@"
+public static class ").Append(typeName).Append(@"Extensions
+{");
+
+            foreach (var item in interceptors)
+            {
+                item.Build(code);
+            }
+
+            code.Append(@"}");
+        }
 
         addSource(fileName, code.ToString());
+
 
         string SanitizeTypeName(ITypeSymbol type, Lifetime lifeTime, string key)
         {
@@ -1602,13 +1699,6 @@ internal static class Extensions
             }
         }
     }
-    static void UpdateParentAsyncDepsCount(HashSet<(int, bool)> parent, HashSet<(int, bool)> child)
-    {
-        foreach (var item in child)
-        {
-            parent.Add(item);
-        }
-    }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     static bool IsNull<T>(T x) => x is null;
@@ -1663,20 +1753,25 @@ internal static class Extensions
     }
     private static InvokeInfo GetInvokeInfos(GeneratorSyntaxContext gsc, CancellationToken _)
     {
-        if (gsc.Node is MemberAccessExpressionSyntax
+        if (gsc.Node is not MemberAccessExpressionSyntax
             {
-                Name: IdentifierNameSyntax
-                { Identifier.ValueText: { } name } method,
+                Parent: InvocationExpressionSyntax inv,
+                Name: GenericNameSyntax { TypeArgumentList.Arguments: [{ } typeArgSyntax] } method,
                 Expression: IdentifierNameSyntax { } refVar
             }
-            && gsc.SemanticModel.GetSymbolInfo(refVar).Symbol switch
-            {
-                ILocalSymbol local => (_ref: local, type: local.Type),
-                IParameterSymbol parameter => (_ref: parameter, type: parameter.Type),
-                _ => (_ref: default(ISymbol)!, type: default(ITypeSymbol)!)
-            }
+            || gsc.SemanticModel.GetInterceptableLocation(inv) is not { } interceptor) return null!;
+
+        if (gsc.SemanticModel.GetTypeInfo(typeArgSyntax).Type is not ITypeSymbol { } depTypeResult) return null!;
+
+        if (gsc.SemanticModel.GetSymbolInfo(refVar).Symbol switch
+        {
+            ILocalSymbol local => (_ref: local, type: local.Type),
+            IParameterSymbol parameter => (_ref: parameter, type: parameter.Type),
+            _ => (_ref: default(ISymbol)!, type: default(ITypeSymbol)!)
+        }
                 is ({ } _ref, var type)
-            && type.GetAttributes().Any(IsGeneratedServiceContainer))
+            && ((type.Name is "Scoped" && type.ContainingType is not null ? type = type.ContainingType : type).GetAttributes().Any(IsGeneratedServiceContainer) 
+                || type.ToDisplayString().StartsWith("Microsoft.Extensions.DependencyInjection.IServiceScope")))
         {
             var clsId = SymbolEqualityComparer.Default.GetHashCode(type);
 
@@ -1685,7 +1780,19 @@ internal static class Extensions
                 Initializer.Value: ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax
             });
 
-            return new(clsId, name, method, isCtor);
+
+            //gsc.GetInterceptableLocation((InvocationExpressionSyntax)gsc.Node)
+            var keyHash = inv.ArgumentList.Arguments switch
+            {
+                [{ Expression: LiteralExpressionSyntax { Token.RawKind: (int)SyntaxKind.StringLiteralToken, Token.ValueText: ['"', .. string text, '"'] } }]
+                    => text.GetHashCode(),
+                [{ Expression: IdentifierNameSyntax id }]
+                    when gsc.SemanticModel.GetSymbolInfo(id).Symbol is IFieldSymbol { IsConst: true, HasConstantValue: true, ConstantValue: string text } => text.GetHashCode(),
+                [{ Expression: MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax id } }]
+                    when gsc.SemanticModel.GetSymbolInfo(id).Symbol is IFieldSymbol { IsConst: true, HasConstantValue: true, ConstantValue: string text } => text.GetHashCode(),
+                _ => Helpers.EmptyStringHashCode
+            };
+            return new(clsId, isCtor, depTypeResult, keyHash, interceptor);
         }
 
         return null!;
@@ -1727,7 +1834,7 @@ internal class DiagnosticLocationComparer : IEqualityComparer<Diagnostic>
     }
 }
 
-internal record InvokeInfo(int ContainerTypeId, string Name, IdentifierNameSyntax MethodSyntax, bool NotFromScopedInstance);
+internal record InvokeInfo(int ContainerTypeId, bool NotFromScopedInstance, ITypeSymbol ReturnType, int KeyHash, InterceptableLocation Interceptor);
 
 internal delegate void CommaSeparateBuilder(ref bool useIComma, int deepParamCount, string baseIndent);
 
@@ -1741,11 +1848,11 @@ internal delegate bool ChildDependencyHandler(bool childExists, bool isChildVali
 
 internal delegate void DisposeBuilder(bool await = true);
 
-class AsyncLocalResolver((Lifetime lifetime, int typeHash, int keyHash) dep)
+class AsyncLocalResolver(DependencyKey dep)
 {
     public int ParamIndex = -1, ResolvedByParamIndex;
     public bool IsValueTask, ResolvedBefore;
-    public (Lifetime lifetime, int typeHash, int keyHash) Dep = dep, ResolverDep;
+    public DependencyKey Dep = dep, ResolverDep;
     internal Func<AsyncLocalResolver> BuildAsyncLocal = null!;
 
     public override bool Equals(object? obj)
@@ -1760,16 +1867,42 @@ class AsyncLocalResolver((Lifetime lifetime, int typeHash, int keyHash) dep)
 
 internal class ResolverBuilder(string toStr)
 {
-    internal (Lifetime lifetime, int typeHash, int keyHash) Key;
+    internal DependencyKey Key;
     internal AsyncType AsyncType;
     internal HashSet<(int, bool)> AsyncNestedDeps = [];
-    internal Map<(Lifetime lifetime, int typeHash, int keyHash), AsyncLocalResolver> AsyncLocalResolvers = new(EqualityComparer<(Lifetime, int, int)>.Default);
+    internal Map<DependencyKey, AsyncLocalResolver> AsyncLocalResolvers = new(EqualityComparer<(Lifetime, int, int)>.Default);
     internal Action<bool> BuildValue = null!;
     internal string ExportTypeFullName = null!;
     internal int ParamsLength;
-    public override string ToString()
+
+    public override string ToString() => toStr;
+}
+
+internal class Interceptors
+{
+    internal DependencyKey Key;
+    internal Action BuildMethod = null!;
+    internal HashSet<InterceptableLocation> Locations = [];
+    public override bool Equals(object obj)
     {
-        return toStr;
+        return (obj as Interceptors)?.Key.Equals(Key) ?? false;
+    }
+    public override int GetHashCode()
+    {
+        return Key.GetHashCode();
+    }
+
+    internal void Build(StringBuilder code)
+    {
+        if (Locations.Count == 0) return;
+
+        foreach (var item in Locations)
+        {
+            code.Append(@"
+    [global::System.Runtime.CompilerServices.InterceptsLocation(").Append(item.Version).Append(@", """).Append(item.Data).Append('"').Append(@")] //").Append(item.ToString());
+        }
+
+        BuildMethod();
     }
 }
 
@@ -1863,7 +1996,7 @@ static class Helpers
     }
 }
 
-record ParamBuildOptions((Lifetime lifetime, int typeHash, int keyHash) Key, Action<bool> Build);
+record ParamBuildOptions(DependencyKey Key, Action<bool> Build);
 
 [Flags]
 internal enum LockerTypes

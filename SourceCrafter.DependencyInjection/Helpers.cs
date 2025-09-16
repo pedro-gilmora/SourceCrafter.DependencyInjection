@@ -628,6 +628,20 @@ namespace SourceCrafter.DependencyInjection
         //    }
         //}
 
+        internal static bool TryGetFirst<T>(this IEnumerable<T> items, Func<T, bool> predicate, out T itemOut)
+        {
+            foreach (T item in items)
+            {
+                if(predicate(item))
+                {
+                    itemOut = item;
+                    return true;
+                }
+            }
+            itemOut = default!;
+            return false;
+        }
+
         internal static T Exchange<T>(ref this T oldVal, T newVal) where T : struct =>
                     oldVal.Equals(newVal) ? oldVal : ((oldVal, _) = (newVal, oldVal)).Item2;
     }

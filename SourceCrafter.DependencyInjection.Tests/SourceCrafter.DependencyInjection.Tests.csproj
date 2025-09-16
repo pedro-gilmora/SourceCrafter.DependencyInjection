@@ -3,12 +3,14 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <Configurations>Debug;Release;DEBUG_SG</Configurations>
     <IsPackable>false</IsPackable>
     <RestoreAdditionalProjectSources>../packaging</RestoreAdditionalProjectSources>
+		<Features>InterceptorsPreview</Features>
+		<LangVersion>preview</LangVersion>
+		<InterceptorsNamespaces>$(InterceptorsNamespaces);SourceCrafter.DependencyInjection.Tests</InterceptorsNamespaces>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
