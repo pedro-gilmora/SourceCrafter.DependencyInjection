@@ -33,17 +33,22 @@ Below is an example of how to apply the available attributes for service registr
 namespace SourceCrafter.DependencyInjection.Tests
 {
     [ServiceContainer]
-    [JsonSetting<AppSettings>("AppSettings")] // Load settings into AppSettings class
-    [JsonSetting<string>("ConnectionStrings::DefaultConnection", nameFormat: "GetConnectionString")] // Connection string
-    [Transient<int>("count", nameof(ResolveAsync))] // Register a transient int value using the ResolveAsync method
-    [Singleton<IDatabase, Database>] // Register Database as a singleton service
-    [Scoped<IAuthService, AuthService>] // Register AuthService as a scoped service
-    public partial class Server
+    [JsonSetting<AppSettings>("AppSettings")]
+    [Scoped("count", source: nameof(CountAsync))]
+    [Scoped("reqId", source: nameof(ResolveRequestIdTask))]
+    [Singleton<IDatabase, Database>]
+    [Scoped<IAuthService, AuthService>]
+    [Scoped<EmployeeController>]
+    public partial class Server : IServiceProvider
     {
-        internal static ValueTask<int> ResolveAsync(CancellationToken _)
+        static Task<int> CountAsync() => Task.FromResult(1);
+
+        public object? GetService(Type serviceType)
         {
-            return ValueTask.FromResult(1);
+            throw new NotImplementedException();
         }
+
+        static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
     }
 }
 ```
@@ -55,15 +60,25 @@ namespace SourceCrafter.DependencyInjection.Tests
 This service is scoped, meaning it is created once per request.
 
 ```csharp
-public class AuthService(IDatabase application, int count) : IAuthService, IDisposable
+public class AuthService(IDatabase application, int count) : IAuthService
 {
-    public int Count => count;
     public IDatabase Database { get; } = application;
+
+    public ValueTask DisposeAsync()
+    {
+        return default;
+    }
 
     public void Dispose()
     {
-        // Cleanup resources, e.g., database connections
+
     }
+}
+
+
+public interface IAuthService : IAsyncDisposable
+{
+    IDatabase Database { get; }
 }
 ```
 
@@ -84,6 +99,14 @@ public class Database(AppSettings settings, string connection) : IDatabase, IAsy
         return default;
     }
 }
+```
+
+#### `EmployeeController`
+
+This is a singleton service that depends on `AppSettings` and a connection string. It implements `IDatabase` and uses `IAsyncDisposable` for asynchronous cleanup.
+
+```csharp
+public class EmployeeController(IAuthService authService, IDatabase application, int count, Guid reqId);
 ```
 
 ### 3. Configuration and Settings
@@ -148,68 +171,171 @@ As result of the previous example, we can notice some aspects:
 
 ```cs
 #nullable enable
+using global::SourceCrafter.DepedencyInjection.Extensions;
+
 namespace SourceCrafter.DependencyInjection.Tests;
 
-[global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
+[global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "1.25.259.33")]
 public partial class Server : global::System.IAsyncDisposable	
 {
-    public static string Environment => global::System.Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Development";
-    static readonly object __lock = new object();
+    public static string EnvironmentName => global::System.Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Development";
 
-    private static readonly global::System.Threading.SemaphoreSlim __globalSemaphore = new global::System.Threading.SemaphoreSlim(1, 1);
-
-    private static global::System.Threading.CancellationTokenSource __globalCancellationTokenSrc = new global::System.Threading.CancellationTokenSource();
-
-    private bool isScoped = false;
-
-    [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    public Server CreateScope() =>
-		new global::SourceCrafter.DependencyInjection.Tests.Server { isScoped = true };
-
-    [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    private static global::SourceCrafter.DependencyInjection.Tests.Database? _getDatabase;
-
-    [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    public global::SourceCrafter.DependencyInjection.Tests.Database GetDatabase()
+    private global::System.Threading.Tasks.Task<int>? _countAsyncCached;
+    private global::System.Threading.Tasks.Task<int> CountAsyncCached
     {
-		if (_getDatabase is not null) return _getDatabase;
-
-        lock(__lock) return _getDatabase ??= new global::SourceCrafter.DependencyInjection.Tests.Database(GetSettings(), GetConnectionString());
-    }
-
-    [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    private global::SourceCrafter.DependencyInjection.Tests.IAuthService? _getAuthService;
-
-    [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    public async global::System.Threading.Tasks.ValueTask<global::SourceCrafter.DependencyInjection.Tests.IAuthService> GetAuthServiceAsync(global::System.Threading.CancellationToken? cancellationToken = default)
-    {
-		if (_getAuthService is not null) return _getAuthService;
-
-        await __globalSemaphore.WaitAsync(cancellationToken ??= __globalCancellationTokenSrc.Token);
-
-        try
+        get
         {
-            return _getAuthService ??= new global::SourceCrafter.DependencyInjection.Tests.AuthService(GetDatabase(), await ResolveAsync(cancellationToken.Value));
-        }
-        finally
-        {
-            __globalSemaphore.Release();
+            if(_countAsyncCached is not null) return _countAsyncCached;
+				
+            lock(this)
+			
+			return _countAsyncCached ??= CountAsync();
         }
     }
 
-    [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    public async global::System.Threading.Tasks.ValueTask DisposeAsync()
+    private global::System.Threading.Tasks.ValueTask<global::System.Guid>? _resolveRequestIdTaskCached;
+    private global::System.Threading.Tasks.ValueTask<global::System.Guid> ResolveRequestIdTaskCached
     {
-		if(isScoped)
+        get
         {
-           _getAuthService?.Dispose();
+            if(_resolveRequestIdTaskCached.HasValue) return _resolveRequestIdTaskCached.Value;
+				
+            lock(this)
+			
+			return _resolveRequestIdTaskCached ??= ResolveRequestIdTask;
+        }
+    }
+
+    private static global::System.Threading.Tasks.Task<global::SourceCrafter.DependencyInjection.Tests.IDatabase>? _databaseTask;
+    public global::System.Threading.Tasks.Task<global::SourceCrafter.DependencyInjection.Tests.IDatabase> GetDatabaseAsync()
+    {
+        if(_databaseTask is not null) return _databaseTask;
+					
+		lock(this)
+		{
+			if(_databaseTask is not null) return _databaseTask;
+
+			var __v1 = ResolveRequestIdTaskCached;
+
+			return _databaseTask = __v1.IsCompletedSuccessfully
+				? global::System.Threading.Tasks.Task.FromResult<global::SourceCrafter.DependencyInjection.Tests.IDatabase>(
+					new global::SourceCrafter.DependencyInjection.Tests.Database(
+						Settings,
+						__v1.Result))
+				: CompleteAsync();
+
+			async global::System.Threading.Tasks.Task<global::SourceCrafter.DependencyInjection.Tests.IDatabase> CompleteAsync()
+			{				
+				return new global::SourceCrafter.DependencyInjection.Tests.Database(
+					Settings,
+					await __v1.ConfigureAwait(false));
+			}
 		}
-		else
-        {
-            (_getConfiguration as global::System.IDisposable)?.Dispose();
-            if (_getDatabase is not null) await _getDatabase.DisposeAsync();
+    }
+
+    private global::System.Threading.Tasks.Task<global::SourceCrafter.DependencyInjection.Tests.IAuthService>? _authServiceTask;
+    private global::System.Threading.Tasks.Task<global::SourceCrafter.DependencyInjection.Tests.IAuthService> GetAuthServiceAsync()
+    {
+        if(_authServiceTask is not null) return _authServiceTask;
+					
+		lock(this)
+		{
+			if(_authServiceTask is not null) return _authServiceTask;
+
+			var __v0 = GetDatabaseAsync();
+			var __v1 = CountAsyncCached;
+
+			return _authServiceTask = __v0.IsCompletedSuccessfully
+					&& __v1.IsCompletedSuccessfully
+				? global::System.Threading.Tasks.Task.FromResult<global::SourceCrafter.DependencyInjection.Tests.IAuthService>(
+					new global::SourceCrafter.DependencyInjection.Tests.AuthService(
+						__v0.Result,
+						__v1.Result))
+				: CompleteAsync();
+
+			async global::System.Threading.Tasks.Task<global::SourceCrafter.DependencyInjection.Tests.IAuthService> CompleteAsync()
+			{
+				await global::System.Threading.Tasks.Task.WhenAll(__v0, __v1);
+				
+				return new global::SourceCrafter.DependencyInjection.Tests.AuthService(
+					__v0.Result,
+					__v1.Result);
+			}
 		}
+    }
+
+    private global::System.Threading.Tasks.Task<global::SourceCrafter.DependencyInjection.Tests.EmployeeController>? _employeeControllerTask;
+    private global::System.Threading.Tasks.Task<global::SourceCrafter.DependencyInjection.Tests.EmployeeController> GetEmployeeControllerAsync()
+    {
+        if(_employeeControllerTask is not null) return _employeeControllerTask;
+					
+		lock(this)
+		{
+			if(_employeeControllerTask is not null) return _employeeControllerTask;
+
+			var __v0 = GetAuthServiceAsync();
+			var __v1 = GetDatabaseAsync();
+			var __v2 = CountAsyncCached;
+			var __v3 = ResolveRequestIdTaskCached;
+
+			return _employeeControllerTask = __v0.IsCompletedSuccessfully
+					&& __v1.IsCompletedSuccessfully
+					&& __v2.IsCompletedSuccessfully
+					&& __v3.IsCompletedSuccessfully
+				? global::System.Threading.Tasks.Task.FromResult<global::SourceCrafter.DependencyInjection.Tests.EmployeeController>(
+					new global::SourceCrafter.DependencyInjection.Tests.EmployeeController(
+						__v0.Result,
+						__v1.Result,
+						__v2.Result,
+						__v3.Result))
+				: CompleteAsync();
+
+			async global::System.Threading.Tasks.Task<global::SourceCrafter.DependencyInjection.Tests.EmployeeController> CompleteAsync()
+			{				
+				return new global::SourceCrafter.DependencyInjection.Tests.EmployeeController(
+					await __v0.ConfigureAwait(false),
+					__v1.Result /* resolved previously by param 0 */,
+					__v2.Result /* resolved previously by param 0 */,
+					__v3.Result /* resolved previously by param 0 */);
+			}
+		}
+    }
+
+	public Scoped CreateScope() => new();
+	
+	public class Scoped : Server	
+	{
+		public new global::System.Threading.Tasks.Task<int> CountAsyncCached 
+			=> base.CountAsyncCached;
+
+		public new global::System.Threading.Tasks.ValueTask<global::System.Guid> ResolveRequestIdTaskCached 
+			=> base.ResolveRequestIdTaskCached;
+
+		public new global::System.Threading.Tasks.Task<global::SourceCrafter.DependencyInjection.Tests.IAuthService> GetAuthServiceAsync() 
+			=> base.GetAuthServiceAsync();
+
+		public new global::System.Threading.Tasks.Task<global::SourceCrafter.DependencyInjection.Tests.EmployeeController> GetEmployeeControllerAsync() 
+			=> base.GetEmployeeControllerAsync();
+
+		public override global::System.Threading.Tasks.ValueTask DisposeAsync() => base.DisposeAsync();
 	}
+
+	public virtual global::System.Threading.Tasks.ValueTask DisposeAsync()
+	{
+        return _authServiceTask.TryDisposeAsync();
+	}
+
+}
+
+public static class ServerExtensions
+{
+    [global::System.Runtime.CompilerServices.InterceptsLocation(1, "BRzaMNjSxBNQhAv1dHJDmtUBAABUZXN0cy5jcw==")] //D:\Code\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.Tests\Tests.cs(20,37)
+    public static global::SourceCrafter.DependencyInjection.Tests.AppSettings CallSingletonSettings(this global::System.IServiceProvider provider)
+        => ((global::SourceCrafter.DependencyInjection.Tests.Server)provider).Settings;
+
+    [global::System.Runtime.CompilerServices.InterceptsLocation(1, "BRzaMNjSxBNQhAv1dHJDmlwDAABUZXN0cy5jcw==")] //D:\Code\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.Tests\Tests.cs(30,48)
+    public static global::System.Threading.Tasks.Task<global::SourceCrafter.DependencyInjection.Tests.EmployeeController> CallScopedGetEmployeeControllerAsync(this global::System.IServiceProvider provider)
+        => ((global::SourceCrafter.DependencyInjection.Tests.Server.Scoped)provider).GetEmployeeControllerAsync();
 }
 ```
 
