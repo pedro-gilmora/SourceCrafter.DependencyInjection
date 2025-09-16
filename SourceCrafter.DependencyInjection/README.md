@@ -11,6 +11,10 @@
 - **Disposability Management**: Control how services are disposed with customizable `Disposability` settings. It scales at compile time according the disposability. 
   If there are IDisposable services and just having a single one IAsynDiposable, automatically the service is async disposable
 - **Advanced Configuration Options**: Define settings like resolver method name formatting, caching, and more through attribute parameters.
+- **Task dependencies resolver**: Any task or value task as factory or as dependency parameter are resolved as cached. Even cached if not transient
+- **GetService<T> & GetRequiredService<T> calls**: like extensions for IServiceProvider just as redirections to compiled resolvers
+
+	Eg: (`await scope.GetRequiredService<Task<EmployeeController>>()`)[https://github.com/pedro-gilmora/SourceCrafter.DependencyInjection/blob/3f02bd85733234e8af6a4eabdc41cb35407ee775/SourceCrafter.DependencyInjection.Tests/Tests.cs#L30]
 ---
 
 ## Installation
