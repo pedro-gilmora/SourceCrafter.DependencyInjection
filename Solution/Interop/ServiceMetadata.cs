@@ -21,7 +21,7 @@ internal sealed class ServiceMetadata
     /// <summary>
     /// Obtiene o establece la clave del servicio
     /// </summary>
-    internal string Key { get; set; } = string.Empty;
+    internal string Key = string.Empty;
 
     /// <summary>
     /// Obtiene o establece la capacidad de disposición del servicio
@@ -86,20 +86,20 @@ internal sealed class ServiceMetadata
     /// <summary>
     /// Obtiene o establece el nombre completo del tipo
     /// </summary>
-    internal string FullTypeName { get; set; } = string.Empty;
+    internal string FullTypeName = string.Empty;
 
     /// <summary>
     /// Obtiene o establece el nombre del método de resolución
     /// </summary>
-    internal string ResolverMethodName { get; set; } = string.Empty;
+    internal string ResolverMethodName= string.Empty;
 
     /// <summary>
     /// Obtiene o establece el nombre del campo de caché
     /// </summary>
-    internal string CacheField { get; set; } = string.Empty;
+    internal string CacheField = string.Empty;
 
     /// <summary>
     /// Obtiene o establece el nombre del tipo de exportación
     /// </summary>
-    internal string ExportTypeName { get; set; } = string.Empty;
+    internal string ExportTypeName = string.Empty;
 } 

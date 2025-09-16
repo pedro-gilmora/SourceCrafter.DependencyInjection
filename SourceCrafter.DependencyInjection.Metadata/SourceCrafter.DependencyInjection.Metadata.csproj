@@ -8,7 +8,22 @@
 		<DefineConstants>$(DefineConstants);DISG_META</DefineConstants>
 		<Company>AsereHighDev</Company>
 		<PackageOutputPath>../packaging</PackageOutputPath>
-		<Version>1.25.211.107</Version>
+		<Version>
+			$([System.Convert]::ToUInt16(
+				$([MSBuild]::Add(
+					$([System.DateTime]::Now.Year),
+					-2024
+				))
+			)).
+			$([System.DateTime]::Now.ToString('yy')).
+			$([System.DateTime]::Now.DayOfYear).
+			$([System.Convert]::ToUInt16(
+				$([MSBuild]::Divide(
+					$([System.DateTime]::Now.TimeOfDay.TotalMinutes),
+					15
+				))
+			))
+		</Version>
 		<Title>Truly compile-time depedency injection metadata</Title>
 		<Description>Attributes for compile-time dependency injection library utilizing attributes to simplify and automate service registration</Description>
 		<PackageProjectUrl>https://github.com/pedro-gilmora/SourceCrafter.DependencyInjection/</PackageProjectUrl>

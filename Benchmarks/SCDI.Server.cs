@@ -8,7 +8,7 @@ namespace SourceCrafter.DependencyInjection.Tests
     [Transient<AppSettings>]
     [Singleton<Database>]
     [Scoped<AuthService>]
-    public sealed partial class ServerSCDI
+    public partial class ServerSCDI
     {
         internal static ValueTask<int> ResolveAsync(CancellationToken _)
         {

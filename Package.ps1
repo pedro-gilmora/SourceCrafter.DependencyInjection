@@ -146,6 +146,5 @@ PACKER: Testing projects
         dotnet clean $PWD/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
     }
     
-    dotnet build $PWD/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
-    dotnet test $PWD/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release /v:d
+    dotnet test $PWD/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj -c Release
 }

@@ -24,14 +24,13 @@
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<Configurations>Debug;Release;Pack;DEBUG_SG;DISG_HOST;DISG</Configurations>
 		<DefineConstants>$(DefineConstants);DISG_HOST;DISG</DefineConstants>
-		<IncludeBuildOutput Condition="$(Configuration) == 'Release'">false</IncludeBuildOutput>
+		<IncludeBuildOutput>false</IncludeBuildOutput>
 		<Company>AsereHighDev</Company>
 		<PackageOutputPath>../packaging</PackageOutputPath>
 		<Version>$(PackageVersion)</Version>
 		<Title>Truly compile-time depedency injection</Title>
-		<Description>Compile-time dependency injection library utilizing attributes to simplify and automate service registration</Description>
+		<Description>Base Compile-time dependency injection library utilizing attributes to simplify and automate service registration</Description>
 		<PackageProjectUrl>https://github.com/pedro-gilmora/SourceCrafter.DependencyInjection/</PackageProjectUrl>
-		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<RepositoryUrl>https://github.com/pedro-gilmora/SourceCrafter.DependencyInjection/</RepositoryUrl>
 		<PackageTags>compile-time, dependency injection</PackageTags>
 	</PropertyGroup>
@@ -42,43 +41,31 @@
 
 	<ItemGroup>
 		<PackageReference Include="IndexRange" Version="1.0.3" PrivateAssets="all" />
-		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0">
+		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.4">
 		  <PrivateAssets>all</PrivateAssets>
 		  <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
-		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" PrivateAssets="all" />
 		<PackageReference Include="System.Diagnostics.Tools" Version="4.3.0" PrivateAssets="all" />
-		<PackageReference Include="System.Memory" Version="4.5.5" Private="True" PrivateAssets="all" />
+		<PackageReference Include="System.Memory" Version="4.5.5" PrivateAssets="all" />
 		<PackageReference Include="System.Runtime.InteropServices" PrivateAssets="all" Version="4.3.0" />
 	</ItemGroup>
 
 	<ItemGroup>
-		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-		<None Include="..\README.md">
-		  <Pack>True</Pack>
-		  <PackagePath>\</PackagePath>
-		</None>
-		<Compile Include="..\Solution\Utils\Map.cs">
-			<Link>Utils\Map.cs</Link>
-		</Compile>
-
-		<Compile Include="..\Solution\Utils\Set.cs">
-			<Link>Utils\Set.cs</Link>
-		</Compile>
-	</ItemGroup>
-
-	<!--<ItemGroup>
 		<Compile Include="..\Solution\Base\*.cs">
 			<Link>Base\%(RecursiveDir)%(Filename)%(Extension)</Link>
+		</Compile>
+		<Compile Include="..\Solution\Utils\*.cs">
+			<Link>Utils\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
 		<Compile Include="..\Solution\Metadata\*.cs">
 			<Link>Metadata\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
-		<Compile Include="..\Solution\Interop\*.cs">
+		<Compile Include="..\Solution\Interop\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/Interop/" BuildAction="Compile">
 			<Link>Interop\%(RecursiveDir)%(Filename)%(Extension)</Link>
 		</Compile>
-	</ItemGroup>-->
-	
+	</ItemGroup>
+
 	<!--<ItemGroup Condition="$(Configuration) != 'Release'">
 		<None Include="..\Solution\Metadata\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/Metadata" BuildAction="Compile"/>
 	</ItemGroup>-->
@@ -92,5 +79,5 @@
 			<TargetPathWithTargetPlatformMoniker Include="$(OutputPath)\SourceCrafter.DependencyInjection.Interop.dll" IncludeRuntimeDependency="true" />
 		</ItemGroup>
 	</Target>-->
-
+	
 </Project>

@@ -14,7 +14,8 @@
     <PackageReference Include="BenchmarkDotNet" Version="0.14.0" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
     <PackageReference Include="Jab" Version="0.10.2" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
     <PackageReference Include="MrMeeseeks.DIE" Version="3.3.1" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="SourceCrafter.DependencyInjection" Version="[1.25.213.18]" OutputItemType="Analyzer" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.Metadata" Version="[1.25.213.18]" />
+    <PackageReference Include="SourceCrafter.DependencyInjection" Version="[1.25.257.49]" OutputItemType="Analyzer" />
+    <PackageReference Include="SourceCrafter.DependencyInjection.Metadata" Version="[1.25.257.49]" />
+    <PackageReference Include="SharedMemory" Version="2.3.2" />
   </ItemGroup>
 </Project>

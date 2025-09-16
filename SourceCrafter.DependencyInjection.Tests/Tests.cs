@@ -1,5 +1,9 @@
 ﻿using FluentAssertions;
 
+using Microsoft.Extensions.DependencyInjection;
+
+using System.Runtime.CompilerServices;
+
 using Xunit;
 
 namespace SourceCrafter.DependencyInjection.Tests
@@ -11,20 +15,24 @@ namespace SourceCrafter.DependencyInjection.Tests
         public async Task Test2()
         {
             await using Server serverContainer = new();
+            //IServiceProvider serviceProvider = null!;
 
-            serverContainer.GetDatabase().TrySave(out var setting1);
+            var e = serverContainer.GetRequiredService<AppSettings>();
 
-            setting1.Should().Be("Value1");
+            var db = await serverContainer.GetDatabaseAsync();
+            db.TrySave(out var setting1);
 
-            await using var scope = serverContainer.CreateScope();
+            setting1.Should().Be("Value3");
 
-            var database = serverContainer.GetDatabase();
-            var employeeService2 = await serverContainer.GetEmployeeServiceAsync();
+            await using Server.Scoped scope = serverContainer.CreateScope();
+
+            var database = await serverContainer.GetDatabaseAsync();
+            var employeeService2 = await scope.GetRequiredService<Task<EmployeeController>>();
             var authService = await scope.GetAuthServiceAsync();
 
             authService.Database.TrySave(out setting1);
 
-            setting1.Should().Be("Value1");
+            setting1.Should().Be("Value3");
         }
     }
 }

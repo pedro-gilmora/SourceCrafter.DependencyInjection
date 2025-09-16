@@ -1,4 +1,6 @@
-﻿using System;
+﻿using SourceCrafter.DependencyInjection.Attributes;
+
+using System;
 
 namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
 {
@@ -15,25 +17,27 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
         string key = "",
         bool optional = true,
         bool reloadOnChange = true,
-        string nameFormat = "Get{0}Configuration",
+        string nameFormat = "{0}Configuration",
         bool handleEnviroments = true,
         Disposability disposability = Disposability.Disposable
     ) : Attribute;
     //: SingletonAttribute<IConfiguration>(source: nameof(ConfigurationResolver.GetJsonConfiguration));
 
     [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = false)]
-    
+
 #if DISG_MSCONF_META
     public
 #else
-    internal 
+    internal
 #endif
     sealed class JsonSettingAttribute(
-        string path, 
+        string path,
         Lifetime lifetime = Lifetime.Singleton,
+        //DI service key
         string key = "",
-        string nameFormat = "Get{0}Settings",
-        string configKey = ""
+        string nameFormat = "{0}Settings",
+        string configKey = "",
+        bool nullable = false
     ) : Attribute;
 
     [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
@@ -46,45 +50,11 @@ namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata
     sealed class JsonSettingAttribute<T>(
         string path,
         Lifetime lifetime = Lifetime.Singleton,
+        //DI service key
         string key = "",
-        string nameFormat = "Get{0}Settings",
-        string configKey = ""
+        string nameFormat = "{0}Settings",
+        string configKey = "",
+        bool nullable = false
     ) : Attribute;
-#pragma warning restore CS9113 // Parameter is unread.
-
-    //public class ConfigurationResolver
-    //{
-    //    static readonly Map<string, IConfiguration> configurations = new(StringComparer.Ordinal);
-    //    static readonly object _locker = new();
-
-    //    public static IConfiguration GetJsonConfiguration(
-    //        IHostEnvironment env,
-    //        string filePath,
-    //        bool optional,
-    //        bool reloadOnChange)
-    //    {
-    //        filePath = Path.GetFullPath(filePath);
-
-    //        ref var existingOrNew = ref configurations.GetValueOrAddDefault(filePath, out var exists);
-
-    //        if (exists) return existingOrNew!;
-
-    //        lock (_locker)
-    //        {
-    //            return existingOrNew ??= new ConfigurationBuilder()
-    //                .AddJsonFile($"{filePath}.{env.EnvironmentName}.json", optional, reloadOnChange)
-    //                .AddJsonFile(filePath, optional, reloadOnChange)
-    //                .Build();
-    //        }
-    //    }
-
-    //    public static TSetting GetJsonSetting<TSetting>(string key, IConfiguration? config = null) where TSetting : new()
-    //    {
-    //        TSetting inst = new();
-
-    //        config?.Bind(key, inst);
-
-    //        return inst;
-    //    }
-    //}
+#pragma warning restore CS9113
 }
