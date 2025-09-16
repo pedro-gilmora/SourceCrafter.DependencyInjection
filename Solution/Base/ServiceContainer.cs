@@ -128,7 +128,7 @@ internal sealed class ServiceContainer
             var exportTypeFullName = depInfo.InterfaceType?.ToGlobalNamespaced() ?? typeName;
             var exportTypeHashCode = SymbolEqualityComparer.Default.GetHashCode(depInfo.InterfaceType ?? type);
 
-            ref var existingOrNew = ref ServicesMap.GetValueOrAddDefault((depInfo.Lifetime, exportTypeHashCode, depInfo.KeyHash), out var exists)!;
+            ref var existingOrNew = ref ServicesMap.GetValueRefOrAddDefault((depInfo.Lifetime, exportTypeHashCode, depInfo.KeyHash), out var exists)!;
 
             if (exists)
             {

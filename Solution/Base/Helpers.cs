@@ -386,7 +386,7 @@ namespace SourceCrafter.DependencyInjection
         {
             var existing = ToMetadataLongName(symbol);
 
-            ref var count = ref uniqueName.GetValueOrAddDefault(existing, out var exists);
+            ref var count = ref uniqueName.GetValueRefOrAddDefault(existing, out var exists);
 
             if (exists)
             {
@@ -587,7 +587,7 @@ namespace SourceCrafter.DependencyInjection
 
             string id = Sanitize(type).Replace(" ", "").Capitalize();
 
-            ref var idOut = ref dependencyRegistry.GetValueOrAddDefault((lifeTime, hashCode, key), out var exists);
+            ref var idOut = ref dependencyRegistry.GetValueRefOrAddDefault((lifeTime, hashCode, key), out var exists);
 
             if (exists)
             {

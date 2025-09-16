@@ -16,7 +16,7 @@ public abstract class Set<TValue> : IEnumerable<TValue>
             ? default(TKey) is int or short or byte or uint or ushort
                 ? e => Convert.ToInt32(e)
                 : e => Convert.ToInt32(EqualityComparer<TKey>.Default.GetHashCode(e))
-            : e => Convert.ToInt32(_comparer.GetHashCode(e));
+            : _comparer.GetHashCode;
 
         Func<TKey, TKey, bool> equals = _comparer is null
             ? default(TKey) is int or short or long or byte or uint or ushort or ulong or double or float
@@ -31,9 +31,11 @@ public abstract class Set<TValue> : IEnumerable<TValue>
         };
     }
 
+    public abstract int Count { get; }
+
     public abstract bool TryAdd(TValue value);
 
-    public ref TValue? GetOrAddDefault<TKey>(TKey key, out bool exists)
+    public ref TValue? GetValueRefOrAddDefault<TKey>(TKey key, out bool exists)
     {
         return ref ((Set<TKey, TValue>)this).GetOrAddDefault(key, out exists);
     }
@@ -75,83 +77,17 @@ public class Set<TKey, TValue>(Func<TValue, TKey> _keyGenerator) : Set<TValue>
     private const int HashPrime = 101;
     private const int MaxPrimeArrayLength = 0x7FFFFFC3;
 
-    internal static ReadOnlySpan<int> Primes =>
-        [
-            3,
-            7,
-            11,
-            17,
-            23,
-            29,
-            37,
-            47,
-            59,
-            71,
-            89,
-            107,
-            131,
-            163,
-            197,
-            239,
-            293,
-            353,
-            431,
-            521,
-            631,
-            761,
-            919,
-            1103,
-            1327,
-            1597,
-            1931,
-            2333,
-            2801,
-            3371,
-            4049,
-            4861,
-            5839,
-            7013,
-            8419,
-            10103,
-            12143,
-            14591,
-            17519,
-            21023,
-            25229,
-            30293,
-            36353,
-            43627,
-            52361,
-            62851,
-            75431,
-            90523,
-            108631,
-            130363,
-            156437,
-            187751,
-            225307,
-            270371,
-            324449,
-            389357,
-            467237,
-            560689,
-            672827,
-            807403,
-            968897,
-            1162687,
-            1395263,
-            1674319,
-            2009191,
-            2411033,
-            2893249,
-            3471899,
-            4166287,
-            4999559,
-            5999471,
-            7199369
-        ];
+    internal static ReadOnlySpan<int> Primes => _primes;
 
-    public int Count => _count;
+    static int[] _primes = [
+        3,7,11,17,23,29,37,47,59,71,89,107,131,163,197,239,293,353,431,521,631,761,919,
+        1103,1327,1597,1931,2333,2801,3371,4049,4861,5839,7013,8419,10103,12143,14591,
+        17519,21023,25229,30293,36353,43627,52361,62851,75431,90523,108631,130363,156437,
+        187751,225307,270371,324449,389357,467237,560689,672827,807403,968897,1162687,
+        1395263,1674319,2009191,2411033,2893249,3471899,4166287,4999559,5999471,7199369
+    ];
+
+    public override int Count => _count;
 
     private int Initialize(int capacity)
     {
@@ -562,7 +498,7 @@ public class Set<TKey, TValue>(Func<TValue, TKey> _keyGenerator) : Set<TValue>
         public void Reset() => i = -1;
     }
 
-    public struct Entry 
+    public struct Entry
     {
         public TKey Key;
         public TValue Value;

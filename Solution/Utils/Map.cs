@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System;
 using System.Collections;
+using System.Linq;
 
 namespace SourceCrafter.DependencyInjection;
 
@@ -159,7 +160,7 @@ internal class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
         return candidate == 2;
     }
     // TODO: apply nullability attributes
-    public virtual ref TValue? GetValueOrAddDefault(TKey key, out bool exists)
+    public virtual ref TValue? GetValueRefOrAddDefault(TKey key, out bool exists)
     {
         Entry[]? entries = _entries!;
 
@@ -489,20 +490,41 @@ internal class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
         return highbits;
     }
 
-    public ValueEnumerator Values => new (this);
+    public ValueCollection Values => new(_entries ?? [], _count);
 
-    public ref struct ValueEnumerator(Map<TKey, TValue> map, int i = -1)
+    public readonly struct ValueCollection : IEnumerable<TValue>
     {
+        private readonly Entry[] vals;
+        readonly int count;
 
-        public readonly TValue Current => map._entries![i].Value;
+        internal ValueCollection(Entry[] vals, int count)
+        {
+            this.vals = vals;
+            this.count = count;
+        }
 
-        public readonly void Dispose() { }
+        public TValue this[int index] => vals![index].Value;
+        public readonly IEnumerator<TValue> GetEnumerator() => new ValueEnumerator(vals ?? [], count);
+
+        readonly IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    internal struct ValueEnumerator(Entry[] vals, int count, int i = -1) : IEnumerator<TValue>
+    {
+        public readonly TValue Current => vals![i].Value;
+
+        readonly object IEnumerator.Current => Current!;
+
+        public void Dispose()
+        {
+            i = -1;
+        }
 
         public readonly ValueEnumerator GetEnumerator() => this;
-        
+
         public bool MoveNext()
         {
-            return ++i < map._count;
+            return ++i < count;
         }
 
         public void Reset()
@@ -511,13 +533,32 @@ internal class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
         }
     }
 
-    public KeyEnumerator Keys => new(_entries!, _count);
+    public KeyCollection Keys => new(_entries ?? [], _count);
 
-    public ref struct KeyEnumerator(Entry[] vals, int count, int i = -1)
+    public readonly struct KeyCollection : IEnumerable<TKey>
+    {
+        private readonly Entry[] vals;
+        readonly int count;
+
+        internal KeyCollection(Entry[] vals, int count)
+        {
+            this.vals = vals;
+            this.count = count;
+        }
+
+        public TKey this[int index] => vals![index].Key;
+        public readonly IEnumerator<TKey> GetEnumerator() => new KeyEnumerator(vals ?? [], count);
+
+        readonly IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    internal struct KeyEnumerator(Entry[] vals, int count, int i = -1) : IEnumerator<TKey>
     {
         public readonly TKey Current => vals[i].Key;
 
-        public readonly void Dispose() { }
+        object IEnumerator.Current => Current!;
+
+        public void Dispose() { Reset(); }
 
         public readonly KeyEnumerator GetEnumerator() => this;
 
@@ -651,5 +692,15 @@ internal class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
         internal uint id;
 
         public static implicit operator (TKey, TValue)(Entry entry) => (entry.Key, entry.Value);
+    }
+}
+
+internal static class MapExtensions
+{
+    internal static Map<TKey, TValue> ToMap<TKey, TValue>(this IEnumerable<TValue> values, Func<TValue, TKey> selector, IEqualityComparer<TKey>? keyComparer = null)
+    {
+        Map<TKey, TValue> map = new(keyComparer ?? EqualityComparer<TKey>.Default);
+        foreach (var value in values) map.TryAdd(selector(value), value);
+        return map;
     }
 }

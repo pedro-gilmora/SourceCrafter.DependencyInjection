@@ -144,7 +144,7 @@ using global::Microsoft.Extensions.Configuration;
                     {
                         var key = (configAttr.ConstructorArguments[1].Value?.ToString() ?? "").Trim();
 
-                        ref var configMethodName = ref methods.GetValueOrAddDefault(key, out var fileExists);
+                        ref var configMethodName = ref methods.GetValueRefOrAddDefault(key, out var fileExists);
 
                         if (fileExists) continue;
 
@@ -164,7 +164,7 @@ using global::Microsoft.Extensions.Configuration;
                             .Append(fieldName)
                             .Append(@" = null;
 
-    private ")
+    internal ")
                             .Append(IConfigurationType)
                             .Append(@" ")
                             .Append(configMethodName)
@@ -285,7 +285,7 @@ using global::Microsoft.Extensions.Configuration;
             }
 
             code.Append(@"
-    private ");
+    internal ");
 
             //if (lifetime is Lifetime.Singleton)
             //    code.Append("static ");
