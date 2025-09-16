@@ -1,4 +1,4 @@
-# SourceCrafter.DependencyInjection - Truly compile-time depedency injection generator
+# SourceCrafter.DependencyInjection - Fastest & truly compile-time depedency injection generator
 
 ## Overview
 
