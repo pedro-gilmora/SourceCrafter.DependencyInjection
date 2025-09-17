@@ -9,19 +9,16 @@ namespace SourceCrafter.DependencyInjection.Tests
     [JsonSetting<AppSettings>("AppSettings")]
     [Scoped("count", source: nameof(CountAsync))]
     [Scoped("reqId", source: nameof(ResolveRequestIdTask))]
+    [Scoped("finalCount", source: nameof(GetCount))]
     [Singleton<IDatabase, Database>]
     [Scoped<IAuthService, AuthService>]
     [Scoped<EmployeeController>]
-    public partial class Server : IServiceProvider
+    public interface IServer : IServiceProvider
     {
         static Task<int> CountAsync() => Task.FromResult(1);
-
-        public object? GetService(Type serviceType)
-        {
-            throw new NotImplementedException();
-        }
-
         static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
+
+        static int GetCount(int count) => count;
     }
 
     #region TestType

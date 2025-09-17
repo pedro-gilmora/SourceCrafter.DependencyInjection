@@ -122,7 +122,7 @@ using global::Microsoft.Extensions.Configuration;
                 ClassDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var argList } =>
                     ($"{mods} {keyword}".TrimStart(), $"{identifier}{argList}"),
                 InterfaceDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var argList } =>
-                    ($"{mods} {keyword}".TrimStart(), $"{identifier.ValueText[1..]}{argList}"),
+                    ($"{mods} partial class".TrimStart(), $"{identifier.ValueText[1..]}{argList}"),
                 _ => ("", "")
             };
 

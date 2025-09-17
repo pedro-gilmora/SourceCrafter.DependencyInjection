@@ -168,9 +168,10 @@ internal static class Extensions
         var declaration = providerType.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
         var providerTypeId = SymbolEqualityComparer.Default.GetHashCode(providerType);
         var providerFullTypeName = providerType.ToGlobalNamespaced();
+        var isInterfaceProvider = providerType.TypeKind == TypeKind.Interface;
         //var providerId = SymbolEqualityComparer.Default.GetHashCode(providerType);
         var compilationId = compilation.GetHashCode();
-        var providerTypeName = providerType.ToGlobalNamespaced();
+        var providerTypeName = providerType.ToTypeNameFormat();
         var attributes = providerType.GetAttributes();
         bool
             hasScopedDependencies = false,
@@ -218,6 +219,7 @@ internal static class Extensions
                      isValid = false,
                     isFactory = false,
                     hasAsyncDependencies = false,
+                    isStaticFactory = false,
                     //isTransient = false,
                     useWhenAll = false,
                     needsCancelToken = false;
@@ -741,53 +743,6 @@ internal static class Extensions
                                 singletonDisposers
                                     .Add(disposability is Disposability.Disposable ? BuildDisposerStatement : BuildAsyncDisposerStatment);
                         }
-
-                        void BuildDisposerStatement(bool awaits = true)
-                        {
-                            code.Append(@"
-        ");
-
-                            code.Append(backingFieldName);
-
-                            code.Append("?.");
-
-                            //if (asyncType > 0) code.Append("Try");
-
-                            code.Append("Dispose();");
-                        }
-
-                        void BuildAsyncDisposerStatment(bool awaits = true)
-                        {
-                            code.Append(@"
-        ");
-
-                            if (asyncType > 0)
-                            {
-                                code.Append(awaits ? "await " : "return ")
-                                    .Append(backingFieldName).Append(".TryDisposeAsync();");
-                            }
-                            else
-                            {
-                                if (awaits)
-                                {
-
-                                    code.Append("if(").Append(backingFieldName)
-                                        .Append(type.IsValueType ? ".HasValue) " : " is not null) ")
-                                        .Append("await ")
-                                        .Append(backingFieldName);
-
-                                    if (type.IsValueType) code.Append(".Value");
-
-                                    code.Append(".DisposeAsync();");
-                                }
-                                else
-                                {
-                                    code.Append("return ")
-                                        .Append(backingFieldName)
-                                        .Append("?.DisposeAsync() ?? default!;");
-                                }
-                            }
-                        }
                     }
 
                     code.Append(@"
@@ -796,19 +751,6 @@ internal static class Extensions
                     if (!isCached && (hasAsyncDependencies/* || (asyncType is not 0 && factory is not null)*/)) code.Append("async ");
 
                     BuildSignature();
-
-                    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-                    void BuildSignature()
-                    {
-                        code.Append(GetTypeName(exportTypeFullName)).Append(' ').Append(methodName);
-
-                        if (asyncType is not 0 && (hasAsyncDependencies || needsCancelToken))
-                        {
-                            code.Append("(");
-                            if (needsCancelToken) code.Append("global::System.Threading.CancellationToken cancellationToken = default");
-                            code.Append(")");
-                        }
-                    }
 
                     if (lifetime is Lifetime.Scoped) scopedExposers.Add(BuildExposedSignature);
 
@@ -885,7 +827,7 @@ internal static class Extensions
                         }
                         else
                         {
-                            var isAsyncEmptyFactory = factory is not null && !needsCancelToken;
+                            var isAsyncEmptyFactory = factory is not null && !(hasAsyncDependencies || needsCancelToken);
 
                             code.Append(@"
         if(").Append(backingFieldName).Append(asyncType is AsyncType.ValueTask ? ".HasValue" : " is not null").Append(") return ").Append(backingFieldName);
@@ -996,6 +938,66 @@ internal static class Extensions
                     }
                 }
 
+                void BuildDisposerStatement(bool awaits = true)
+                {
+                    code.Append(@"
+        ");
+
+                    code.Append(backingFieldName);
+
+                    code.Append("?.");
+
+                    //if (asyncType > 0) code.Append("Try");
+
+                    code.Append("Dispose();");
+                }
+
+                void BuildAsyncDisposerStatment(bool awaits = true)
+                {
+                    code.Append(@"
+        ");
+
+                    if (asyncType > 0)
+                    {
+                        code.Append(awaits ? "await " : "return ")
+                            .Append(backingFieldName).Append(".TryDisposeAsync();");
+                    }
+                    else
+                    {
+                        if (awaits)
+                        {
+
+                            code.Append("if(").Append(backingFieldName)
+                                .Append(type.IsValueType ? ".HasValue) " : " is not null) ")
+                                .Append("await ")
+                                .Append(backingFieldName);
+
+                            if (type.IsValueType) code.Append(".Value");
+
+                            code.Append(".DisposeAsync();");
+                        }
+                        else
+                        {
+                            code.Append("return ")
+                                .Append(backingFieldName)
+                                .Append("?.DisposeAsync() ?? default!;");
+                        }
+                    }
+                }
+
+                [MethodImpl(MethodImplOptions.AggressiveInlining)]
+                void BuildSignature()
+                {
+                    code.Append(GetTypeName(exportTypeFullName)).Append(' ').Append(methodName);
+
+                    if (asyncType is not 0 && (hasAsyncDependencies || needsCancelToken))
+                    {
+                        code.Append("(");
+                        if (needsCancelToken) code.Append("global::System.Threading.CancellationToken cancellationToken = default");
+                        code.Append(")");
+                    }
+                }
+
                 string GetTypeName(string typeName)
                 {
                     //{(initialAsyncType > 0 && asyncType > initialAsyncType ? "Value" : "")}
@@ -1056,7 +1058,7 @@ internal static class Extensions
                     {
                         case IMethodSymbol { ContainingType: { } containingType, IsStatic: { } isStatic } method:
 
-                            if (isStatic) AppendFactoryContainingType(code, containingType);
+                            AppendFactoryContainingType(code, containingType, isStatic);
 
                             if (method is { ReturnType.Name: "Task" or "ValueTask", TypeArguments: { IsDefaultOrEmpty: false } and [{ } argType] }
                                 && SymbolEqualityComparer.Default.Equals(argType, type))
@@ -1084,7 +1086,7 @@ internal static class Extensions
 
                         case IPropertySymbol { IsIndexer: bool isIndexer, ContainingType: { } containingType, IsStatic: { } isStatic } prop:
 
-                            if (isStatic) AppendFactoryContainingType(code, containingType);
+                            AppendFactoryContainingType(code, containingType, isStatic);
 
                             if (isIndexer)
                             {
@@ -1105,7 +1107,7 @@ internal static class Extensions
 
                         case IFieldSymbol { ContainingType: { } containingType, IsStatic: { } isStatic } field:
 
-                            if (isStatic) AppendFactoryContainingType(code, containingType);
+                            AppendFactoryContainingType(code, containingType, isStatic);
 
                             code.Append(field.Name);
 
@@ -1120,12 +1122,17 @@ internal static class Extensions
                 }
 
 
-                void AppendFactoryContainingType(StringBuilder code, INamedTypeSymbol containingType)
+                void AppendFactoryContainingType(StringBuilder code, INamedTypeSymbol containingType, bool isStatic)
                 {
-                    if (SymbolEqualityComparer.Default.Equals(containingType, providerType))
+                    var comesFromCurrentProvider = SymbolEqualityComparer.Default.Equals(containingType, providerType);
+                    
+                    if (comesFromCurrentProvider && !isInterfaceProvider)
                         return;
 
-                    code.Append(containingType.ToGlobalNamespaced()).Append('.');
+                    if (isInterfaceProvider && !isStatic)
+                        code.Append("((").Append(comesFromCurrentProvider ? providerTypeName : providerFullTypeName).Append(")this)").Append('.');
+                    else if(isStatic)
+                        code.Append(comesFromCurrentProvider ? providerTypeName : providerFullTypeName).Append('.');
                 }
 
                 void AppendDefault(bool _ = false)
@@ -1230,11 +1237,12 @@ internal static class Extensions
 
                                 switch (model.GetSymbolInfo(methodRef.Expression))
                                 {
-                                    case { Symbol: (IFieldSymbol or IPropertySymbol) and { Kind: var kind } fieldOrProp }:
+                                    case { Symbol: (IFieldSymbol or IPropertySymbol) and { Kind: var kind, IsStatic: var isStatic } fieldOrProp }:
 
                                         factory = fieldOrProp;
                                         factoryKind = kind;
                                         isFactory = true;
+                                        isStaticFactory = isStatic;
                                         initialAsyncType = asyncType = ((fieldOrProp as IFieldSymbol)?.Type ?? ((IPropertySymbol)fieldOrProp).Type).TryGetAsyncType(out var returnType);
 
                                         if (returnType.TypeKind is TypeKind.Interface || returnType.IsAbstract)
@@ -1245,9 +1253,10 @@ internal static class Extensions
 
                                         continue;
 
-                                    case { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [IMethodSymbol { ReturnsVoid: false, IsStatic: true } method] }:
+                                    case { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [ IMethodSymbol { ReturnsVoid: false, IsStatic: var isStatic } method ] }:
 
                                         factory = method;
+                                        isStaticFactory = isStatic;
                                         factoryKind = SymbolKind.Method;
                                         defaultParamValues = method.Parameters;
                                         initialAsyncType = asyncType = method.ReturnType.TryGetAsyncType(out returnType);
@@ -1431,8 +1440,8 @@ internal static class Extensions
         {
             ClassDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var typeParamsList } =>
                 ($"{mods} {keyword}".TrimStart(), $"{identifier}{typeParamsList}"),
-            InterfaceDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var typeParamsList } =>
-                ($"{mods} {keyword}".TrimStart(), $"{identifier.ValueText[1..]}{typeParamsList}"),
+            InterfaceDeclarationSyntax { Modifiers: var mods, Identifier: { } identifier, TypeParameterList: var typeParamsList } =>
+                ($"{mods/*.Except([SyntaxFactory.Token(SyntaxKind.InterfaceKeyword)])*/} partial class".TrimStart(), $"{identifier.ValueText[1..]}{typeParamsList}"),
             _ => ("", "")
         };
 
@@ -1448,7 +1457,7 @@ internal static class Extensions
             _ => null
         };
 
-        AddDisposabilityInterface(containerDisposability);
+        AddDisposabilityInterface(containerDisposability, isInterfaceProvider);
 
         code.Append(@"
     public static string EnvironmentName => global::System.Environment.GetEnvironmentVariable(""DOTNET_ENVIRONMENT"") ?? ""Development"";
@@ -1485,9 +1494,9 @@ internal static class Extensions
             code.Append(@"
 	public Scoped CreateScope() => new();
 	
-	public class Scoped : ").Append(providerType.ToNameOnly());
+	public class Scoped : ").Append(typeName);
 
-            AddDisposabilityInterface(containerDisposability == scopedDisposability ? 0 : scopedDisposability, true);
+            AddDisposabilityInterface(containerDisposability == scopedDisposability ? 0 : scopedDisposability, false, true);
 
             foreach (var scopedExposer in scopedExposers)
             {
@@ -1598,11 +1607,15 @@ internal static class Extensions
 ");
         }
 
+        if (useInterceptors) code.Append(@"
+    
+    public object? GetService(global::System.Type serviceType) => throw new global::System.NotImplementedException();");
+
         code.Append(@"
 }
 ");
 
-        if (interceptors.Count > 0)
+        if (useInterceptors && interceptors.Count > 0)
         {
             code.Append(@"
 public static class ").Append(typeName).Append(@"Extensions
@@ -1672,7 +1685,7 @@ public static class ").Append(typeName).Append(@"Extensions
             }
         }
 
-        void AddDisposabilityInterface(Disposability disposability, bool isScoped = false)
+        void AddDisposabilityInterface(Disposability disposability, bool isInterface = false, bool isScoped = false)
         {
             var indent = isScoped ? "	" : null;
 
@@ -1680,21 +1693,25 @@ public static class ").Append(typeName).Append(@"Extensions
             {
                 case Disposability.Disposable:
 
-                    code.Append(isScoped ? "," : " :").Append(@" global::System.IDisposable	
+                    code.Append(isScoped ? "," : " :" + (isInterface ? " I" + typeName + ", "  : null)).Append(@" global::System.IDisposable	
 ").Append(indent).Append("{");
 
                     break;
 
                 case Disposability.AsyncDisposable:
 
-                    code.Append(isScoped ? "," : " :").Append(@" global::System.IAsyncDisposable	
+                    code.Append(isScoped ? "," : " :" + (isInterface ? " I" + typeName + ", " : null)).Append(@" global::System.IAsyncDisposable	
 ").Append(indent).Append("{");
 
                     break;
 
                 default:
                     code.Append(@"	
-").Append(indent).Append("{");
+").Append(indent);
+
+                    if (isInterface) code.Append(": I" + typeName);
+                    
+                    code.Append("{");
                     break;
             }
         }
@@ -1770,7 +1787,7 @@ public static class ").Append(typeName).Append(@"Extensions
             _ => (_ref: default(ISymbol)!, type: default(ITypeSymbol)!)
         }
                 is ({ } _ref, var type)
-            && ((type.Name is "Scoped" && type.ContainingType is not null ? type = type.ContainingType : type).GetAttributes().Any(IsGeneratedServiceContainer) 
+            && ((type.Name is "Scoped" && type.ContainingType is not null ? type = type.ContainingType : type).GetAttributes().Any(IsGeneratedServiceContainer)
                 || type.ToDisplayString().StartsWith("Microsoft.Extensions.DependencyInjection.IServiceScope")))
         {
             var clsId = SymbolEqualityComparer.Default.GetHashCode(type);
