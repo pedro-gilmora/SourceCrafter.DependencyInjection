@@ -25,7 +25,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class ServiceContainerAttribute : Attribute;
+        class ServiceContainerAttribute(string envName = "DOTNET_ENVIRONMENT") : Attribute;
 
         [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META

@@ -1,5 +1,7 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+
+using System;
 using System.Runtime.CompilerServices;
 
 [assembly: InternalsVisibleTo("SourceCrafter.DependencyInjection")]
@@ -44,8 +46,7 @@ internal static class ServiceContainerGeneratorDiagnostics
     internal static Diagnostic UnresolvedDependency(
         SyntaxNode invExpr,
         string providerClassName,
-        string typeFullName,
-        string? key)
+        string? typeFullName)
     {
         DiagnosticDescriptor rule = new(
             id: "SCDI03",
@@ -60,7 +61,7 @@ internal static class ServiceContainerGeneratorDiagnostics
         return Diagnostic.Create(
             rule,
             invExpr.GetLocation(),
-            $@"[{(key is { } ? key + ", " : null)}{typeFullName}]",
+            $@"[{typeFullName ?? "[Unknown Type]"}]",
             providerClassName);
     }
 
@@ -189,5 +190,23 @@ internal static class ServiceContainerGeneratorDiagnostics
             method.ToDisplayString(),
             type.ToDisplayString(),
             type.TypeKind is TypeKind.Interface || type.IsAbstract ? "base" : type.Kind.ToString().ToLower());
+    }
+
+    internal static Diagnostic UncoveredGenericResolver(MemberAccessExpressionSyntax method, string providerFullTypeName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI11",
+            title: "Generic service resolver support couldn't cover this call",
+            messageFormat: "Generic service {0} resolver support couldn't cover this call at container {1}",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true
+        );
+
+        return Diagnostic.Create(
+            rule,
+            method.GetLocation(),
+            method.Parent,
+            providerFullTypeName);
     }
 }
