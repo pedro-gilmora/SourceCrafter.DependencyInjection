@@ -312,7 +312,11 @@ internal static class Extensions
         {
 
             code.Append(@"
-	public Scoped CreateScope() => new();
+	public Scoped CreateScope() => new() { _root = this };
+
+	private ").Append(typeName).Append(@" _root = default!;
+
+	public ").Append(typeName).Append(@" Root { [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)] get => this; }    
 	
 	public class Scoped : ").Append(typeName);
 
@@ -340,6 +344,10 @@ internal static class Extensions
                 code.Append(scopedDisposeMethodName).Append(@"();");
 
                 code.Append(@"
+
+		public new ").Append(typeName).Append(@" Root { [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)] get => _root; }
+
+	    public new Scoped CreateScope() => new() { _root = _root };
 	}
 ");
                 if (scopedDisposers.Count > 0 && scopedDisposeMethodName is not null)
@@ -970,7 +978,7 @@ public static class ").Append(typeName).Append(@"Extensions
                                         break;
                                 }
 
-                                code.Append(" CallInterceptor").Append(++i).Append(@"(this global::System.IServiceProvider provider)
+                                code.Append(" InterceptorCall").Append(++i).Append(@"(this global::System.IServiceProvider provider)
         => ");
 
                                 if (isCached)
