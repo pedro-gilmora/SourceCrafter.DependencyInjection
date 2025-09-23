@@ -19,13 +19,21 @@ namespace SourceCrafter.DependencyInjection
 
     namespace Attributes
     {
-        [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct, AllowMultiple = true)]
+        [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct, AllowMultiple = false)]
 #if DISG_META
         public
 #else
         internal 
 #endif
         class ServiceContainerAttribute(string envName = "DOTNET_ENVIRONMENT") : Attribute;
+
+        [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = true)]
+#if DISG_META
+        public
+#else
+        internal 
+#endif
+        class RootAttribute : Attribute;
 
         [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META

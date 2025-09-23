@@ -28,6 +28,7 @@ public sealed class CodeGenerator : IIncrementalGenerator
 
     internal const string
             BaseAttributesNS = "SourceCrafter.DependencyInjection.Attributes",
+            GlobalBaseAttributeNS = $"global::{BaseAttributesNS}",
             ServiceContainerFullTypeName = $"{BaseAttributesNS}.ServiceContainerAttribute",
             CancelTokenFQMetaName = "System.Threading.CancellationToken",
             EnumFQMetaName = "global::System.Enum",
@@ -36,10 +37,10 @@ public sealed class CodeGenerator : IIncrementalGenerator
             SourceParamName = "source",
             ImplParamName = "impl",
             IfaceParamName = "iface",
-            SingletonAttr = $"global::{BaseAttributesNS}.SingletonAttribute",
-            ScopedAttr = $"global::{BaseAttributesNS}.ScopedAttribute",
-            TransientAttr = $"global::{BaseAttributesNS}.TransientAttribute",
-            DependencyAttr = $"global::{BaseAttributesNS}.DependencyAttribute",
+            SingletonAttr = $"{GlobalBaseAttributeNS}.SingletonAttribute",
+            ScopedAttr = $"{GlobalBaseAttributeNS}.ScopedAttribute",
+            TransientAttr = $"{GlobalBaseAttributeNS}.TransientAttribute",
+            DependencyAttr = $"{GlobalBaseAttributeNS}.DependencyAttribute",
             ServiceContainerAttr = $"global::{ServiceContainerFullTypeName}";
 
 
@@ -201,7 +202,7 @@ internal static class Extensions
             useInterceptors = providerType.AllInterfaces.Any(i => i.ToGlobalNamespaced() == "global::System.IServiceProvider");
 
         HashSet<string> externalAssemblies = [];
-        StringBuilder code = new();
+        StringBuilder code = new("#nullable enable\n");
         ResolverBuilder cancelDepInfo = new("Scoped CancellationToken token")
         {
             Key = (Lifetime.Transient, SymbolEqualityComparer.Default.GetHashCode(cancelTokenType), EmptyStringHashCode),
@@ -636,6 +637,14 @@ public static class ").Append(typeName).Append(@"Extensions
                 var paramAsyncType = prm.Type.TryGetAsyncType(out var paramType);
                 var paramTypeHashCode = paramType.ToGlobalNamespaced().GetHashCode();
 
+                if (paramType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == className || SymbolEqualityComparer.Default.Equals(paramType, providerType))
+                {
+                    var asksForRoot = prm.GetAttributes().Any(a => a.AttributeClass?.ToGlobalNamespaced() == $"{GlobalBaseAttributeNS}.RootAttribute");
+                    appendParams.Add(new(cancelDepInfo.Key, AppendProvider));
+                    continue;
+                    void AppendProvider(bool _) => code.Append(asksForRoot ? "Root" : "this");
+                }
+
                 if (SymbolEqualityComparer.Default.Equals(prm.Type, cancelTokenType))
                 {
                     needsCancelToken = true;
@@ -965,6 +974,7 @@ public static class ").Append(typeName).Append(@"Extensions
                             {
                                 code.Append(@"
     public static ");
+
                                 switch (asyncType)
                                 {
                                     case AsyncType.None:
@@ -1696,11 +1706,6 @@ public static class ").Append(typeName).Append(@"Extensions
                     return false;
                 }
             }
-
-            void AppendCancelToken(bool _)
-            {
-                code.Append("cancellationToken");
-            }
         }
 
         string SanitizeTypeName(ITypeSymbol type, Lifetime lifeTime, string key)
@@ -1754,6 +1759,11 @@ public static class ").Append(typeName).Append(@"Extensions
                         return char.ToUpperInvariant(typeName[0]) + typeName[1..].TrimEnd('?', '_');
                 }
             }
+        }
+
+        void AppendCancelToken(bool _)
+        {
+            code.Append("cancellationToken");
         }
 
         void AddDisposabilityInterface(Disposability disposability, bool isInterface = false, bool isScoped = false)

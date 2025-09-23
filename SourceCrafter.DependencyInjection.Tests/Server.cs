@@ -15,10 +15,11 @@ namespace SourceCrafter.DependencyInjection.Tests
     [Scoped<EmployeeController>]
     public interface IServer : IServiceProvider
     {
-        static Task<int> CountAsync() => Task.FromResult(1);
+        static Task<int> CountAsync(IServer _) => Task.FromResult(1);
+
         static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
 
-        static int GetCount(int count) => count;
+        static int GetCount(int count, [Root] Server _) => count;
     }
 
     #region TestType
