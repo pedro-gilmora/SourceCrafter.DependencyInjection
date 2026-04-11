@@ -26,7 +26,7 @@
 		<IncludeBuildOutput Condition="$(Configuration) == 'Release'">false</IncludeBuildOutput>
 		<Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>
 		<DefineConstants>$(DefineConstants);DISG</DefineConstants>
-		<PackageOutputPath>../packaging</PackageOutputPath>
+		<PackageOutputPath>../publish</PackageOutputPath>
 		<Version>$(PackageVersion)</Version>
 	</PropertyGroup>
 

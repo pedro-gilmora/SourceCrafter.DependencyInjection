@@ -7,7 +7,7 @@
 		<Nullable>enable</Nullable>
 		<DefineConstants>$(DefineConstants);DISG_MSCONF_META</DefineConstants>
 		<Company>AsereHighDev</Company>
-		<PackageOutputPath>../packaging</PackageOutputPath>		
+		<PackageOutputPath>../publish</PackageOutputPath>		
 		<Version>
 			$([System.Convert]::ToUInt16(
 				$([MSBuild]::Add(

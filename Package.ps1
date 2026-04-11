@@ -78,17 +78,17 @@ if($hasCounts -or $forcePack -eq 'true')
     Write-Output "
 PACKER: Test project references where updated
 "
-    if(-not (Test-Path "$PWD/packaging/"))
+    if(-not (Test-Path "$PWD/publish/"))
     {
         Write-Host "PACKER: Created packaging output folder
 "
-        New-Item -ItemType Directory -Path "$PWD/packaging/"
+        New-Item -ItemType Directory -Path "$PWD/publish/"
     }
 
     if($clean -eq "true")
     {
         Write-Information "PACKER: Removing packages"
-        Remove-Item -Path "$PWD/packaging/*.*" -recurse
+        Remove-Item -Path "$PWD/publish/*.*" -recurse
     }
 
     if($pack -eq 'true')
@@ -103,7 +103,7 @@ PACKER: Initializing...
                 Write-Output '
     PACKER: Creating local source "DILocalPackages"...
 '
-                dotnet nuget add source "$PWD/packaging" -n DILocalPackages
+                dotnet nuget add source "$PWD/publish" -n DILocalPackages
             }
             
             Write-Output '
@@ -135,7 +135,7 @@ PACKER: Testing projects
     {
         if(dotnet nuget list source | Select-String -Pattern 'LocalPackages')
         {
-            dotnet nuget add source $PWD/packaging -n DILocalPackages
+            dotnet nuget add source $PWD/publish -n DILocalPackages
         }        
         
         dotnet restore $PWD/SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj

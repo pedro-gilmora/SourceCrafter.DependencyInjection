@@ -26,7 +26,7 @@
 		<DefineConstants>$(DefineConstants);DISG_HOST;DISG</DefineConstants>
 		<IncludeBuildOutput Condition="$(Configuration) == 'Release'">false</IncludeBuildOutput>
 		<Company>AsereHighDev</Company>
-		<PackageOutputPath>../packaging</PackageOutputPath>
+		<PackageOutputPath>../publish</PackageOutputPath>
 		<Version>$(PackageVersion)</Version>
 		<Title>Truly compile-time depedency injection</Title>
 		<Description>Compile-time dependency injection library utilizing attributes to simplify and automate service registration</Description>
