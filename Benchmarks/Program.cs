@@ -22,20 +22,20 @@ public class Program
         BenchmarkDotNet.Running.BenchmarkRunner.Run<Program>();
     }
 
-    [Benchmark]
-    public async Task Manual()
-    {
-        await using var container = new SourceCrafter.DependencyInjection.Tests.ServerSCDI();
-        await using var scope = container.CreateScope();
-        using var authService = scope.GetAuthService();
-    }
+    //[Benchmark]
+    //public async Task Manual()
+    //{
+    //    await using var container = new SourceCrafter.DependencyInjection.Tests.ServerSCDI();
+    //    await using var scope = container.CreateScope();
+    //    using var authService = scope.GetAuthService();
+    //}
 
     [Benchmark]
     public async Task SourceCrafter_DependencyInjection()
     {
         await using var container = new SourceCrafter.DependencyInjection.Tests.ServerSCDI();
         await using var scope = container.CreateScope();
-        using var authService = scope.GetAuthService();
+        using var authService = scope.AuthService;
     }
 
     [Benchmark]
