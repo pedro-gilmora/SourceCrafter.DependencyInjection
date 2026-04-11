@@ -37,7 +37,7 @@ public abstract class Set<TValue> : IEnumerable<TValue>
 
     public ref TValue? GetValueRefOrAddDefault<TKey>(TKey key, out bool exists)
     {
-        return ref ((Set<TKey, TValue>)this).GetOrAddDefault(key, out exists);
+        return ref ((Set<TKey, TValue>)this).GetValueRefOrAddDefault(key, out exists);
     }
 
     public ref TValue GetValueOrInsertor<TKey>(TKey key, out Action<TValue> insertor)
@@ -206,22 +206,25 @@ public class Set<TKey, TValue>(Func<TValue, TKey> _keyGenerator) : Set<TValue>
         return true;
     }
 
-    public ref TValue? GetOrAddDefault(TKey key, out bool exists)
+    public ref TValue? GetValueRefOrAddDefault(TKey key, out bool exists)
     {
-        if (_buckets is null) Initialize(0);
+        if (_buckets == null)
+        {
+            Initialize(0);
+        }
 
-        Entry[]? entries = _entries!;
+        Entry[] entries = _entries!;
 
-        var hashCode = getHashCode(key!);
+        var hashCode = (uint)getHashCode(key);
 
         uint collisionCount = 0;
-        ref int bucket = ref GetBucket((uint)hashCode);
+        ref int bucket = ref GetBucket(hashCode);
         int i = bucket - 1; // Value in _buckets is 1-based
 
 
         while ((uint)i < (uint)entries.Length)
         {
-            if (entries[i].id == hashCode && equals(key, entries[i].Key))
+            if (entries[i].id == hashCode && equals(entries[i].Key, key))
             {
                 exists = true;
 
@@ -235,7 +238,7 @@ public class Set<TKey, TValue>(Func<TValue, TKey> _keyGenerator) : Set<TValue>
             {
                 // The chain of entries forms a loop; which means a concurrent update has happened.
                 // Break out of the loop and throw, rather than looping forever.
-                throw new NotSupportedException("Concurrent operations are not allowed");
+                throw new InvalidOperationException("Collision count exceeded length. Concurrent update happened");
             }
         }
 
@@ -253,19 +256,21 @@ public class Set<TKey, TValue>(Func<TValue, TKey> _keyGenerator) : Set<TValue>
             if (count == entries.Length)
             {
                 Resize();
-                bucket = ref GetBucket((uint)hashCode);
+                bucket = ref GetBucket(hashCode);
             }
             index = count;
             _count = count + 1;
-            entries = _entries;
+            entries = _entries!;
         }
 
         ref Entry entry = ref entries![index];
-        entry.id = (uint)hashCode;
+        entry.id = hashCode;
         entry.next = bucket - 1; // Value in _buckets is 1-based
         entry.Key = key;
+        entry.Value = default!;
         bucket = index + 1; // Value in _buckets is 1-based
         _version++;
+
 
         exists = false;
 
