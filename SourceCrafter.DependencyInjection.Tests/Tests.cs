@@ -24,6 +24,10 @@ namespace SourceCrafter.DependencyInjection.Tests
 
             await using var scope = serverContainer.CreateScope();
 
+            var id = await scope.GetRequiredKeyedService<Task<int>>("count");
+
+            id.Should().Be(1);
+
             var database = await serverContainer.GetDatabaseAsync();
 
             var employeeService2 = await scope.GetRequiredService<Task<EmployeeController>>();

@@ -77,7 +77,7 @@ public sealed class CodeGenerator : IIncrementalGenerator
                 .Collect();
         var scopedUsage = context.SyntaxProvider
                 .CreateSyntaxProvider(
-                    (syntax, _) => syntax is MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax { }, Name.Identifier.ValueText: "GetService" or "GetRequiredService" },
+                    (syntax, _) => syntax is MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax { }, Name.Identifier.ValueText: "GetService" or "GetRequiredService" or "GetKeyedService" or "GetRequiredKeyedService"},
                     GetInvokeInfos)
                 .Where(info => info is not null)
                 .Collect();
@@ -216,7 +216,6 @@ internal static class Extensions
         List<Action<List<Action>, List<DisposeBuilder>, List<DisposeBuilder>>> dependencyBuilders = [];
         Set<Interceptor> interceptors = Set<Interceptor>.Create(i => i.Key);
 
-
         Disposability
             containerDisposability = Disposability.None,
             scopedDisposability = Disposability.None;
@@ -229,6 +228,15 @@ internal static class Extensions
             singletonDisposable = 0,
             scopedAsyncDisposable = 0,
             singletonAsyncDisposable = 0;
+
+        var (modifiers, typeName) = declaration switch
+        {
+            ClassDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var typeParamsList } =>
+                ($"{mods} {keyword}".TrimStart(), $"{identifier}{typeParamsList}"),
+            InterfaceDeclarationSyntax { Modifiers: var mods, Identifier: { } identifier, TypeParameterList: var typeParamsList } =>
+                ($"{mods/*.Except([SyntaxFactory.Token(SyntaxKind.InterfaceKeyword)])*/} partial class".TrimStart(), $"{identifier.ValueText[1..]}{typeParamsList}"),
+            _ => ("", "")
+        };
 
         foreach (var attr in attributes)
         {
@@ -256,15 +264,6 @@ internal static class Extensions
 
 ");
         }
-
-        var (modifiers, typeName) = declaration switch
-        {
-            ClassDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var typeParamsList } =>
-                ($"{mods} {keyword}".TrimStart(), $"{identifier}{typeParamsList}"),
-            InterfaceDeclarationSyntax { Modifiers: var mods, Identifier: { } identifier, TypeParameterList: var typeParamsList } =>
-                ($"{mods/*.Except([SyntaxFactory.Token(SyntaxKind.InterfaceKeyword)])*/} partial class".TrimStart(), $"{identifier.ValueText[1..]}{typeParamsList}"),
-            _ => ("", "")
-        };
 
         code.AppendLine(generatedCodeAttribute)
             .Append(modifiers)
@@ -317,7 +316,7 @@ internal static class Extensions
 
 	private ").Append(typeName).Append(@" _root = default!;
 
-	public ").Append(typeName).Append(@" Root { [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)] get => this; }    
+	public ").Append(typeName).Append(@" Root => this;    
 	
 	public class Scoped : ").Append(typeName);
 
@@ -346,7 +345,7 @@ internal static class Extensions
 
                 code.Append(@"
 
-		public new ").Append(typeName).Append(@" Root { [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)] get => _root; }
+		public new ").Append(typeName).Append(@" Root => _root;
 
 	    public new Scoped CreateScope() => new() { _root = _root };
 	}
@@ -437,6 +436,8 @@ internal static class Extensions
         }
 
         if (useInterceptors) code.Append(@"    
+    public global::System.ReadOnlySpan<T> GetServices<T>() => throw new global::System.NotImplementedException();
+
     public object? GetService(global::System.Type serviceType) => throw new global::System.NotImplementedException();");
 
         code.Append(@"
@@ -461,7 +462,7 @@ public static class ").Append(typeName).Append(@"Extensions
         {
             foreach (var serviceCall in serviceCalls)
             {
-                if(!serviceCall.Covered) diagnostics.Add(ServiceContainerGeneratorDiagnostics.UncoveredGenericResolver(serviceCall.Member, providerFullTypeName));
+                if(!serviceCall.Acknowledged) diagnostics.Add(ServiceContainerGeneratorDiagnostics.UncoveredGenericResolver(serviceCall.Member, providerFullTypeName));
             }
         }
 
@@ -673,9 +674,9 @@ public static class ").Append(typeName).Append(@"Extensions
                 var keyHash = prm.Name.GetHashCode();
                 resolvedKey = foundService?.Key ?? default;
 
-                if (foundService is not null || lifeTimes.Any(t =>
-                    dependencyAsValueBuilders.TryGetValue(resolvedKey = (t, paramTypeHashCode, keyHash), out foundService!)
-                    || dependencyAsValueBuilders.TryGetValue(resolvedKey = (t, paramTypeHashCode, EmptyStringHashCode), out foundService!)))
+                if (foundService is not null || lifeTimes.Any(lifeTime =>
+                    dependencyAsValueBuilders.TryGetValue(resolvedKey = (lifeTime, paramTypeHashCode, keyHash), out foundService!)
+                    || dependencyAsValueBuilders.TryGetValue(resolvedKey = (lifeTime, paramTypeHashCode, EmptyStringHashCode), out foundService!)))
                 {
                     var buildParam = foundService!.BuildValue;
                     var foundExportTypeFullName = foundService.ExportTypeFullName;
@@ -942,83 +943,87 @@ public static class ").Append(typeName).Append(@"Extensions
 
             void TryRegisterInterceptorMethod()
             {
-                foreach (var item in serviceCalls)
+                foreach (var serviceCall in serviceCalls)
                 {
-                    var callContainerType = item.ContainerType.Name is "Scoped" && item.ContainerType.ContainingType is not null
-                        ? item.ContainerType.ContainingType
-                        : item.ContainerType;
+                    var isScoped = serviceCall.ContainerType.Name is "Scoped" && serviceCall.ContainerType.ContainingType is not null;
+
+                    var callContainerType = serviceCall.ContainerType.Name is "Scoped" && serviceCall.ContainerType.ContainingType is not null
+                        ? serviceCall.ContainerType.ContainingType
+                        : serviceCall.ContainerType;
 
                     var nameOnly = callContainerType.ToNameOnly();
+                    var isMicrosoftScoped = callContainerType.AsNonNullable().ToDisplayString().Equals("Microsoft.Extensions.DependencyInjection.IServiceScope");
 
                     if (!(SymbolEqualityComparer.Default.Equals(callContainerType, providerType)
-                          || callContainerType.AsNonNullable().ToDisplayString().Equals("Microsoft.Extensions.DependencyInjection.IServiceScope")
+                          || isMicrosoftScoped
                           || callContainerType.AllInterfaces.Any(i => i.GetAttributes().Any(IsGeneratedServiceContainer))
                           || nameOnly == className)) continue;
 
-                    ITypeSymbol returnType = item.ReturnType;
+                    ITypeSymbol returnType = serviceCall.ReturnType;
 
                     returnType.TryGetAsyncType(out var type);
 
                     var typeHashCode = type.ToGlobalNamespaced().GetHashCode();
 
-                    foreach (var lifetime in lifeTimes)
+                    var lifeTime = Lifetime.Singleton;
+
+                    if ((lifeTime, typeHashCode, serviceCall.KeyHash) == key 
+                        || ((isScoped || isMicrosoftScoped) && ((Lifetime.Scoped, typeHashCode, serviceCall.KeyHash) == key)) 
+                        || (lifeTime = Lifetime.Transient, typeHashCode, serviceCall.KeyHash) == key)
                     {
-                        if ((lifetime, typeHashCode, item.KeyHash) != key) continue;
-
-                        ref var interceptor = ref interceptors.GetValueRefOrAddDefault(key, out var exists);
-
-                        interceptor ??= new()
-                        {
-                            Key = key,
-                            BuildMethod = (ref i) =>
-                            {
-                                code.Append(@"
-    public static ");
-
-                                switch (asyncType)
-                                {
-                                    case AsyncType.None:
-                                        code.Append(exportTypeFullName);
-                                        break;
-                                    case AsyncType.ValueTask:
-                                        code.Append("global::System.Threading.Tasks.ValueTask<").Append(exportTypeFullName).Append(">");
-                                        break;
-                                    case AsyncType.Task:
-                                        code.Append("global::System.Threading.Tasks.Task<").Append(exportTypeFullName).Append(">");
-                                        break;
-                                }
-
-                                code.Append(" InterceptorCall").Append(++i).Append(@"(this global::System.IServiceProvider provider)
-        => ");
-
-                                if (isCached)
-                                {
-                                    code.Append("((").Append(fullProviderImplName);
-
-                                    if (lifetime is Lifetime.Scoped) code.Append(".Scoped");
-
-                                    code.Append(")provider).");
-
-                                    BuildCachedCaller();
-                                }
-                                else
-                                {
-                                    BuildInstance(false);
-                                }
-
-                                code.Append(@";
-");
-                            }
-                        };
-
-                        if (!item.Covered) item.Covered = true;
-
-                        var interceptorLocation = item.Interceptor;
-
-                        if (!interceptors.Any(i => i.Locations.Contains(interceptorLocation))) interceptor.Locations.Add(interceptorLocation);
+                        AddOrUpdateIntercerceptor(serviceCall, returnType, lifeTime, isScoped || isMicrosoftScoped);
 
                         return;
                     }
+                }
+
+                void AddOrUpdateIntercerceptor(InvokeInfo item, ITypeSymbol returnType, Lifetime lifetime, bool isScoped)
+                {
+                    ref var interceptor = ref interceptors.GetValueRefOrAddDefault(key, out var exists);
+
+                    interceptor ??= new()
+                    {
+                        Key = key,
+                        BuildMethod = (ref i) =>
+                        {
+                            code.Append(@"
+    public static ");
+
+                            switch (asyncType)
+                            {
+                                case AsyncType.None:
+                                    code.Append(exportTypeFullName);
+                                    break;
+                                case AsyncType.ValueTask:
+                                    code.Append("global::System.Threading.Tasks.ValueTask<").Append(exportTypeFullName).Append(">");
+                                    break;
+                                case AsyncType.Task:
+                                    code.Append("global::System.Threading.Tasks.Task<").Append(exportTypeFullName).Append(">");
+                                    break;
+                            }
+
+                            code.Append(" InterceptorCall").Append(++i).Append(@"(this global::System.IServiceProvider provider");
+
+                            if (item.IsKeyed) code.Append(", object? _");
+
+                            code.Append(@") => ").Append("((").Append(className);
+
+                            if (isScoped) code.Append(".Scoped");
+
+                            code.Append(")provider).");
+
+                            BuildValue();
+
+                            code.Append(@";
+");
+                        }
+                    };
+
+                    if (!item.Acknowledged) item.Acknowledged = true;
+
+                    var interceptorLocation = item.Interceptor;
+
+                    if (!interceptors.Any(i => i.Locations.Contains(interceptorLocation))) interceptor.Locations.Add(interceptorLocation);
                 }
             }
 
@@ -1849,17 +1854,19 @@ public static class ").Append(typeName).Append(@"Extensions
             return false;
         }
     }
+
     private static InvokeInfo GetInvokeInfos(GeneratorSyntaxContext gsc, CancellationToken _)
     {
         if (gsc.Node is not MemberAccessExpressionSyntax
             {
                 Parent: InvocationExpressionSyntax inv,
-                Name: GenericNameSyntax { TypeArgumentList.Arguments: [{ } typeArgSyntax] } method,
+                Name: GenericNameSyntax { TypeArgumentList.Arguments: [{ } typeArgSyntax], Identifier.ValueText: { } methodName } method,
                 Expression: IdentifierNameSyntax { } refVar
             } memberAccess
-            || gsc.SemanticModel.GetInterceptableLocation(inv) is not { } interceptor) return null!;
+            
+            || gsc.SemanticModel.GetInterceptableLocation(inv) is not { } interceptor
 
-        if (gsc.SemanticModel.GetTypeInfo(typeArgSyntax).Type is not ITypeSymbol { } depTypeResult) return null!;
+            || gsc.SemanticModel.GetTypeInfo(typeArgSyntax).Type is not ITypeSymbol { } depTypeResult) return null!;
 
         if (gsc.SemanticModel.GetSymbolInfo(refVar).Symbol switch
         {
@@ -1878,7 +1885,7 @@ public static class ").Append(typeName).Append(@"Extensions
 
             var keyHash = inv.ArgumentList.Arguments switch
             {
-                [{ Expression: LiteralExpressionSyntax { Token.RawKind: (int)SyntaxKind.StringLiteralToken, Token.ValueText: ['"', .. string text, '"'] } }]
+                [{ Expression: LiteralExpressionSyntax { Token.RawKind: (int)SyntaxKind.StringLiteralToken, Token.ValueText: string text } }]
                     => text.GetHashCode(),
                 [{ Expression: IdentifierNameSyntax id }]
                     when gsc.SemanticModel.GetSymbolInfo(id).Symbol is IFieldSymbol { IsConst: true, HasConstantValue: true, ConstantValue: string text } => text.GetHashCode(),
@@ -1887,7 +1894,7 @@ public static class ").Append(typeName).Append(@"Extensions
                 _ => EmptyStringHashCode
             };
 
-            return new(type, isCtor, depTypeResult, keyHash, interceptor, memberAccess);
+            return new(type, depTypeResult, interceptor, memberAccess, keyHash, isCtor, methodName.Contains("Keyed"));
         }
 
         return null!;
@@ -1929,9 +1936,16 @@ internal class DiagnosticLocationComparer : IEqualityComparer<Diagnostic>
     }
 }
 
-internal record InvokeInfo(ITypeSymbol ContainerType, bool NotFromScopedInstance, ITypeSymbol ReturnType, int KeyHash, InterceptableLocation Interceptor, MemberAccessExpressionSyntax Member) 
+internal record InvokeInfo(
+    ITypeSymbol ContainerType,
+    ITypeSymbol ReturnType,
+    InterceptableLocation Interceptor,
+    MemberAccessExpressionSyntax Member,
+    int KeyHash,
+    bool NotFromScopedInstance,
+    bool IsKeyed)
 {
-    internal bool Covered = false;
+    internal bool Acknowledged = false;
 }
 
 internal delegate void CommaSeparateBuilder(ref bool useIComma, int deepParamCount, string baseIndent);

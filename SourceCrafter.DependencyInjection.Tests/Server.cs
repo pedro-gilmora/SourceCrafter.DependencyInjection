@@ -19,7 +19,7 @@ namespace SourceCrafter.DependencyInjection.Tests
 
         static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
 
-        static int GetCount(int count, [Root] Server _) => count;
+        static int GetCount(int count, [Root] IServer _) => count;
     }
 
     #region TestType
