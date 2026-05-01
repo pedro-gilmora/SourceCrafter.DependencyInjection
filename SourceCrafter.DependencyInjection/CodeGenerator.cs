@@ -11,6 +11,7 @@ using System;
 
 using System.Collections.Generic;
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -19,7 +20,7 @@ using System.Threading;
 using System.Xml.Linq;
 
 using DependencyKey = (Lifetime lifetime, int typeHash, int keyHash);
-
+delegate void BuildValue(bool asyncContext = false);
 [Generator]
 public sealed class CodeGenerator : IIncrementalGenerator
 {
@@ -115,7 +116,7 @@ public sealed class CodeGenerator : IIncrementalGenerator
                     context.AddSource("Utils.g", @"
 namespace System.Runtime.CompilerServices
 {
-    [AttributeUsage(AttributeTargets.Method)]
+    [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
     public sealed class InterceptsLocationAttribute(int version, string data) : global::System.Attribute { }
 }");
 
@@ -435,6 +436,8 @@ internal static class Extensions
 ");
         }
 
+        TryRegisterInterceptorMethod();
+
         if (useInterceptors) code.Append(@"    
     public global::System.ReadOnlySpan<T> GetServices<T>() => throw new global::System.NotImplementedException();
 
@@ -468,6 +471,94 @@ public static class ").Append(typeName).Append(@"Extensions
 
         addSource(fileName, code.ToString());
 
+        void TryRegisterInterceptorMethod()
+        {
+            foreach (var serviceCall in serviceCalls)
+                foreach (var (key, resolver) in dependencyAsValueBuilders)
+                {
+                    var isScoped = serviceCall.ContainerType.Name is "Scoped" && serviceCall.ContainerType.ContainingType is not null;
+
+                    var callContainerType = serviceCall.ContainerType.Name is "Scoped" && serviceCall.ContainerType.ContainingType is not null
+                        ? serviceCall.ContainerType.ContainingType
+                        : serviceCall.ContainerType;
+
+                    var nameOnly = callContainerType.ToNameOnly();
+                    var isMicrosoftScoped = callContainerType.AsNonNullable().ToDisplayString().Equals("Microsoft.Extensions.DependencyInjection.IServiceScope");
+
+                    if (!(SymbolEqualityComparer.Default.Equals(callContainerType, providerType)
+                          || isMicrosoftScoped
+                          || callContainerType.AllInterfaces.Any(i => i.GetAttributes().Any(IsGeneratedServiceContainer))
+                          || nameOnly == className)) continue;
+
+                    ITypeSymbol returnType = serviceCall.ReturnType;
+
+                    returnType.TryGetAsyncType(out var type);
+
+                    var typeHashCode = type.ToGlobalNamespaced().GetHashCode();
+
+                    var lifeTime = Lifetime.Singleton;
+#if DEBUG_SG
+                    Trace.WriteLine($"Searching {(resolver.ExportTypeFullName, key.lifetime, key.keyHash)} at ({type}, keyHash = {serviceCall.KeyHash})");
+#endif
+                    if ((lifeTime, typeHashCode, serviceCall.KeyHash) == key
+                        || ((isScoped || isMicrosoftScoped) && ((Lifetime.Scoped, typeHashCode, serviceCall.KeyHash) == key))
+                        || (lifeTime = Lifetime.Transient, typeHashCode, serviceCall.KeyHash) == key)
+                    {
+                        AddOrUpdateIntercerceptor(serviceCall, returnType, lifeTime, isScoped || isMicrosoftScoped, key, resolver.AsyncType, resolver.ExportTypeFullName, resolver.BuildValue);
+
+                        break;
+                    }
+                }
+
+            void AddOrUpdateIntercerceptor(InvokeInfo item, ITypeSymbol returnType, Lifetime lifetime, bool isScoped, DependencyKey key, AsyncType asyncType, string exportTypeFullName, BuildValue buildValue)
+            {
+                ref var interceptor = ref interceptors.GetValueRefOrAddDefault(key, out var exists);
+
+                interceptor ??= new()
+                {
+                    Key = key,
+                    BuildMethod = (ref i) =>
+                    {
+                        code.Append(@"
+    public static ");
+
+                        switch (asyncType)
+                        {
+                            case AsyncType.None:
+                                code.Append(exportTypeFullName);
+                                break;
+                            case AsyncType.ValueTask:
+                                code.Append("global::System.Threading.Tasks.ValueTask<").Append(exportTypeFullName).Append(">");
+                                break;
+                            case AsyncType.Task:
+                                code.Append("global::System.Threading.Tasks.Task<").Append(exportTypeFullName).Append(">");
+                                break;
+                        }
+
+                        code.Append(" InterceptorCall").Append(++i).Append(@"(this global::System.IServiceProvider provider");
+
+                        if (item.IsKeyed) code.Append(", object? _");
+
+                        code.Append(@") => ").Append("((").Append(className);
+
+                        if (isScoped) code.Append(".Scoped");
+
+                        code.Append(")provider).");
+
+                        buildValue();
+
+                        code.Append(@";
+");
+                    }
+                };
+
+                if (!item.Acknowledged) item.Acknowledged = true;
+
+                var interceptorLocation = item.Interceptor;
+
+                interceptor.Locations.Add(interceptorLocation);
+            }
+        }
         bool TryBuildService(AttributeData? attr, ISymbol? sourceSymbol, out ResolverBuilder resolver, ChildDependencyHandler? validateAsChildDependency = null)
         {
             var (sourceKind, sourceType) = sourceSymbol?.Kind switch
@@ -535,6 +626,14 @@ public static class ").Append(typeName).Append(@"Extensions
 
             resolver = null!;
 
+#if DEBUG_SG
+
+            string ServiceString()
+            {
+                return $"({exportType}, {lifetime}, {keyHashCode})";
+            }
+
+#endif
             var (backingFieldName, methodName) = ("", "");
 
             ref var existingOrNewValueBuilder = ref Unsafe.AsRef(in resolver);
@@ -622,7 +721,7 @@ public static class ").Append(typeName).Append(@"Extensions
             if (isSimpleTransient)
             {
                 (backingFieldName, methodName) = GetResolverName();
-                TryRegisterInterceptorMethod();
+                //TryRegisterInterceptorMethod();
                 return true;
             }
 
@@ -901,7 +1000,7 @@ public static class ").Append(typeName).Append(@"Extensions
 
             existingOrNewValueBuilder.AsyncType = asyncType;
 
-            TryRegisterInterceptorMethod();
+            //TryRegisterInterceptorMethod();
 
             return true;
 
@@ -938,92 +1037,6 @@ public static class ").Append(typeName).Append(@"Extensions
                     }
 
                     pos++;
-                }
-            }
-
-            void TryRegisterInterceptorMethod()
-            {
-                foreach (var serviceCall in serviceCalls)
-                {
-                    var isScoped = serviceCall.ContainerType.Name is "Scoped" && serviceCall.ContainerType.ContainingType is not null;
-
-                    var callContainerType = serviceCall.ContainerType.Name is "Scoped" && serviceCall.ContainerType.ContainingType is not null
-                        ? serviceCall.ContainerType.ContainingType
-                        : serviceCall.ContainerType;
-
-                    var nameOnly = callContainerType.ToNameOnly();
-                    var isMicrosoftScoped = callContainerType.AsNonNullable().ToDisplayString().Equals("Microsoft.Extensions.DependencyInjection.IServiceScope");
-
-                    if (!(SymbolEqualityComparer.Default.Equals(callContainerType, providerType)
-                          || isMicrosoftScoped
-                          || callContainerType.AllInterfaces.Any(i => i.GetAttributes().Any(IsGeneratedServiceContainer))
-                          || nameOnly == className)) continue;
-
-                    ITypeSymbol returnType = serviceCall.ReturnType;
-
-                    returnType.TryGetAsyncType(out var type);
-
-                    var typeHashCode = type.ToGlobalNamespaced().GetHashCode();
-
-                    var lifeTime = Lifetime.Singleton;
-
-                    if ((lifeTime, typeHashCode, serviceCall.KeyHash) == key 
-                        || ((isScoped || isMicrosoftScoped) && ((Lifetime.Scoped, typeHashCode, serviceCall.KeyHash) == key)) 
-                        || (lifeTime = Lifetime.Transient, typeHashCode, serviceCall.KeyHash) == key)
-                    {
-                        AddOrUpdateIntercerceptor(serviceCall, returnType, lifeTime, isScoped || isMicrosoftScoped);
-
-                        return;
-                    }
-                }
-
-                void AddOrUpdateIntercerceptor(InvokeInfo item, ITypeSymbol returnType, Lifetime lifetime, bool isScoped)
-                {
-                    ref var interceptor = ref interceptors.GetValueRefOrAddDefault(key, out var exists);
-
-                    interceptor ??= new()
-                    {
-                        Key = key,
-                        BuildMethod = (ref i) =>
-                        {
-                            code.Append(@"
-    public static ");
-
-                            switch (asyncType)
-                            {
-                                case AsyncType.None:
-                                    code.Append(exportTypeFullName);
-                                    break;
-                                case AsyncType.ValueTask:
-                                    code.Append("global::System.Threading.Tasks.ValueTask<").Append(exportTypeFullName).Append(">");
-                                    break;
-                                case AsyncType.Task:
-                                    code.Append("global::System.Threading.Tasks.Task<").Append(exportTypeFullName).Append(">");
-                                    break;
-                            }
-
-                            code.Append(" InterceptorCall").Append(++i).Append(@"(this global::System.IServiceProvider provider");
-
-                            if (item.IsKeyed) code.Append(", object? _");
-
-                            code.Append(@") => ").Append("((").Append(className);
-
-                            if (isScoped) code.Append(".Scoped");
-
-                            code.Append(")provider).");
-
-                            BuildValue();
-
-                            code.Append(@";
-");
-                        }
-                    };
-
-                    if (!item.Acknowledged) item.Acknowledged = true;
-
-                    var interceptorLocation = item.Interceptor;
-
-                    if (!interceptors.Any(i => i.Locations.Contains(interceptorLocation))) interceptor.Locations.Add(interceptorLocation);
                 }
             }
 
@@ -1983,7 +1996,7 @@ internal class ResolverBuilder(string toStr)
     internal AsyncType AsyncType;
     internal HashSet<(int, bool)> AsyncNestedDeps = [];
     internal Map<DependencyKey, AsyncLocalResolver> AsyncLocalResolvers = new(EqualityComparer<(Lifetime, int, int)>.Default);
-    internal Action<bool> BuildValue = null!;
+    internal BuildValue BuildValue = null!;
     internal string ExportTypeFullName = null!;
     internal int ParamsLength;
 

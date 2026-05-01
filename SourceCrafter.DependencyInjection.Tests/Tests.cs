@@ -34,6 +34,8 @@ namespace SourceCrafter.DependencyInjection.Tests
 
             var authService = await scope.GetAuthServiceAsync();
 
+            employeeService2 = await scope.GetRequiredService<Task<EmployeeController>>();
+
             authService.Database.TrySave(out setting1);
 
             setting1.Should().Be("Value3");
