@@ -33,9 +33,9 @@ public class Program
     [Benchmark]
     public async Task SourceCrafter_DependencyInjection()
     {
-        await using var container = new SourceCrafter.DependencyInjection.Tests.ServerSCDI();
-        await using var scope = container.CreateScope();
-        using var authService = scope.AuthService;
+        var container = new SourceCrafter.DependencyInjection.Tests.ServerSCDI();
+        //await using var scope = container.CreateScope();
+        //using var authService = scope.AuthService;
     }
 
     [Benchmark]

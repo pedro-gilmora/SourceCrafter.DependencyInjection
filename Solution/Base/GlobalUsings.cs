@@ -1,5 +1,5 @@
-﻿global using DependencyKeyOfString = (SourceCrafter.DependencyInjection.Lifetime Lifetime, int Type, string Key);
-global using DependencyKeyOfInt = (SourceCrafter.DependencyInjection.Lifetime Lifetime, int Type, int Key);
-global using DependencyMap = SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Lifetime LifeTime, int FullTypeName, int Key), SourceCrafter.DependencyInjection.ServiceDescriptor>;
-global using DependencyNamesMap = SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Lifetime LifeTime, int TypeId, string Key), string>;
-global using DependencyMapDictionary = System.Collections.Generic.Dictionary<string, SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Lifetime LifeTime, int FullTypeName, int Key), SourceCrafter.DependencyInjection.ServiceDescriptor>>;
+﻿global using DependencyKeyOfString = (SourceCrafter.DependencyInjection.Constants.Lifetime Lifetime, int Type, string Key);
+global using DependencyKeyOfInt = (SourceCrafter.DependencyInjection.Constants.Lifetime Lifetime, int Type, int Key);
+global using DependencyMap = SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Constants.Lifetime LifeTime, int FullTypeName, int Key), SourceCrafter.DependencyInjection.ServiceDescriptor>;
+global using DependencyNamesMap = SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Constants.Lifetime LifeTime, int TypeId, string Key), string>;
+global using DependencyMapDictionary = System.Collections.Generic.Dictionary<string, SourceCrafter.DependencyInjection.Map<(SourceCrafter.DependencyInjection.Constants.Lifetime LifeTime, int FullTypeName, int Key), SourceCrafter.DependencyInjection.ServiceDescriptor>>;
