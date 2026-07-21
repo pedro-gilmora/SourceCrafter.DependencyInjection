@@ -381,15 +381,23 @@ namespace SourceCrafter.DependencyInjection
             return ret.ToString();
         }
 
-        internal static string ToMetadataLongName(this ISymbol symbol, Map<string, byte> uniqueName)
+        internal static string ToMetadataLongName(this ISymbol symbol, Dictionary<string, byte> uniqueName)
         {
             var existing = ToMetadataLongName(symbol);
+            
+            var exists = false;
+            
+            if(!uniqueName.TryGetValue(existing, out var count))
+            {
+                uniqueName[existing] = count = 1;
+            }
+            else
+            {
+                exists = true;
+                uniqueName[existing] = count += 1;
+            }
 
-            ref var count = ref uniqueName.GetValueRefOrAddDefault(existing, out var exists);
-
-            if (exists) return existing + "_" + (++count);
-
-            return existing;
+            return exists ? existing + "_" + count : existing;
         }
 
         internal static string Capitalize(this string str)

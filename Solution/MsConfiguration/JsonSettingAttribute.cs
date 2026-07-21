@@ -1,5 +1,5 @@
 ﻿using SourceCrafter.DependencyInjection.Attributes;
-
+using SourceCrafter.DependencyInjection.Constants;
 using System;
 
 namespace SourceCrafter.DependencyInjection.MsConfiguration.Metadata

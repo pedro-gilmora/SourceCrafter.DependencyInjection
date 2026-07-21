@@ -1,41 +1,42 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-		<TargetFramework>netstandard2.0</TargetFramework>
+	<TargetFramework>netstandard2.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
-		<LangVersion>preview</LangVersion>
-		<Nullable>enable</Nullable>
-		<DefineConstants>$(DefineConstants);DISG_MSCONF_META</DefineConstants>
-		<Company>AsereHighDev</Company>
-		<PackageOutputPath>../publish</PackageOutputPath>		
-		<Version>
-			$([System.Convert]::ToUInt16(
-				$([MSBuild]::Add(
-					$([System.DateTime]::Now.Year),
-					-2024
-				))
-			)).
-			$([System.DateTime]::Now.ToString('yy')).
-			$([System.DateTime]::Now.DayOfYear).
-			$([System.Convert]::ToUInt16(
-				$([MSBuild]::Divide(
-					$([System.DateTime]::Now.TimeOfDay.TotalMinutes),
-					15
-				))
-			))	
-		</Version>
-		<Title>Truly compile-time depedency injection metadata</Title>
-		<Description>Attributes for compile-time dependency injection library utilizing attributes to simplify and automate Microsoft configuration services registration</Description>
-		<PackageProjectUrl>https://github.com/pedro-gilmora/SourceCrafter.DependencyInjection/</PackageProjectUrl>
-		<RepositoryUrl>https://github.com/pedro-gilmora/SourceCrafter.DependencyInjection/</RepositoryUrl>
-		<PackageTags>compile-time metadata, MS Config, dependency injection</PackageTags>
-  </PropertyGroup>
-	<ItemGroup>
-		<Compile Include="..\Solution\MsConfiguration\*.cs">
-			<Link>%(RecursiveDir)%(Filename)%(Extension)</Link>
-		</Compile>
-	</ItemGroup>
-	<ItemGroup>
-	  <ProjectReference Include="..\SourceCrafter.DependencyInjection.Metadata\SourceCrafter.DependencyInjection.Metadata.csproj" PrivateAssets="all"/>
-	</ItemGroup>
+	<LangVersion>preview</LangVersion>
+	<Nullable>enable</Nullable>
+	<DefineConstants>$(DefineConstants);DISG_MSCONF_META</DefineConstants>
+	<Company>AsereHighDev</Company>
+	<PackageOutputPath>../publish</PackageOutputPath>		
+	<Version>
+		$([System.Convert]::ToUInt16(
+			$([MSBuild]::Add(
+				$([System.DateTime]::Now.Year),
+				-2024
+			))
+		)).
+		$([System.DateTime]::Now.ToString('yy')).
+		$([System.DateTime]::Now.DayOfYear).
+		$([System.Convert]::ToUInt16(
+			$([MSBuild]::Divide(
+				$([System.DateTime]::Now.TimeOfDay.TotalMinutes),
+				15
+			))
+		))	
+	</Version>
+	<Title>Truly compile-time depedency injection metadata</Title>
+	<Description>Attributes for compile-time dependency injection library utilizing attributes to simplify and automate Microsoft configuration services registration</Description>
+	<PackageProjectUrl>https://github.com/pedro-gilmora/SourceCrafter.DependencyInjection/</PackageProjectUrl>
+	<RepositoryUrl>https://github.com/pedro-gilmora/SourceCrafter.DependencyInjection/</RepositoryUrl>
+	<PackageTags>compile-time metadata, MS Config, dependency injection</PackageTags>
+	<PackageReadmeFile>README.md</PackageReadmeFile>
+</PropertyGroup>
+<ItemGroup>
+	<Compile Include="..\Solution\MsConfiguration\*.cs">
+		<Link>%(RecursiveDir)%(Filename)%(Extension)</Link>
+	</Compile>
+</ItemGroup>
+<ItemGroup>
+	<ProjectReference Include="..\SourceCrafter.DependencyInjection.Metadata\SourceCrafter.DependencyInjection.Metadata.csproj" PrivateAssets="all"/>
+</ItemGroup>
 </Project>

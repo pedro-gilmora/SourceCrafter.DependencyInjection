@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 using SourceCrafter.DependencyInjection;
 using SourceCrafter.DependencyInjection.Attributes;
+using SourceCrafter.DependencyInjection.Constants;
 using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
 
 using System;

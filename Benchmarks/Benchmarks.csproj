@@ -8,14 +8,13 @@
     <!--<PublishAot>true</PublishAot>
     <PublishReadyToRun>true</PublishReadyToRun>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>-->
-    <RestoreAdditionalProjectSources>../publish</RestoreAdditionalProjectSources>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" Version="0.14.0" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
     <PackageReference Include="Jab" Version="0.10.2" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
     <PackageReference Include="MrMeeseeks.DIE" Version="3.3.1" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="SourceCrafter.DependencyInjection" Version="[1.25.280.62]" OutputItemType="Analyzer" />
-    <PackageReference Include="SourceCrafter.DependencyInjection.Metadata" Version="[1.25.280.62]" />
+	<ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" OutputItemType="Analyzer" />
+	<ProjectReference Include="..\SourceCrafter.DependencyInjection.Metadata\SourceCrafter.DependencyInjection.Metadata.csproj" />
     <PackageReference Include="SharedMemory" Version="2.3.2" />
   </ItemGroup>
 </Project>

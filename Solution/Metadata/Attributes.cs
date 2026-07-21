@@ -1,22 +1,10 @@
 ﻿#pragma warning disable CS9113
+using SourceCrafter.DependencyInjection.Constants;
 using System;
 using System.Diagnostics;
 
 namespace SourceCrafter.DependencyInjection
 {
-#if DISG_META
-    public
-#else
-    internal
-#endif
-    enum Lifetime : byte { Singleton, Scoped, Transient }
-#if DISG_META
-        public
-#else
-    internal 
-#endif
-    enum Disposability : byte { None, Disposable, AsyncDisposable }
-
     namespace Attributes
     {
         [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct, AllowMultiple = false)]

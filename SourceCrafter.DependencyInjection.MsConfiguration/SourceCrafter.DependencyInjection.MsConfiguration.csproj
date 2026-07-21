@@ -28,6 +28,7 @@
 		<DefineConstants>$(DefineConstants);DISG</DefineConstants>
 		<PackageOutputPath>../publish</PackageOutputPath>
 		<Version>$(PackageVersion)</Version>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">

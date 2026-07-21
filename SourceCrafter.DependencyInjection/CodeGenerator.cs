@@ -103,7 +103,7 @@ public sealed class CodeGenerator : IIncrementalGenerator
                     var (((compilation, servicesContainers), externals), serviceCalls) = info;
 
                     HashSet<Diagnostic> diagnostics = new(new DiagnosticLocationComparer());
-                    Map<string, byte> uniqueNames = new(StringComparer.Ordinal);
+                    Dictionary<string, byte> uniqueNames = new(StringComparer.Ordinal);
                     var addExtensions = false;
                     int i = -1;
                     var cancelTokenType = compilation.GetTypeByMetadataName(CancelTokenFQMetaName)!;
@@ -123,7 +123,8 @@ namespace System.Runtime.CompilerServices
 
                     if (addExtensions)
                     {
-                        context.AddSource("TaskExtensions.g", @"using global::System.Threading.Tasks;
+                        context.AddSource("TaskExtensions.g", @"#nullable enable
+using global::System.Threading.Tasks;
 
 namespace SourceCrafter.DepedencyInjection.Extensions;
 
@@ -168,7 +169,8 @@ internal static class Extensions
                         messageFormat: e.Message,
                         category: "SourceCrafter.DependencyInjection.FatalError",
                         defaultSeverity: DiagnosticSeverity.Error,
-                        isEnabledByDefault: true
+                        isEnabledByDefault: true,
+                        description: e.ToString()
                     );
 
                     context.ReportDiagnostic(Diagnostic.Create(rule, null));
@@ -181,7 +183,7 @@ internal static class Extensions
         SemanticModel model,
         INamedTypeSymbol providerType,
         HashSet<Diagnostic> diagnostics,
-        Map<string, byte> uniqueNames,
+        Dictionary<string, byte> uniqueNames,
         ImmutableArray<InvokeInfo> serviceCalls,
         ref bool addExtensions,
         ref int i,

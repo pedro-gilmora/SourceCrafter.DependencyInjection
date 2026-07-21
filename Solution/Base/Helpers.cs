@@ -3,7 +3,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 using SourceCrafter.DependencyInjection;
-
+using SourceCrafter.DependencyInjection.Constants;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;

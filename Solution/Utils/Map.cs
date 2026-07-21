@@ -673,7 +673,7 @@ internal class Map<TKey, TValue> : IEnumerable<(TKey, TValue)>
 
         readonly object IEnumerator.Current => map._entries![i];
 
-        bool IEnumerator.MoveNext() => i++ < map._count;
+        bool IEnumerator.MoveNext() => ++i < map._count;
 
         void IEnumerator.Reset() => i = 0;
 
