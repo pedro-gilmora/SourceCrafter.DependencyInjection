@@ -134,13 +134,13 @@ jobs:
         
         $icon Build $status 
         
-        👤 **Triggered by:** [$( escape "${{ github.triggering_actor }}" )](https://github.com/$( escape "${{ github.triggering_actor }}" ))
+        👤 **Triggered by:** [ ${{ github.triggering_actor }} ](https://github.com/${{ github.triggering_actor }})
 
-        🌿 **Branch:** $( escape "${{ github.ref_name }}" )
+        🌿 **Branch:** ${{ github.ref_name }}
 
-        🔗 **Change:** [ $( $githubEvent.head_commit.id.Substring(0,8) ) ]($( escape $githubEvent.head_commit.url ))
+        🔗 **Change:** [ $( $githubEvent.head_commit.id.Substring(0,8) ) ]($( $githubEvent.head_commit.url ))
 
-        ⚙️ **Job** [ $( escape $jobName ) ](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/$jobId)
+        ⚙️ **Job** [ $jobName ](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/$jobId)
 
         ---  
         ### $(escape ( releaseTrimming $githubEvent.head_commit.message) )$(if($commits.Count -gt 1 ) { "
@@ -152,7 +152,7 @@ jobs:
         ", $( $commits | 
         Select -Skip 1 | 
         ForEach-Object { 
-            "| [$( $_.id.Substring(0,8) )]($( escape $_.url )) | $( escape ( releaseTrimming $_.message ) ) | [$( escape $_.author.username )]($( escape https://github.com/$($_.author.username) )) |"
+            "| [$( $_.id.Substring(0,8) )]($( $_.url )) | $( escape ( releaseTrimming $_.message ) ) | [$( $_.author.username )](https://github.com/$($_.author.username)) |"
         })))"
         })$( if($errors) { "
         ---
@@ -165,7 +165,6 @@ jobs:
         $telegramPackages
         "@
         
-        <#
         if( $isRelease -and -not $failed ) 
         {
           gh release create v${{ env.VERSION }} -t "$(releaseTrimming $githubEvent.head_commit.message)" -n $(if($commits.Count -gt 1) { "| ID | Message | Author |
@@ -181,7 +180,6 @@ jobs:
           $githubPackages"
           } else { "" }) 
         }
-        #>
   
         Write-Host $message
 
