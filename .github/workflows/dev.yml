@@ -78,10 +78,7 @@ jobs:
         $telegramPackages = ''          
         if(Test-Path ./telegram_packages.txt) {
           $telegramPackages = @"
-        <br/>
-        <br/>
-        <br/>
-
+        ---
         ### Packages
         | Package Name | Package Version |
         |---|---|
@@ -143,8 +140,9 @@ jobs:
         🔗 **Change:** **[$( $githubEvent.head_commit.id.Substring(0,8) )]($( escape $githubEvent.head_commit.url ))**
 
         ⚙️ **Job** [$( escape $jobName )](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/$jobId)
-  
+        ---  
         ### $(escape ( releaseTrimming $githubEvent.head_commit.message) )$(if($commits.Count -gt 1 ) { "
+        #### Other changes
         
         $([string]::Join("
         ", $( $commits | 
@@ -154,6 +152,8 @@ jobs:
           by [$(escape $_.author.username)]($( escape https://github.com/$($_.author.username) ))"
         })))"
         })$( if($errors) { "
+        ---
+        #### Errors
         
         ``````
         $( escape $errors.Trim() )
