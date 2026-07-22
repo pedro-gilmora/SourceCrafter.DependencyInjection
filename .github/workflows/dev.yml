@@ -144,13 +144,13 @@ jobs:
         ---  
         ### $(escape ( releaseTrimming $githubEvent.head_commit.message) )$(if($commits.Count -gt 1 ) { "
         #### Other changes
-        
+        | Commit Id | Description | Author |
+        |---|---|---|
         $([string]::Join("
         ", $( $commits | 
         Select -Skip 1 | 
         ForEach-Object { 
-            "🔹[$($_.id.Substring(0,8))]($(escape $_.url)): $(escape ( releaseTrimming $_.message ) )
-          by [$(escape $_.author.username)]($( escape https://github.com/$($_.author.username) ))"
+            "| $($_.id.Substring(0,8))]($(escape $_.url)) | $(escape ( releaseTrimming $_.message ) ) | [$(escape $_.author.username)]($( escape https://github.com/$($_.author.username) )) |"
         })))"
         })$( if($errors) { "
         ---
