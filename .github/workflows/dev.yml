@@ -137,20 +137,21 @@ jobs:
 
         🌿 **Branch:** $( escape "${{ github.ref_name }}" )
 
-        🔗 **Change:** **[$( $githubEvent.head_commit.id.Substring(0,8) )]($( escape $githubEvent.head_commit.url ))**
+        🔗 **Change:** ** [$( $githubEvent.head_commit.id.Substring(0,8) )]($( escape $githubEvent.head_commit.url )) **
 
         ⚙️ **Job** [$( escape $jobName )](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/$jobId)
 
         ---  
         ### $(escape ( releaseTrimming $githubEvent.head_commit.message) )$(if($commits.Count -gt 1 ) { "
         #### Other changes
+
         | Commit Id | Description | Author |
         |---|---|---|
         $([string]::Join("
         ", $( $commits | 
         Select -Skip 1 | 
         ForEach-Object { 
-            "| $($_.id.Substring(0,8))]($(escape $_.url)) | $(escape ( releaseTrimming $_.message ) ) | [$(escape $_.author.username)]($( escape https://github.com/$($_.author.username) )) |"
+            "| [$( $_.id.Substring(0,8) )]($( escape $_.url )) | $( escape ( releaseTrimming $_.message ) ) | [$( escape $_.author.username )]($( escape https://github.com/$($_.author.username) )) |"
         })))"
         })$( if($errors) { "
         ---
