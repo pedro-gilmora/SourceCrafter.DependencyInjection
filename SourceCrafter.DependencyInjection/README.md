@@ -33,7 +33,8 @@ dotnet add package SourceCrafter.DependencyInjection
 ### With Microsoft Configuration Support
 For JSON settings (`[JsonSetting<T>]`) and MS.Extensions integration:
 ```bash
-dotnet add package SourceCrafter.DependencyInjection.MsConfiguration
+dotnet add package SourceCrafter.DependencyInjection
+dotnet add package SourceCrafter.DependencyInjection.Metadata
 ```
 
 ---

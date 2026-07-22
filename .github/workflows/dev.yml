@@ -47,14 +47,21 @@ jobs:
       if: github.ref_name == 'dev' && startsWith(github.event.head_commit.message, '[Release]')
       id: publish
       run: |        
-        for package in $(find . -wholename '**/packaging/*.nupkg'); do
+        for package in $(find . -wholename '**/publish/*.nupkg'); do
           # Execute nuget push for each package
-          output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error / { print }')
+          # output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error / { print }')
 
-          if [ "${#output}" -ne 0 ]; then
-            echo -e "Restore errors:
-          $output" >> errors.log
-          fi
+          # if [ "${#output}" -ne 0 ]; then
+            # echo -e "Restore errors:
+          # $output" >> errors.log
+            # continue;
+          # fi
+
+          filename=$(basename "$package" .nupkg)
+          package_name="${filename%%.[0-9]*}"   # everything before the last dot+digit
+          version="${filename##$package_name.}" # everything after
+          echo "| $package_name | [$version](https://www.nuget.org/packages/$package_name/$version) |" >> telegram_packages.txt
+          echo "[![$package_name: $version](https://img.shields.io/nuget/v/$package_name.svg?label=$package_name&style=plastic)](https://www.nuget.org/packages/$package_name/$version)" >> github_packages.txt          
         done
 
     - name: Notify Telegram & create GitHub Release
@@ -67,6 +74,25 @@ jobs:
         $githubEvent = @{}          
         if(Test-Path ./github_event.json) {
           $githubEvent = Get-Content -Path ./github_event.json -Raw | ConvertFrom-Json
+        }
+        $telegramPackages = ''          
+        if(Test-Path ./telegram_packages.txt) {
+          $telegramPackages = @"
+        <br/>
+        <br/>
+        <br/>
+
+        ### Packages
+        | Package Name | Package Version |
+        |---|---|
+        $(Get-Content -Path ./telegram_packages.txt)
+        "@
+          echo $telegramPackages
+        }
+        $githubPackages = ''          
+        if(Test-Path ./github_packages.txt) {
+          $githubPackages = Get-Content -Path ./github_packages.txt
+          echo $githubPackages
         }
 
         # Load errors from errors logs file
@@ -106,14 +132,19 @@ jobs:
         $jobId, $jobName = (gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs --jq '.jobs[0] | "\(.id)|\(.name)"') -split '\|', 2
 
         $message = @"
-        🚀 *$(escape '${{ github.workflow }}')* \#${{ github.run_number }} 
+        # 🚀 $(escape '${{ github.workflow }}') \#${{ github.run_number }} 
+        
         $icon Build $status 
-        👤 *Triggered by:* [$( escape "${{ github.triggering_actor }}" )](https://github.com/$( escape "${{ github.triggering_actor }}" ))
-        🌿 *Branch:* $( escape "${{ github.ref_name }}" )
-        🔗 *Change:* *[$( $githubEvent.head_commit.id.Substring(0,8) )]($( escape $githubEvent.head_commit.url ))*
-        ⚙️ *Job* [$( escape $jobName )](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/$jobId)
+        
+        👤 **Triggered by:** [$( escape "${{ github.triggering_actor }}" )](https://github.com/$( escape "${{ github.triggering_actor }}" ))
+
+        🌿 **Branch:** $( escape "${{ github.ref_name }}" )
+
+        🔗 **Change:** **[$( $githubEvent.head_commit.id.Substring(0,8) )]($( escape $githubEvent.head_commit.url ))**
+
+        ⚙️ **Job** [$( escape $jobName )](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/$jobId)
   
-        *$(escape ( releaseTrimming $githubEvent.head_commit.message) )*$(if($commits.Count -gt 1 ) { "
+        ### $(escape ( releaseTrimming $githubEvent.head_commit.message) )$(if($commits.Count -gt 1 ) { "
         
         $([string]::Join("
         ", $( $commits | 
@@ -127,8 +158,11 @@ jobs:
         ``````
         $( escape $errors.Trim() )
         ``````" } )
+
+        $telegramPackages
         "@
         
+        <#
         if( $isRelease -and -not $failed ) 
         {
           gh release create v${{ env.VERSION }} -t "$(releaseTrimming $githubEvent.head_commit.message)" -n $(if($commits.Count -gt 1) { "| ID | Message | Author |
@@ -138,18 +172,21 @@ jobs:
             Select -Skip 1 | 
             ForEach-Object { 
               "| [$($_.id.Substring(0,8))]($($_.url)) | $( releaseTrimming $_.message ) | [$( $_.author.username )]( https://github.com/$($_.author.username) ) |"
-          })))"
+          })))
+          
+          ### Packages
+          $githubPackages"
           } else { "" }) 
         }
+        #>
   
         Write-Host $message
 
-        $uri = "https://api.telegram.org/bot${{ secrets.TGBOT_TOKEN }}/sendMessage"
+        $uri = "https://api.telegram.org/bot${{ secrets.TGBOT_TOKEN }}/sendRichMessage"
 
         $body = @{
           chat_id = ${{ secrets.SC_CHATID }}
-          text = $message
-          parse_mode = 'MarkdownV2'
+          rich_message = @{ markdown = $message } | ConvertTo-Json
           message_thread_id = 4
         }
 

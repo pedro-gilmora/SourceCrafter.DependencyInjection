@@ -18,7 +18,10 @@ This is the **Roslyn code generator** that processes your container and generate
 
 ### With Microsoft.Extensions.Configuration Support (Recommended)
 ```bash
+dotnet add package SourceCrafter.DependencyInjection
+dotnet add package SourceCrafter.DependencyInjection.Metadata
 dotnet add package SourceCrafter.DependencyInjection.MsConfiguration
+dotnet add package SourceCrafter.DependencyInjection.MsConfiguration.Metadata
 ```
 
 This includes support for:
@@ -147,35 +150,6 @@ Configuration changes are detected automatically:
 - **Intelligent Disposal**: Detects and applies `IDisposable` or `IAsyncDisposable` automatically
 - **Scoped Isolation**: Per-instance configuration and service caching for request-local state
 - **Configuration Hot-Reload**: Respects configuration changes in scoped contexts
-
-## Technical Details
-
-| Aspect | Detail |
-|--------|--------|
-| **Package Type** | Roslyn Code Generator (Analyzer) |
-| **Delivery** | `/analyzers/dotnet/cs/*.dll` in NuGet |
-| **Runtime Cost** | Zero – pure compile-time, no shipping binaries |
-| **Dependency Model** | PrivateAssets – no version conflicts |
-| **Target Framework** | .NET Standard 2.0 |
-| **Configuration Support** | Microsoft.Extensions.Configuration |
-
-### Build Configurations
-
-- **Debug**: Full diagnostics and logging
-- **Release**: Optimized, stripped symbols
-- **Pack**: Production NuGet build
-- **DEBUG_SG**: Source generator debugging
-
-### Key Dependencies (All Private)
-
-- `Microsoft.CodeAnalysis.CSharp` – Syntax tree analysis
-- `System.Text.Json` – Configuration deserialization
-- `Microsoft.Extensions.DependencyInjection` – Runtime integration support
-
-### NuGet Output
-
-- Shared output: `../publish/`
-- All dependencies embedded to prevent consumer version conflicts
 
 ---
 
