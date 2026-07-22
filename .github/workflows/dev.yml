@@ -51,11 +51,11 @@ jobs:
           # Execute nuget push for each package
           # output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error / { print }')
 
-          # if [ "${#output}" -ne 0 ]; then
-            # echo -e "Restore errors:
-          # $output" >> errors.log
-            # continue;
-          # fi
+          if [ "${#output}" -ne 0 ]; then
+            echo -e "Restore errors:
+          $output" >> errors.log
+            continue;
+          fi
 
           filename=$(basename "$package" .nupkg)
           package_name="${filename%%.[0-9]*}"   # everything before the last dot+digit
