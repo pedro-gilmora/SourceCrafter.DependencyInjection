@@ -138,9 +138,9 @@ jobs:
 
         🌿 **Branch:** $( escape "${{ github.ref_name }}" )
 
-        🔗 **Change:** ** [$( $githubEvent.head_commit.id.Substring(0,8) )]($( escape $githubEvent.head_commit.url )) **
+        🔗 **Change:** [ $( $githubEvent.head_commit.id.Substring(0,8) ) ]($( escape $githubEvent.head_commit.url ))
 
-        ⚙️ **Job** [$( escape $jobName )](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/$jobId)
+        ⚙️ **Job** [ $( escape $jobName ) ](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/$jobId)
 
         ---  
         ### $(escape ( releaseTrimming $githubEvent.head_commit.message) )$(if($commits.Count -gt 1 ) { "
