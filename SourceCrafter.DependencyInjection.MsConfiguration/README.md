@@ -148,35 +148,6 @@ Configuration changes are detected automatically:
 - **Scoped Isolation**: Per-instance configuration and service caching for request-local state
 - **Configuration Hot-Reload**: Respects configuration changes in scoped contexts
 
-## Technical Details
-
-| Aspect | Detail |
-|--------|--------|
-| **Package Type** | Roslyn Code Generator (Analyzer) |
-| **Delivery** | `/analyzers/dotnet/cs/*.dll` in NuGet |
-| **Runtime Cost** | Zero – pure compile-time, no shipping binaries |
-| **Dependency Model** | PrivateAssets – no version conflicts |
-| **Target Framework** | .NET Standard 2.0 |
-| **Configuration Support** | Microsoft.Extensions.Configuration |
-
-### Build Configurations
-
-- **Debug**: Full diagnostics and logging
-- **Release**: Optimized, stripped symbols
-- **Pack**: Production NuGet build
-- **DEBUG_SG**: Source generator debugging
-
-### Key Dependencies (All Private)
-
-- `Microsoft.CodeAnalysis.CSharp` – Syntax tree analysis
-- `System.Text.Json` – Configuration deserialization
-- `Microsoft.Extensions.DependencyInjection` – Runtime integration support
-
-### NuGet Output
-
-- Shared output: `../publish/`
-- All dependencies embedded to prevent consumer version conflicts
-
 ---
 
 **Use MsConfiguration when** you need to load settings from `appsettings.json` or `IConfiguration`  
