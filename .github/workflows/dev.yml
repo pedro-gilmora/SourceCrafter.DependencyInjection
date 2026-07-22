@@ -35,7 +35,7 @@ jobs:
       id: build
       run: |
         try {
-          .\Package.ps1 -clean false -specificVersion "${{ env.VERSION }}" -test true -forcePack true
+          .\Package.ps1 -clean false -specificVersion "${{ env.VERSION }}" -test false -forcePack true
         } catch {
           Write-Error @"
         Restore, Package and Test errors: 
@@ -75,6 +75,7 @@ jobs:
         if(Test-Path ./github_event.json) {
           $githubEvent = Get-Content -Path ./github_event.json -Raw | ConvertFrom-Json
         }
+        #Read published telegram packages
         $telegramPackages = ''          
         if(Test-Path ./telegram_packages.txt) {
           $telegramPackages = @"
