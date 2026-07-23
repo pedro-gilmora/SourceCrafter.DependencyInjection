@@ -49,7 +49,7 @@ jobs:
       run: |        
         for package in $(find . -wholename '**/publish/*.nupkg'); do
           # Execute nuget push for each package
-          # output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error / { print }')
+          output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error / { print }')
 
           if [ "${#output}" -ne 0 ]; then
             echo -e "Restore errors:
@@ -60,8 +60,8 @@ jobs:
           filename=$(basename "$package" .nupkg)
           package_name="${filename%%.[0-9]*}"   # everything before the last dot+digit
           version="${filename##$package_name.}" # everything after
-          echo "| $package_name | [$version](https://www.nuget.org/packages/$package_name/$version) |" >> telegram_packages.txt
-          echo "<br/>[![$package_name: $version](https://img.shields.io/nuget/v/$package_name.svg?label=$package_name&style=plastic)](https://www.nuget.org/packages/$package_name/$version)" >> github_packages.txt          
+          printf "\n| $package_name | [$version](https://www.nuget.org/packages/$package_name/$version) |" >> telegram_packages.txt
+          printf "\n[![$package_name: $version](https://img.shields.io/nuget/v/$package_name.svg?label=$package_name&style=plastic)](https://www.nuget.org/packages/$package_name/$version)" >> github_packages.txt          
         done
 
     - name: Notify Telegram & create GitHub Release
