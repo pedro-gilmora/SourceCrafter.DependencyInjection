@@ -1190,7 +1190,7 @@ public static class ").Append(typeName).Append(@"Extensions
                             }
 
                             code.Append(@"
-			return ").Append(backingFieldName).Append(" = ");
+			return ").Append(backingFieldName).Append(" ??= ");
 
                             var useAnd = false;
 
