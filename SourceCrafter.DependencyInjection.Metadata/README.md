@@ -36,5 +36,6 @@ dotnet add package SourceCrafter.DependencyInjection.Metadata
 
 ## See Also
 
-- [SourceCrafter.DependencyInjection](../SourceCrafter.DependencyInjection/README.md) – Core code generator
-- [SourceCrafter.DependencyInjection.MsConfiguration.Metadata](../SourceCrafter.DependencyInjection.MsConfiguration.Metadata/README.md) – Extended metadata for MS.Extensions
+- [SourceCrafter.DependencyInjection](https://www.nuget.org/packages/SourceCrafter.DependencyInjection#readme-body-tab) – Core code generator
+- [SourceCrafter.DependencyInjection.MsConfiguration](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.MsConfiguration#readme-body-tab) – MSEC generator
+- [SourceCrafter.DependencyInjection.MsConfiguration.Metadata](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.MsConfiguration.Metadata#readme-body-tab) – Extended metadata for MSEC generator

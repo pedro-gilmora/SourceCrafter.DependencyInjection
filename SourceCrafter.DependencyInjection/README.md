@@ -488,7 +488,7 @@ public partial class Server : global::System.IAsyncDisposable
 
 	public virtual global::System.Threading.Tasks.ValueTask DisposeAsync()
 	{
-        return _authServiceTask.TryDisposeAsync();
+            return _authServiceTask.TryDisposeAsync();
 	}
 
 }
@@ -512,7 +512,12 @@ public static class ServerExtensions
   - Core: `SourceCrafter.DependencyInjection`
   - MS Configuration: `SourceCrafter.DependencyInjection.MsConfiguration`
 - **License**: See repository for details
+---
 
+## See also
+- **Core Metadata**: [SourceCrafter.DependencyInjection.Metadata](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.Metadata#readme-body-tab)
+- **Core Configuration**: [SourceCrafter.DependencyInjection.MsConfiguration](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.MsConfiguration#readme-body-tab)
+- **Configuration Metadata**: [SourceCrafter.DependencyInjection.MsConfiguration.Metadata](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.MsConfiguration.Metadata#readme-body-tab)
 ---
 
 **SourceCrafter.DependencyInjection** makes compile-time DI seamless, fast, and transparent—zero magic, 100% predictable.

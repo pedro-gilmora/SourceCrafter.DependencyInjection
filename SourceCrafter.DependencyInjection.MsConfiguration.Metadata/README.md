@@ -69,6 +69,6 @@ var settings = await container.Settings;  // Generated resolver
 
 ## References
 
-- **Core Metadata**: [SourceCrafter.DependencyInjection.Metadata](../SourceCrafter.DependencyInjection.Metadata/README.md)
-- **Code Generator**: [SourceCrafter.DependencyInjection.MsConfiguration](../SourceCrafter.DependencyInjection.MsConfiguration/README.md)
-- **Usage Guide**: [SourceCrafter.DependencyInjection](../SourceCrafter.DependencyInjection/README.md)
+- [SourceCrafter.DependencyInjection](https://www.nuget.org/packages/SourceCrafter.DependencyInjection#readme-body-tab) – Core code generator
+- [SourceCrafter.DependencyInjection.Metadata](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.Metadata#readme-body-tab) – Extended metadata for MSEC generator
+- [SourceCrafter.DependencyInjection.MsConfiguration](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.MsConfiguration#readme-body-tab) – MSEC generator

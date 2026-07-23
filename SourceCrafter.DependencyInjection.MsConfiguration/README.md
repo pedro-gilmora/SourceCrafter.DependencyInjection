@@ -160,6 +160,6 @@ Configuration changes are detected automatically:
 
 ## References
 
-- **Core Metadata**: [SourceCrafter.DependencyInjection.Metadata](../SourceCrafter.DependencyInjection.Metadata/README.md)
-- **Configuration Metadata**: [SourceCrafter.DependencyInjection.MsConfiguration.Metadata](../SourceCrafter.DependencyInjection.MsConfiguration.Metadata/README.md)
-- **Main Documentation**: [SourceCrafter.DependencyInjection](../SourceCrafter.DependencyInjection/README.md)
+- [SourceCrafter.DependencyInjection](https://www.nuget.org/packages/SourceCrafter.DependencyInjection#readme-body-tab) – Core code generator
+- [SourceCrafter.DependencyInjection.Metadata](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.Metadata#readme-body-tab) – MSEC generator
+- [SourceCrafter.DependencyInjection.MsConfiguration.Metadata](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.MsConfiguration.Metadata#readme-body-tab) – Extended metadata for MSEC generator
