@@ -61,7 +61,7 @@ jobs:
           package_name="${filename%%.[0-9]*}"   # everything before the last dot+digit
           version="${filename##$package_name.}" # everything after
           echo "| $package_name | [$version](https://www.nuget.org/packages/$package_name/$version) |" >> telegram_packages.txt
-          echo "[![$package_name: $version](https://img.shields.io/nuget/v/$package_name.svg?label=$package_name&style=plastic)](https://www.nuget.org/packages/$package_name/$version)" >> github_packages.txt          
+          echo "<br/>[![$package_name: $version](https://img.shields.io/nuget/v/$package_name.svg?label=$package_name&style=plastic)](https://www.nuget.org/packages/$package_name/$version)" >> github_packages.txt          
         done
 
     - name: Notify Telegram & create GitHub Release
@@ -134,13 +134,13 @@ jobs:
         
         $icon Build $status 
         
-        👤 **Triggered by:** [ ${{ github.triggering_actor }} ](https://github.com/${{ github.triggering_actor }})
+        👤 **Triggered by:** [${{ github.triggering_actor }}](https://github.com/${{ github.triggering_actor }})
 
         🌿 **Branch:** ${{ github.ref_name }}
 
-        🔗 **Change:** [ $( $githubEvent.head_commit.id.Substring(0,8) ) ]($( $githubEvent.head_commit.url ))
+        🔗 **Change:** [$( $githubEvent.head_commit.id.Substring(0,8) )]($( $githubEvent.head_commit.url ))
 
-        ⚙️ **Job** [ $jobName ](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/$jobId)
+        ⚙️ **Job** [$jobName](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}/job/$jobId)
 
         ---  
         ### $(escape ( releaseTrimming $githubEvent.head_commit.message) )$(if($commits.Count -gt 1 ) { "
