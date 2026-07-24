@@ -46,29 +46,24 @@ jobs:
     - name: Publish generator and endpoints to Nuget
       if: github.ref_name == 'dev' && startsWith(github.event.head_commit.message, '[Release]')
       id: publish
-      shell: pwsh     
       run: |        
-        $packages = Get-ChildItem -Recurse -Filter *.nupkg | Where-Object { $_.FullName -like "*\publish\*" }
+        for package in $(find . -wholename '**/publish/*.nupkg'); do
+          # Execute nuget push for each package
+          output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error / { print }')
 
-        foreach ($package in $packages) {
-            # Run dotnet nuget push and capture output
-            $output = & dotnet nuget push $package.FullName --api-key $env:NUGET_API_KEY --source "https://api.nuget.org/v3/index.json" 2>&1 | Select-String ": error "
+          if [ "${#output}" -ne 0 ]; then
+            echo -e "Restore errors:
+          $output" >> errors.log
+            continue;
+          fi
 
-            if ($output) {
-                Add-Content -Path "errors.log" -Value ("Restore errors: " + $output)
-                continue
-            }
-            elseif([System.IO.Path]::GetFileNameWithoutExtension($package.Name) -match '^(.+?)\.((?:\d+(?:\.\d+)*))$')
-            {
-                $packageName = $matches[1]
-                $version = $matches[2]
+          filename=$(basename "$package" .nupkg)
+          package_name="${filename%%.[0-9]*}"   # everything before the last dot+digit
+          version="${filename##$package_name.}" # everything after
+          printf "| $package_name | [$version](https://www.nuget.org/packages/$package_name/$version) |" >> telegram_packages.txt
+          printf "[![$package_name: $version](https://img.shields.io/nuget/v/$package_name.svg?label=$package_name&style=plastic)](https://www.nuget.org/packages/$package_name/$version)" >> github_packages.txt          
+        done
 
-                # Write to telegram_packages.txt
-                Add-Content -Path "telegram_packages.txt" -Value "| $packageName | [$version](https://www.nuget.org/packages/$packageName/$version) |"
-                # Write to github_packages.txt
-                Add-Content -Path "github_packages.txt" -Value "[![$packageName`: $version](https://img.shields.io/nuget/v/$packageName.svg?label=$packageName&style=plastic)](https://www.nuget.org/packages/$packageName/$version)"
-            }
-        }
 
     - name: Notify Telegram & create GitHub Release
       if: always()
@@ -89,13 +84,13 @@ jobs:
         ### Packages
         | Package Name | Package Version |
         |---|---|
-        $(Get-Content -Path ./telegram_packages.txt)
+        $(Get-Content -Path ./telegram_packages.txt -Raw)
         "@
           echo $telegramPackages
         }
         $githubPackages = ''          
         if(Test-Path ./github_packages.txt) {
-          $githubPackages = Get-Content -Path ./github_packages.txt
+          $githubPackages = Get-Content -Path ./github_packages.txt -Raw
           echo $githubPackages
         }
 
