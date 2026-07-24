@@ -12,7 +12,10 @@ param(
     [Parameter(Mandatory=$false)]
     [string]$startingYear = "2024",
     [Parameter(Mandatory=$false)]
-    [string]$specificVersion = $null
+    [string]$specificVersion = $null,
+    [Parameter(Mandatory=$false)]
+    [string]$nugetApiKey = $null
+
 )
 
 function Get-Version {
@@ -73,7 +76,7 @@ REFERENCE: Updating package: $($_.GetAttribute('Include')) to version $version"
     }
 }
 
-if($hasCounts -or $forcePack -eq 'true')
+if($hasCounts -or $null -ne $nugetApiKey)
 {    
     Write-Output "
 PACKER: Test project references where updated
@@ -111,12 +114,15 @@ PACKER: Restoring...
 '        
             dotnet restore
 
-            Write-Host "PACKER: Packaging projects
+            Write-Host "PACKER: Packaging projects $nugetApiKey
 "
-            dotnet pack $PWD/SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj -c Release -v n -p:PackageVersion=$version
-            dotnet pack $PWD/SourceCrafter.DependencyInjection.Metadata/SourceCrafter.DependencyInjection.Metadata.csproj -c Release -v n -p:PackageVersion=$version
-            dotnet pack $PWD/SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -v n -p:PackageVersion=$version
-            dotnet pack $PWD/SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -v n -p:PackageVersion=$version
+            foreach($packageName in $('','.Metadata','.MsConfiguration','MsConfiguration.Metadata'))
+            {
+                dotnet pack $PWD/SourceCrafter.DependencyInjection$packageName/SourceCrafter.DependencyInjection$packageName.csproj -c Release -v n -p:PackageVersion=$version
+                dotnet nuget push $PWD/publish/SourceCrafter.DependencyInjection$packageName.$version.nupkg --api-key $nugetApiKey --source "https://api.nuget.org/v3/index.json"
+                Add-Content -Path "telegram_packages.txt" -Value "`n| SourceCrafter.DependencyInjection$packageName| [$version](https://www.nuget.org/packages/SourceCrafter.DependencyInjection$packageName/$version) |"
+                Add-Content -Path "github_packages.txt" -Value "`n[![SourceCrafter.DependencyInjection$packageName`: $version](https://img.shields.io/nuget/v/SourceCrafter.DependencyInjection$packageName.svg?label=SourceCrafter.DependencyInjection$packageName&style=plastic)](https://www.nuget.org/packages/SourceCrafter.DependencyInjection$packageName/$version)"            
+            }
         }
         catch
         {
