@@ -114,9 +114,16 @@ PACKER: Restoring...
             Write-Host "PACKER: Packaging projects
 "
             dotnet pack $PWD/SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj -c Release -v n -p:PackageVersion=$version
+            dotnet nuget push $PWD/publish/SourceCrafter.DependencyInjection.$version.nupkg --api-key $env:NUGET_API_KEY --source "https://api.nuget.org/v3/index.json"
+
             dotnet pack $PWD/SourceCrafter.DependencyInjection.Metadata/SourceCrafter.DependencyInjection.Metadata.csproj -c Release -v n -p:PackageVersion=$version
+            dotnet nuget push $PWD/publish/SourceCrafter.DependencyInjection.Metadata.$version.nupkg --api-key $env:NUGET_API_KEY --source "https://api.nuget.org/v3/index.json"
+
             dotnet pack $PWD/SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj -c Release -v n -p:PackageVersion=$version
+            dotnet nuget push $PWD/publish/SourceCrafter.DependencyInjection.MsConfiguration.$version.nupkg --api-key $env:NUGET_API_KEY --source "https://api.nuget.org/v3/index.json"
+
             dotnet pack $PWD/SourceCrafter.DependencyInjection.MsConfiguration.Metadata/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj -c Release -v n -p:PackageVersion=$version
+            dotnet nuget push $PWD/publish/SourceCrafter.DependencyInjection.MsConfiguration.Metadata.$version.nupkg --api-key $env:NUGET_API_KEY --source "https://api.nuget.org/v3/index.json"
         }
         catch
         {
