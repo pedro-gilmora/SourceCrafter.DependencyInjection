@@ -35,7 +35,7 @@ jobs:
       id: build
       run: |
         try {
-          .\Package.ps1 -clean false -specificVersion "${{ env.VERSION }}" -test false -forcePack true
+          .\Package.ps1 -clean false -specificVersion "${{ env.VERSION }}" -test true -forcePack $($github.event.head_commit.message -match '^\[Release\]\s*')
         } catch {
           Write-Error @"
         Restore, Package and Test errors: 
@@ -44,16 +44,14 @@ jobs:
         }
       
     - name: Publish generator and endpoints to Nuget
-      if: github.ref_name == 'dev' && startsWith(github.event.head_commit.message, '[Release]')
       id: publish
       shell: pwsh     
       run: |        
-        $packages = Get-ChildItem -Recurse -Filter *.nupkg | Where-Object { $_.FullName -like "*\publish\*" }
+        $packages = Get-ChildItem -Filter publish\*.nupkg
 
         foreach ($package in $packages) {
-            # Run dotnet nuget push and capture output
-            $output = & dotnet nuget push $package.FullName --api-key $env:NUGET_API_KEY --source "https://api.nuget.org/v3/index.json" 2>&1 | Select-String ": error "
-
+            $output = dotnet nuget push $package.FullName --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | Select-String "error: "
+            
             if ($output) {
                 Add-Content -Path "errors.log" -Value ("Restore errors: " + $output)
                 continue
@@ -63,9 +61,7 @@ jobs:
                 $packageName = $matches[1]
                 $version = $matches[2]
 
-                # Write to telegram_packages.txt
                 Add-Content -Path "telegram_packages.txt" -Value "| $packageName | [$version](https://www.nuget.org/packages/$packageName/$version) |"
-                # Write to github_packages.txt
                 Add-Content -Path "github_packages.txt" -Value "[![$packageName`: $version](https://img.shields.io/nuget/v/$packageName.svg?label=$packageName&style=plastic)](https://www.nuget.org/packages/$packageName/$version)"
             }
         }
@@ -89,13 +85,13 @@ jobs:
         ### Packages
         | Package Name | Package Version |
         |---|---|
-        $(Get-Content -Path ./telegram_packages.txt)
+        $(Get-Content -Path ./telegram_packages.txt -Raw)
         "@
           echo $telegramPackages
         }
         $githubPackages = ''          
         if(Test-Path ./github_packages.txt) {
-          $githubPackages = Get-Content -Path ./github_packages.txt
+          $githubPackages = Get-Content -Path ./github_packages.txt -Raw
           echo $githubPackages
         }
 
