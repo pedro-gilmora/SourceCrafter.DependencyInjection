@@ -32,12 +32,6 @@
     <File Path="Solution/Metadata/Attributes.cs" />
   </Folder>
   <Project Path="Benchmarks/Benchmarks.csproj" />
-  <Project Path="SourceCrafter.DependencyInjection.Base/SourceCrafter.DependencyInjection.Base.csproj">
-    <BuildType Solution="DEBUG_SG|*" Project="Debug" />
-  </Project>
-  <Project Path="SourceCrafter.DependencyInjection.Interop/SourceCrafter.DependencyInjection.Interop.csproj">
-    <BuildType Solution="DEBUG_SG|*" Project="Debug" />
-  </Project>
   <Project Path="SourceCrafter.DependencyInjection.Metadata/SourceCrafter.DependencyInjection.Metadata.csproj">
     <BuildType Solution="DEBUG_SG|*" Project="Debug" />
   </Project>
