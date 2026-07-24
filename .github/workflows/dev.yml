@@ -60,8 +60,8 @@ jobs:
           filename=$(basename "$package" .nupkg)
           package_name="${filename%%.[0-9]*}"   # everything before the last dot+digit
           version="${filename##$package_name.}" # everything after
-          printf "\n| $package_name | [$version](https://www.nuget.org/packages/$package_name/$version) |" >> telegram_packages.txt
-          printf "\n[![$package_name: $version](https://img.shields.io/nuget/v/$package_name.svg?label=$package_name&style=plastic)](https://www.nuget.org/packages/$package_name/$version)" >> github_packages.txt          
+          printf "\r\n| $package_name | [$version](https://www.nuget.org/packages/$package_name/$version) |" >> telegram_packages.txt
+          printf "\r\n[![$package_name: $version](https://img.shields.io/nuget/v/$package_name.svg?label=$package_name&style=plastic)](https://www.nuget.org/packages/$package_name/$version)" >> github_packages.txt          
         done
 
     - name: Notify Telegram & create GitHub Release
