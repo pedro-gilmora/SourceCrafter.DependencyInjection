@@ -46,33 +46,37 @@ jobs:
     - name: Publish generator and endpoints to Nuget
       if: github.ref_name == 'dev' && startsWith(github.event.head_commit.message, '[Release]')
       id: publish
-      run: |  
-        telegram=();
-        github=();
+      run: | 
+        declare -A packages
+        
         for package in $(find . -wholename '**/publish/*.nupkg'); do
           filename=$(basename "$package" .nupkg)
           package_name="${filename%%.[0-9]*}"   # everything before the last dot+digit
           version="${filename##$package_name.}" # everything after
-          
-          telegram+=("| $package_name | [$version](https://www.nuget.org/packages/$package_name/$version) |")
-          github+=("[![$package_name: $version](https://img.shields.io/nuget/v/$package_name.svg?label=$package_name&style=plastic)](https://www.nuget.org/packages/$package_name/$version)")
-          
+          packages[$package_name]=$version
+
           # Execute nuget push for each package
           output=$(dotnet nuget push "$package" --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" 2>&1)
 
           if [ $? -ne 0 ]; then
-            # Keep the badge arrays clean
-            unset 'telegram[-1]'
-            unset 'github[-1]'
+            # Remove from packages
+            unset packages["$package_name"]
 
             # Log the entire output, not just filtered lines
             echo -e "Nuget errors for $package:\n$output\n" >> errors.log
           fi
         done
-        # Escribir cada array en su archivo
-        printf "%s\n" "${telegram[@]}" > telegram_packages.txt
-        printf "%s\n" "${github[@]}"   > github_packages.txt
 
+        json_parts=()
+        for name in "${!packages[@]}"; do
+          json_parts+=("{\"package\":\"$name\",\"version\":\"${packages[$name]}\"}")
+        done
+
+        # Join with commas using IFS
+        json=$(IFS=,; echo "[${json_parts[*]}]")
+
+        # Export to GitHub Actions environment
+        echo "$json" >> nuget_pkgs.json
 
     - name: Notify Telegram & create GitHub Release
       if: always()
@@ -85,23 +89,26 @@ jobs:
         if(Test-Path ./github_event.json) {
           $githubEvent = Get-Content -Path ./github_event.json -Raw | ConvertFrom-Json
         }
+        
         #Read published telegram packages
-        $telegramPackages = ''          
-        if(Test-Path ./telegram_packages.txt) {
-          $telegramPackages = @"
+        $packages = $(Get-Content -Path nuget_pkgs.json -Raw | ConvertFrom-Json | Sort-Object { $_.package.Length })
+        
+        $telegramPackages, $githubPackages = if($packages){
+        @"
         ---
         ### Packages
+
         | Package Name | Package Version |
-        |---|---|
-        $(Get-Content -Path ./telegram_packages.txt -Raw)
+        |---|---|$($packages | Sort-Object { $_.package.Length } | ForEach-Object { "
+        | $($_.package) | [$($_.version)](https://www.nuget.org/packages/$($_.package)/$($_.version)) |" })"
+        "@,
+        @"
+        ---
+        ### Packages
+        $($packages | Sort-Object { $_.package.Length } | ForEach-Object { "
+        [![$($_.package): $($_.version)](https://img.shields.io/nuget/v/$($_.package).svg?label=$($_.package)&style=plastic)](https://www.nuget.org/packages/$($_.package)/$($_.version))" })
         "@
-          echo $telegramPackages
-        }
-        $githubPackages = ''          
-        if(Test-Path ./github_packages.txt) {
-          $githubPackages = $(Get-Content -Path ./github_packages.txt -Raw)
-          echo $githubPackages
-        }
+        } else {"",""}
 
         # Load errors from errors logs file
         $errors = ""
