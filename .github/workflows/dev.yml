@@ -46,22 +46,29 @@ jobs:
     - name: Publish generator and endpoints to Nuget
       if: github.ref_name == 'dev' && startsWith(github.event.head_commit.message, '[Release]')
       id: publish
-      run: |        
+      run: |  
+        telegram=();
+        github=();
+        i=0
         for package in $(find . -wholename '**/publish/*.nupkg'); do
-          # Execute nuget push for each package
-          output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error / { print }')
-
-          if [ "${#output}" -ne 0 ]; then
-            echo -e "Restore errors:
-          $output" >> errors.log
-            continue;
-          fi
-
           filename=$(basename "$package" .nupkg)
           package_name="${filename%%.[0-9]*}"   # everything before the last dot+digit
           version="${filename##$package_name.}" # everything after
-          printf "| $package_name | [$version](https://www.nuget.org/packages/$package_name/$version) |" >> telegram_packages.txt
-          printf "[![$package_name: $version](https://img.shields.io/nuget/v/$package_name.svg?label=$package_name&style=plastic)](https://www.nuget.org/packages/$package_name/$version)" >> github_packages.txt          
+          
+          telegram+=("| $package_name | [$version](https://www.nuget.org/packages/$package_name/$version) |")
+          github+=("[![$package_name: $version](https://img.shields.io/nuget/v/$package_name.svg?label=$package_name&style=plastic)](https://www.nuget.org/packages/$package_name/$version)")
+          
+          # Execute nuget push for each package
+          output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error/ { print }')
+
+          if [ "${#output}" -ne 0 ]; then
+            unset 'telegram[-1]'
+            unset 'github[-1]'
+            echo -e "Nuget errors:
+          $output" >> errors.log
+            continue;
+          fi
+          ((i++))
         done
 
 
@@ -83,14 +90,13 @@ jobs:
         ---
         ### Packages
         | Package Name | Package Version |
-        |---|---|
-        $(Get-Content -Path ./telegram_packages.txt -Raw)
+        |---|---|$(Get-Content -Path ./telegram_packages.txt -Raw)
         "@
           echo $telegramPackages
         }
         $githubPackages = ''          
         if(Test-Path ./github_packages.txt) {
-          $githubPackages = Get-Content -Path ./github_packages.txt -Raw
+          $githubPackages = $(Get-Content -Path ./github_packages.txt -Raw)
           echo $githubPackages
         }
 
@@ -179,7 +185,7 @@ jobs:
           
           ### Packages
           $githubPackages"
-          } else { "" }) 
+          } else { "$githubPackages" }) 
         }
   
         Write-Host $message
