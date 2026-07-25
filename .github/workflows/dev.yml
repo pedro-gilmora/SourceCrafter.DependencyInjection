@@ -69,6 +69,9 @@ jobs:
             echo -e "Nuget errors for $package:\n$output\n" >> errors.log
           fi
         done
+        # Escribir cada array en su archivo
+        printf "%s\n" "${telegram[@]}" > telegram_packages.txt
+        printf "%s\n" "${github[@]}"   > github_packages.txt
 
 
     - name: Notify Telegram & create GitHub Release
@@ -89,7 +92,8 @@ jobs:
         ---
         ### Packages
         | Package Name | Package Version |
-        |---|---|$(Get-Content -Path ./telegram_packages.txt -Raw)
+        |---|---|
+        $(Get-Content -Path ./telegram_packages.txt -Raw)
         "@
           echo $telegramPackages
         }
