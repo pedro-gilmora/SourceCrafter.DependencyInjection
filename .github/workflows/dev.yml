@@ -49,7 +49,6 @@ jobs:
       run: |  
         telegram=();
         github=();
-        i=0
         for package in $(find . -wholename '**/publish/*.nupkg'); do
           filename=$(basename "$package" .nupkg)
           package_name="${filename%%.[0-9]*}"   # everything before the last dot+digit
@@ -59,16 +58,16 @@ jobs:
           github+=("[![$package_name: $version](https://img.shields.io/nuget/v/$package_name.svg?label=$package_name&style=plastic)](https://www.nuget.org/packages/$package_name/$version)")
           
           # Execute nuget push for each package
-          output=$(dotnet nuget push $package --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" | awk '/: error/ { print }')
+          output=$(dotnet nuget push "$package" --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" 2>&1)
 
-          if [ "${#output}" -ne 0 ]; then
+          if [ $? -ne 0 ]; then
+            # Keep the badge arrays clean
             unset 'telegram[-1]'
             unset 'github[-1]'
-            echo -e "Nuget errors:
-          $output" >> errors.log
-            continue;
+
+            # Log the entire output, not just filtered lines
+            echo -e "Nuget errors for $package:\n$output\n" >> errors.log
           fi
-          ((i++))
         done
 
 
