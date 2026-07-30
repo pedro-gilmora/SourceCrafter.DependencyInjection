@@ -5,7 +5,7 @@ using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
 
 namespace SourceCrafter.DependencyInjection.Tests
 {
-    [ServiceContainer]
+    [ServiceContainer(EnvName)]
     [JsonSetting<AppSettings>("AppSettings")]
     [Scoped("count", source: nameof(CountAsync))]
     [Scoped("reqId", source: nameof(ResolveRequestIdTask))]
@@ -15,6 +15,7 @@ namespace SourceCrafter.DependencyInjection.Tests
     [Scoped<EmployeeController>]
     public interface IServer : IServiceProvider
     {
+        internal const string EnvName = "ASPNETCORE_ENVIRONMENT";
         static Task<int> CountAsync(IServer _) => Task.FromResult(1);
 
         static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());

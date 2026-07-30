@@ -57,13 +57,33 @@ namespace SourceCrafter.DependencyInjection
                 genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters | SymbolDisplayGenericsOptions.IncludeVariance,
                 miscellaneousOptions: SymbolDisplayMiscellaneousOptions.UseSpecialTypes | SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
-        internal static string ToGlobalNamespaced(this ISymbol t) => t.ToDisplayString(_globalizedNamespace);
+        extension(AttributeData t)
+        {
+            internal AttributeSyntax? Syntax => t.ApplicationSyntaxReference?.GetSyntax() as AttributeSyntax;
+        }
 
-        internal static string ToGlobalNonGenericNamespace(this ISymbol t) => t.ToDisplayString(_globalizedNonGenericNamespace);
+        extension(IFieldSymbol t)
+        {
+            internal string GlobalNamespaced => 
+                t.ToDisplayString(
+                    _globalizedNamespace.RemoveMemberOptions(                        
+                        SymbolDisplayMemberOptions.IncludeType |
+                        SymbolDisplayMemberOptions.IncludeModifiers |
+                        SymbolDisplayMemberOptions.IncludeExplicitInterface |
+                        SymbolDisplayMemberOptions.IncludeParameters |
+                        SymbolDisplayMemberOptions.IncludeConstantValue |
+                        SymbolDisplayMemberOptions.IncludeRef));
+        }
+        extension(ISymbol t)
+        {
+            internal string GlobalNamespaced => t.ToDisplayString(_globalizedNamespace);
 
-        internal static string ToTypeNameFormat(this ITypeSymbol t) => t.ToDisplayString(_typeNameFormat);
+            internal string GlobalNonGenericNamespace => t.ToDisplayString(_globalizedNonGenericNamespace);
 
-        internal static string ToNameOnly(this ISymbol t) => t.ToDisplayString(_symbolNameOnly);
+            internal string TypeNameFormat => t.ToDisplayString(_typeNameFormat);
+
+            internal string NameOnly => t.ToDisplayString(_symbolNameOnly);
+        }
 
         //internal readonly record struct DependencyInfo
         //{
@@ -511,7 +531,7 @@ namespace SourceCrafter.DependencyInjection
 
         internal static bool TryGetAsyncType(this ITypeSymbol typeSymbol, out ITypeSymbol factoryType)
         {
-            switch ((factoryType = typeSymbol)?.ToGlobalNonGenericNamespace())
+            switch ((factoryType = typeSymbol)?.GlobalNonGenericNamespace)
             {
                 case "global::System.Threading.Tasks.ValueTask" or "global::System.Threading.Tasks.Task"
                     when factoryType is INamedTypeSymbol { TypeArguments: [{ } firstTypeArg] }:

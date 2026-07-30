@@ -42,7 +42,8 @@ public sealed class CodeGenerator : IIncrementalGenerator
             ScopedAttr = $"{GlobalBaseAttributeNS}.ScopedAttribute",
             TransientAttr = $"{GlobalBaseAttributeNS}.TransientAttribute",
             DependencyAttr = $"{GlobalBaseAttributeNS}.DependencyAttribute",
-            ServiceContainerAttr = $"global::{ServiceContainerFullTypeName}";
+            ServiceContainerAttr = $"global::{ServiceContainerFullTypeName}",
+            DefaultEnvName = @"""DOTNET_ENVIRONMENT""";
 
 
     //private readonly DependencyMapDictionary containers = new(StringComparer.Ordinal);
@@ -78,7 +79,7 @@ public sealed class CodeGenerator : IIncrementalGenerator
                 .Collect();
         var scopedUsage = context.SyntaxProvider
                 .CreateSyntaxProvider(
-                    (syntax, _) => syntax is MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax { }, Name.Identifier.ValueText: "GetService" or "GetRequiredService" or "GetKeyedService" or "GetRequiredKeyedService"},
+                    (syntax, _) => syntax is MemberAccessExpressionSyntax { Parent: InvocationExpressionSyntax { }, Name.Identifier.ValueText: "GetService" or "GetRequiredService" or "GetKeyedService" or "GetRequiredKeyedService" },
                     GetInvokeInfos)
                 .Where(info => info is not null)
                 .Collect();
@@ -192,17 +193,17 @@ internal static class Extensions
     {
         var declaration = providerType.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
         var providerTypeId = SymbolEqualityComparer.Default.GetHashCode(providerType);
-        var providerFullTypeName = providerType.ToGlobalNamespaced();
+        var providerFullTypeName = providerType.GlobalNamespaced;
         var isInterfaceProvider = providerType.TypeKind == TypeKind.Interface;
-        var providerTypeName = providerType.ToTypeNameFormat();
+        var providerTypeName = providerType.TypeNameFormat;
         var className = isInterfaceProvider ? providerTypeName[1..] : providerTypeName;
-        var fullProviderImplName = providerType.ContainingNamespace.ToGlobalNamespaced() + '.' + className;
+        var fullProviderImplName = providerType.ContainingNamespace.GlobalNamespaced + '.' + className;
         //var providerId = SymbolEqualityComparer.Default.GetHashCode(providerType);
         var compilationId = compilation.GetHashCode();
         var attributes = providerType.GetAttributes();
         bool
             hasScopedDependencies = false,
-            useInterceptors = providerType.AllInterfaces.Any(i => i.ToGlobalNamespaced() == "global::System.IServiceProvider");
+            useInterceptors = providerType.AllInterfaces.Any(i => i.GlobalNamespaced == "global::System.IServiceProvider");
 
         HashSet<string> externalAssemblies = [];
         StringBuilder code = new("#nullable enable\n");
@@ -240,6 +241,8 @@ internal static class Extensions
                 ($"{mods/*.Except([SyntaxFactory.Token(SyntaxKind.InterfaceKeyword)])*/} partial class".TrimStart(), $"{identifier.ValueText[1..]}{typeParamsList}"),
             _ => ("", "")
         };
+
+        string envName = "";
 
         foreach (var attr in attributes)
         {
@@ -283,7 +286,7 @@ internal static class Extensions
         AddDisposabilityInterface(containerDisposability, isInterfaceProvider);
 
         code.Append(@"
-    public static string EnvironmentName => global::System.Environment.GetEnvironmentVariable(""DOTNET_ENVIRONMENT"") ?? ""Development"";
+    public static string EnvironmentName => global::System.Environment.GetEnvironmentVariable(").Append(envName).Append(@") ?? ""Development"";
 ");
 
         List<Action> scopedExposers = [];
@@ -467,7 +470,7 @@ public static class ").Append(typeName).Append(@"Extensions
         {
             foreach (var serviceCall in serviceCalls)
             {
-                if(!serviceCall.Acknowledged) diagnostics.Add(ServiceContainerGeneratorDiagnostics.UncoveredGenericResolver(serviceCall.Member, providerFullTypeName));
+                if (!serviceCall.Acknowledged) diagnostics.Add(ServiceContainerGeneratorDiagnostics.UncoveredGenericResolver(serviceCall.Member, providerFullTypeName));
             }
         }
 
@@ -484,7 +487,7 @@ public static class ").Append(typeName).Append(@"Extensions
                         ? serviceCall.ContainerType.ContainingType
                         : serviceCall.ContainerType;
 
-                    var nameOnly = callContainerType.ToNameOnly();
+                    var nameOnly = callContainerType.NameOnly;
                     var isMicrosoftScoped = callContainerType.AsNonNullable().ToDisplayString().Equals("Microsoft.Extensions.DependencyInjection.IServiceScope");
 
                     if (!(SymbolEqualityComparer.Default.Equals(callContainerType, providerType)
@@ -496,7 +499,7 @@ public static class ").Append(typeName).Append(@"Extensions
 
                     returnType.TryGetAsyncType(out var type);
 
-                    var typeHashCode = type.ToGlobalNamespaced().GetHashCode();
+                    var typeHashCode = type.GlobalNamespaced.GetHashCode();
 
                     var lifeTime = Lifetime.Singleton;
 #if DEBUG_SG
@@ -642,7 +645,7 @@ public static class ").Append(typeName).Append(@"Extensions
 
             if (!IsValidServiceAttribute(attr))
             {
-                if ((sourceType ?? type)?.ToGlobalNamespaced() is { } fullName && attr?.ApplicationSyntaxReference?.GetSyntax() is { } attrSyntx)
+                if ((sourceType ?? type)?.GlobalNamespaced is { } fullName && attr?.ApplicationSyntaxReference?.GetSyntax() is { } attrSyntx)
                 {
                     diagnostics.Add(
                         ServiceContainerGeneratorDiagnostics
@@ -659,8 +662,8 @@ public static class ").Append(typeName).Append(@"Extensions
             resolver = existingOrNewValueBuilder = ref dependencyAsValueBuilders.GetValueRefOrAddDefault(key, out var exists)!;
 
 
-            var typeFullName = type.ToGlobalNamespaced();
-            var exportTypeFullName = exportType.ToGlobalNamespaced();
+            var typeFullName = type.GlobalNamespaced;
+            var exportTypeFullName = exportType.GlobalNamespaced;
 
             if (validateAsChildDependency?.Invoke(
                 exists,
@@ -737,11 +740,11 @@ public static class ").Append(typeName).Append(@"Extensions
             {
                 var paramIndex = paramPos++;
                 var paramAsyncType = prm.Type.TryGetAsyncType(out var paramType);
-                var paramTypeHashCode = paramType.ToGlobalNamespaced().GetHashCode();
+                var paramTypeHashCode = paramType.GlobalNamespaced.GetHashCode();
 
                 if (paramType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == className || SymbolEqualityComparer.Default.Equals(paramType, providerType))
                 {
-                    var asksForRoot = prm.GetAttributes().Any(a => a.AttributeClass?.ToGlobalNamespaced() == $"{GlobalBaseAttributeNS}.RootAttribute");
+                    var asksForRoot = prm.GetAttributes().Any(a => a.AttributeClass?.GlobalNamespaced == $"{GlobalBaseAttributeNS}.RootAttribute");
                     appendParams.Add(new(cancelDepInfo.Key, AppendProvider));
                     continue;
                     void AppendProvider(bool _) => code.Append(asksForRoot ? "Root" : "this");
@@ -1372,7 +1375,7 @@ public static class ").Append(typeName).Append(@"Extensions
             }
 
             void BuildFactoryCaller(
-                bool allowAwait, 
+                bool allowAwait,
                 string newIndentedLine = @"
 				")
             {
@@ -1486,12 +1489,33 @@ public static class ").Append(typeName).Append(@"Extensions
 
             bool IsValidServiceAttribute(AttributeData? attr)
             {
+                var isContainerAttr = false;
+
                 if (attr is not { AttributeClass: { } _attrClass, ApplicationSyntaxReference: { } attrSyntaxRef }
-                    || _attrClass.ToGlobalNamespaced() is ServiceContainerAttr
+                    || (isContainerAttr = _attrClass.GlobalNamespaced is ServiceContainerAttr)
                     || attrSyntaxRef.GetSyntax() is not AttributeSyntax { } _attrSyntax
                     || !TryGetAttributeParamsDefinition(model.GetSymbolInfo(_attrSyntax), out ImmutableArray<IParameterSymbol> attrParams)
                     || !TryGetLifetime(_attrSyntax, ref _attrClass, ref isExternal, out lifetime))
                 {
+                    if (isContainerAttr)
+                    {
+                        envName = attr switch
+                        {
+                            { Syntax.ArgumentList.Arguments: [{ } arg, ..] } => arg switch
+                                {
+                                    { Expression: LiteralExpressionSyntax { Token.ValueText: { } envString } } when envString.Trim() is { Length: > 0 } => $@"""{envString}""",
+                                    { Expression: MemberAccessExpressionSyntax { Name: { } member } } => model.GetSymbolInfo(member) switch
+                                        {
+                                            { Symbol: IFieldSymbol {} field } => field.GlobalNamespaced,
+                                            _ => DefaultEnvName
+                                        },
+                                    { Expression: IdentifierNameSyntax member } => isInterfaceProvider ? $"{providerTypeName}.{member.Identifier.ValueText}" : member.Identifier.ValueText,
+                                    _ => DefaultEnvName
+                                },
+                            { ConstructorArguments: [{ Value: string v }, ..] } => $@"""{v}""",
+                            _ => DefaultEnvName
+                        };
+                    }
                     return false;
                 }
 
@@ -1520,6 +1544,7 @@ public static class ").Append(typeName).Append(@"Extensions
                     }
                 }
 
+
                 foreach (var (param, arg) in GetAttrParamsMap(attrParams, _attrSyntax.ArgumentList?.Arguments ?? []))
                 {
                     switch (param.Name)
@@ -1530,7 +1555,7 @@ public static class ").Append(typeName).Append(@"Extensions
 
                             continue;
 
-                        case IfaceParamName when sourceSymbol is IParameterSymbol { Type.TypeKind : not TypeKind.Interface } && !isGeneric && arg is { Expression: TypeOfExpressionSyntax { Type: { } type } }:
+                        case IfaceParamName when sourceSymbol is IParameterSymbol { Type.TypeKind: not TypeKind.Interface } && !isGeneric && arg is { Expression: TypeOfExpressionSyntax { Type: { } type } }:
 
                             interfaceType = (ITypeSymbol)model!.GetSymbolInfo(type).Symbol!;
 
@@ -1620,7 +1645,7 @@ public static class ").Append(typeName).Append(@"Extensions
                     keyHashCode = (name = paramName).GetHashCode();
                 }
 
-                typeHashCode = (interfaceType ?? type!).ToGlobalNamespaced().GetHashCode();
+                typeHashCode = (interfaceType ?? type!).GlobalNamespaced.GetHashCode();
 
                 key = (lifetime, typeHashCode, keyHashCode);
 
@@ -1771,7 +1796,7 @@ public static class ").Append(typeName).Append(@"Extensions
 
                     default:
 
-                        string typeName = type.ToTypeNameFormat();
+                        string typeName = type.TypeNameFormat;
 
                         if (type is IArrayTypeSymbol { ElementType: { } elType })
                             typeName = Sanitize(elType) + "Array";
@@ -1828,7 +1853,7 @@ public static class ").Append(typeName).Append(@"Extensions
         bool found;
         do
         {
-            (isExternal, (found, lifetime)) = attrClass.ToGlobalNonGenericNamespace() switch
+            (isExternal, (found, lifetime)) = attrClass.GlobalNonGenericNamespace switch
             {
                 SingletonAttr => (isExternal, (true, Lifetime.Singleton)),
                 ScopedAttr => (isExternal, (true, Lifetime.Scoped)),
@@ -1878,7 +1903,7 @@ public static class ").Append(typeName).Append(@"Extensions
                 Name: GenericNameSyntax { TypeArgumentList.Arguments: [{ } typeArgSyntax], Identifier.ValueText: { } methodName } method,
                 Expression: IdentifierNameSyntax { } refVar
             } memberAccess
-            
+
             || gsc.SemanticModel.GetInterceptableLocation(inv) is not { } interceptor
 
             || gsc.SemanticModel.GetTypeInfo(typeArgSyntax).Type is not ITypeSymbol { } depTypeResult) return null!;
@@ -1916,7 +1941,7 @@ public static class ").Append(typeName).Append(@"Extensions
     }
 
     static bool IsGeneratedServiceContainer(AttributeData attrData) =>
-        attrData.AttributeClass?.ToGlobalNamespaced().EndsWith(serviceContainerFullTypeName) ?? false;
+        attrData.AttributeClass?.GlobalNamespaced.EndsWith(serviceContainerFullTypeName) ?? false;
 
     private static string ParseToolAndVersion()
     {
@@ -2069,7 +2094,7 @@ static class Helpers
 
     internal static AsyncType TryGetAsyncType(this ITypeSymbol typeSymbol, out ITypeSymbol factoryType)
     {
-        switch (typeSymbol.ToGlobalNonGenericNamespace())
+        switch (typeSymbol.GlobalNonGenericNamespace)
         {
             case "global::System.Threading.Tasks.ValueTask" or "global::System.Threading.Tasks.Task"
                 when typeSymbol is INamedTypeSymbol { TypeArguments: [{ } firstTypeArg] }:
@@ -2092,7 +2117,7 @@ static class Helpers
 
         foreach (var iFace in type.AllInterfaces)
         {
-            switch (iFace.ToGlobalNonGenericNamespace())
+            switch (iFace.GlobalNonGenericNamespace)
             {
                 case "global::System.IDisposable" when disposability is Disposability.None:
                     disposability = Disposability.Disposable;
