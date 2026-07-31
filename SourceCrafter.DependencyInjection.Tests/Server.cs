@@ -7,7 +7,7 @@ namespace SourceCrafter.DependencyInjection.Tests
 {
     [ServiceContainer(EnvName)]
     [JsonSetting<AppSettings>("AppSettings")]
-    [Scoped("count", source: nameof(CountAsync))]
+    [Transient("count", source: nameof(CountAsync))]
     [Scoped("reqId", source: nameof(ResolveRequestIdTask))]
     [Scoped("finalCount", source: nameof(GetCount))]
     [Singleton<IDatabase, Database>]

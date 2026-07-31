@@ -20,9 +20,9 @@ using System.Threading;
 using System.Xml.Linq;
 
 using DependencyKey = (Lifetime lifetime, int typeHash, int keyHash);
-delegate void BuildValue(bool asyncContext = false);
+delegate void BuildValue(bool asyncContext = false, bool interceptorContext = false);
 [Generator]
-public sealed class CodeGenerator : IIncrementalGenerator
+public sealed class Containers : IIncrementalGenerator
 {
     internal static readonly int EmptyStringHashCode = "".GetHashCode();
 
@@ -49,7 +49,7 @@ public sealed class CodeGenerator : IIncrementalGenerator
     //private readonly DependencyMapDictionary containers = new(StringComparer.Ordinal);
     private readonly CancellationTokenSource cancellationTokenSource = new();
 
-    ~CodeGenerator()
+    ~Containers()
     {
         //containers.Clear();
         cancellationTokenSource.Cancel();
@@ -120,7 +120,6 @@ namespace System.Runtime.CompilerServices
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
     public sealed class InterceptsLocationAttribute(int version, string data) : global::System.Attribute { }
 }");
-
 
                     if (addExtensions)
                     {
@@ -210,7 +209,7 @@ internal static class Extensions
         ResolverBuilder cancelDepInfo = new("Scoped CancellationToken token")
         {
             Key = (Lifetime.Transient, SymbolEqualityComparer.Default.GetHashCode(cancelTokenType), EmptyStringHashCode),
-            BuildValue = _ => code.Append("cancellationToken")
+            BuildValue = (_,_) => code.Append("cancellationToken")
         };
         var defaultKeyComparer = EqualityComparer<DependencyKey>.Default;
         Map<DependencyKey, ResolverBuilder> dependencyAsValueBuilders = new(defaultKeyComparer);
@@ -546,11 +545,11 @@ public static class ").Append(typeName).Append(@"Extensions
 
                         code.Append(@") => ").Append("((").Append(className);
 
-                        if (isScoped) code.Append(".Scoped");
+                        if (isScoped && lifetime != Lifetime.Transient) code.Append(".Scoped");
 
                         code.Append(")provider).");
 
-                        buildValue();
+                        buildValue(interceptorContext: true);
 
                         code.Append(@";
 ");
@@ -719,7 +718,7 @@ public static class ").Append(typeName).Append(@"Extensions
                         .PrimitiveDependencyShouldBeKeyed(lifetime, attrSyntax, typeFullName, exportTypeFullName));
             }
 
-            if (!(isExternal || (isFactory && !isCached) || isSimpleTransient)) dependencyBuilders.Add(BuildMethod);
+            if (!isExternal && (!isFactory || isCached || !isSimpleTransient)) dependencyBuilders.Add(BuildMethod);
 
             //$"{key}: {existingOrNewValueBuilder}".Dump();
 
@@ -747,7 +746,7 @@ public static class ").Append(typeName).Append(@"Extensions
                     var asksForRoot = prm.GetAttributes().Any(a => a.AttributeClass?.GlobalNamespaced == $"{GlobalBaseAttributeNS}.RootAttribute");
                     appendParams.Add(new(cancelDepInfo.Key, AppendProvider));
                     continue;
-                    void AppendProvider(bool _) => code.Append(asksForRoot ? "Root" : "this");
+                    void AppendProvider(bool _, bool __) => code.Append(asksForRoot ? "Root" : "this");
                 }
 
                 if (SymbolEqualityComparer.Default.Equals(prm.Type, cancelTokenType))
@@ -785,7 +784,7 @@ public static class ").Append(typeName).Append(@"Extensions
                     var buildParam = foundService!.BuildValue;
                     var foundExportTypeFullName = foundService.ExportTypeFullName;
 
-                    appendParams.Add(new(resolvedKey, asyncContext =>
+                    appendParams.Add(new(resolvedKey, (asyncContext, _) =>
                     {
                         var awaits = asyncContext && foundService.AsyncType is not 0 && paramAsyncType is 0;
 
@@ -910,7 +909,7 @@ public static class ").Append(typeName).Append(@"Extensions
                     appendParams.Add(new(resolvedKey, AppendDefault));
                 }
 
-                bool ValidateChild(bool childExists, bool isChildValid, Lifetime childLifetime, AsyncType childAsyncType, int childParamCount, Action<bool> buildParam, bool isNullChildType, bool isUnkeyedInternalPrimitive)
+                bool ValidateChild(bool childExists, bool isChildValid, Lifetime childLifetime, AsyncType childAsyncType, int childParamCount, BuildValue buildParam, bool isNullChildType, bool isUnkeyedInternalPrimitive)
                 {
                     if (!hasAsyncDependencies && childAsyncType > 0) hasAsyncDependencies = true;
 
@@ -1105,11 +1104,11 @@ public static class ").Append(typeName).Append(@"Extensions
 
                     if (isFactory)
                     {
-                        BuildFactoryCaller(true);
+                        ProvideFactoryCaller(true);
                     }
                     else
                     {
-                        BuildInstance(true);
+                        ProvideInstance(true);
                     }
                     code.Append(@";
 ");
@@ -1138,11 +1137,11 @@ public static class ").Append(typeName).Append(@"Extensions
 
                         if (isFactory)
                         {
-                            BuildFactoryCaller(false);
+                            ProvideFactoryCaller(false);
                         }
                         else
                         {
-                            BuildInstance(false);
+                            ProvideInstance(false);
                         }
 
                         code.Append(@";
@@ -1167,7 +1166,7 @@ public static class ").Append(typeName).Append(@"Extensions
 		
 		return ").Append(backingFieldName).Append(" ??= ");
 
-                            BuildFactoryCaller(false);
+                            ProvideFactoryCaller(false);
 
                             code.Append(";");
                         }
@@ -1212,12 +1211,12 @@ public static class ").Append(typeName).Append(@"Extensions
 
                             if (isFactory)
                             {
-                                BuildFactoryCaller(false, @"
+                                ProvideFactoryCaller(false, @"
 						");
                             }
                             else
                             {
-                                BuildInstance(false, @"
+                                ProvideInstance(false, @"
 						");
                             }
 
@@ -1241,12 +1240,12 @@ public static class ").Append(typeName).Append(@"Extensions
 
                             if (isFactory)
                             {
-                                BuildFactoryCaller(true, @"
+                                ProvideFactoryCaller(true, @"
 					");
                             }
                             else
                             {
-                                BuildInstance(true, @"
+                                ProvideInstance(true, @"
 					");
                             }
 
@@ -1329,27 +1328,27 @@ public static class ").Append(typeName).Append(@"Extensions
                     : typeName;
             }
 
-            void BuildValue(bool asyncContext = false)
+            void BuildValue(bool asyncContext = false, bool interceptorContext = false)
             {
-                if (!isCached && isFactory)
+                if (!interceptorContext && !isCached && isFactory)
                 {
                     //if (asyncContext && asyncType is not 0) code.Append("await ");
 
-                    BuildFactoryCaller(asyncContext);
+                    ProvideFactoryCaller(asyncContext);
                 }
-                else if (!isCached && !isExternal)
+                else if (!interceptorContext && !isCached && !isExternal)
                 {
-                    BuildInstance(asyncContext);
+                    ProvideInstance(asyncContext);
                 }
                 else
                 {
                     //if (asyncContext && (asyncType is not 0)) code.Append("await ");
 
-                    BuildCachedCaller();
+                    ProvideCachedCaller();
                 }
             }
 
-            void BuildCachedCaller(string newIndentedLine = @"
+            void ProvideCachedCaller(string newIndentedLine = @"
 				")
             {
                 code.Append(methodName);
@@ -1362,7 +1361,7 @@ public static class ").Append(typeName).Append(@"Extensions
                 }
             }
 
-            void BuildInstance(bool isAsyncContext, string newIndentedLine = @"
+            void ProvideInstance(bool isAsyncContext, string newIndentedLine = @"
 				")
             {
                 code.Append("new ")
@@ -1374,7 +1373,7 @@ public static class ").Append(typeName).Append(@"Extensions
                 code.Append(')');
             }
 
-            void BuildFactoryCaller(
+            void ProvideFactoryCaller(
                 bool allowAwait,
                 string newIndentedLine = @"
 				")
@@ -1459,7 +1458,7 @@ public static class ").Append(typeName).Append(@"Extensions
                     code.Append(comesFromCurrentProvider ? providerTypeName : providerFullTypeName).Append('.');
             }
 
-            void AppendDefault(bool _ = false)
+            void AppendDefault(bool _ = false, bool __ = false)
             {
                 code.Append("default");
 
@@ -1661,6 +1660,7 @@ public static class ").Append(typeName).Append(@"Extensions
                     is { IsDefaultOrEmpty: false, Length: > 0 } parameters)
                 {
                     prms = parameters;
+                    isSimpleTransient = lifetime is Lifetime.Transient && prms.Length == 0;
                 }
                 else if (!isSimpleTransient && !isCached)
                 {
@@ -1806,7 +1806,7 @@ public static class ").Append(typeName).Append(@"Extensions
             }
         }
 
-        void AppendCancelToken(bool _)
+        void AppendCancelToken(bool _, bool __)
         {
             code.Append("cancellationToken");
         }
@@ -1996,7 +1996,7 @@ public enum AsyncType : byte { None, ValueTask, Task }
 
 public enum Disposability : byte { None, Disposable, AsyncDisposable }
 
-internal delegate bool ChildDependencyHandler(bool childExists, bool isChildValid, Lifetime childLifetime, AsyncType isChildAsync, int childParamCount, Action<bool> buildParam, bool isNullChildType, bool isUnkeyedInternalPrimitive);
+internal delegate bool ChildDependencyHandler(bool childExists, bool isChildValid, Lifetime childLifetime, AsyncType isChildAsync, int childParamCount, BuildValue buildParam, bool isNullChildType, bool isUnkeyedInternalPrimitive);
 
 internal delegate void DisposeBuilder(bool await = true);
 
@@ -2131,7 +2131,7 @@ static class Helpers
     }
 }
 
-record ParamBuildOptions(DependencyKey Key, Action<bool> Build);
+record ParamBuildOptions(DependencyKey Key, BuildValue Build);
 
 [Flags]
 internal enum LockerTypes

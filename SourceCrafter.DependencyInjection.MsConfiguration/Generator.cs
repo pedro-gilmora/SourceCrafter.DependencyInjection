@@ -21,8 +21,10 @@ using System.Text;
 using System.Threading;
 using System.Xml.Linq;
 
+namespace MsConfiguration.Container;
+
 [Generator]
-public sealed class Generator : IIncrementalGenerator
+public sealed class Extensions : IIncrementalGenerator
 {
     private const string IConfigurationType = "global::Microsoft.Extensions.Configuration.IConfiguration";
     private const string FullyQualifiedMetadataName = "SourceCrafter.DependencyInjection.MsConfiguration.Metadata.JsonSettingAttribute";
