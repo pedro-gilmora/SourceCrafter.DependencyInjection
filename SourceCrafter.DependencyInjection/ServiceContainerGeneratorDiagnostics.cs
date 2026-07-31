@@ -209,4 +209,18 @@ internal static class ServiceContainerGeneratorDiagnostics
             method.Parent,
             providerFullTypeName);
     }
+
+    internal static Diagnostic ThrowInnerFactorySpecs(string name, Location location)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI12",
+            title: "Internal factory must be private and name must have underscore leading (Eg: _Name)",
+            messageFormat: "Internal factory '{0}' must be private and name must have underscore leading (Eg: _{0})",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true
+        );
+
+        return Diagnostic.Create(rule, location, name);
+    }
 }

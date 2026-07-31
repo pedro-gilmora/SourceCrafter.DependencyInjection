@@ -209,7 +209,7 @@ internal static class Extensions
         ResolverBuilder cancelDepInfo = new("Scoped CancellationToken token")
         {
             Key = (Lifetime.Transient, SymbolEqualityComparer.Default.GetHashCode(cancelTokenType), EmptyStringHashCode),
-            BuildValue = (_,_) => code.Append("cancellationToken")
+            BuildValue = (_, _) => code.Append("cancellationToken")
         };
         var defaultKeyComparer = EqualityComparer<DependencyKey>.Default;
         Map<DependencyKey, ResolverBuilder> dependencyAsValueBuilders = new(defaultKeyComparer);
@@ -245,7 +245,7 @@ internal static class Extensions
 
         foreach (var attr in attributes)
         {
-            TryBuildService(attr, null, out _);
+            ScanService(attr, null, out _);
         }
 
         containerDisposability = (Disposability)Math.Max((byte)scopedDisposability, (byte)containerDisposability);
@@ -563,7 +563,7 @@ public static class ").Append(typeName).Append(@"Extensions
                 interceptor.Locations.Add(interceptorLocation);
             }
         }
-        bool TryBuildService(AttributeData? attr, ISymbol? sourceSymbol, out ResolverBuilder resolver, ChildDependencyHandler? validateAsChildDependency = null)
+        bool ScanService(AttributeData? attr, ISymbol? sourceSymbol, out ResolverBuilder resolver, ChildDependencyHandler? validateAsChildDependency = null)
         {
             var (sourceKind, sourceType) = sourceSymbol?.Kind switch
             {
@@ -632,10 +632,7 @@ public static class ").Append(typeName).Append(@"Extensions
 
 #if DEBUG_SG
 
-            string ServiceString()
-            {
-                return $"({exportType}, {lifetime}, {keyHashCode})";
-            }
+            _ = $"({exportType}, {lifetime}, {keyHashCode})";
 
 #endif
             var (backingFieldName, methodName) = ("", "");
@@ -659,7 +656,6 @@ public static class ").Append(typeName).Append(@"Extensions
             var deepParamsCount = 0;
 
             resolver = existingOrNewValueBuilder = ref dependencyAsValueBuilders.GetValueRefOrAddDefault(key, out var exists)!;
-
 
             var typeFullName = type.GlobalNamespaced;
             var exportTypeFullName = exportType.GlobalNamespaced;
@@ -767,7 +763,7 @@ public static class ").Append(typeName).Append(@"Extensions
                 {
                     foreach (var paramAttr in paramAttrs)
                     {
-                        if (TryBuildService(paramAttr, prm, out foundService, ValidateChild))
+                        if (ScanService(paramAttr, prm, out foundService, ValidateChild))
                         {
                             break;
                         }
@@ -902,7 +898,7 @@ public static class ").Append(typeName).Append(@"Extensions
 
                 if (paramType.TypeKind is not TypeKind.Interface)
                 {
-                    TryBuildService(null, prm, out _, ValidateChild);
+                    ScanService(null, prm, out _, ValidateChild);
                 }
                 else
                 {
@@ -1467,23 +1463,23 @@ public static class ").Append(typeName).Append(@"Extensions
 
             (string, string) GetResolverName()
             {
-                var methodName = nameOrFormat is not null
+                var memberName = nameOrFormat is not null
                     ? string.Format(nameOrFormat, name.Pascalize()!).RemoveDuplicates()
                     : SanitizeTypeName(type ?? exportType, lifetime, name.Pascalize()!);
 
-                methodName = isExternal ? methodName : factory?.Name ?? methodName;
+                memberName = (isExternal ? memberName : factory?.Name ?? memberName).TrimStart('_');
 
-                if (factory != null && isCached && !methodName.EndsWith("Cached") && !methodName.EndsWith("Cache"))
-                    methodName += "Cached";
+                if (factory != null && isCached && !memberName.EndsWith("Cached") && !memberName.EndsWith("Cache"))
+                    memberName += "Cached";
 
-                var fieldName = "_" + methodName.Camelize();
+                var fieldName = "_" + memberName.Camelize();
 
-                if (!(methodName.Contains("Async") || methodName.Contains("Task")) && asyncType is not 0)
-                    (methodName, fieldName) = ((!isExternal && factory is null ? "Get" : "") + methodName + "Async", fieldName + "Task");
+                if (!(memberName.Contains("Async") || memberName.Contains("Task")) && asyncType is not 0)
+                    (memberName, fieldName) = ((!isExternal && factory is null ? "Get" : "") + memberName + "Async", fieldName + "Task");
 
-                //if (!isExternal && factory is null) methodName = "Get" + methodName;
+                //if (!isExternal && factory is null) memberName = "Get" + memberName;
 
-                return (fieldName, methodName);
+                return (fieldName, memberName);
             }
 
             bool IsValidServiceAttribute(AttributeData? attr)
@@ -1501,16 +1497,16 @@ public static class ").Append(typeName).Append(@"Extensions
                         envName = attr switch
                         {
                             { Syntax.ArgumentList.Arguments: [{ } arg, ..] } => arg switch
+                            {
+                                { Expression: LiteralExpressionSyntax { Token.ValueText: { } envString } } when envString.Trim() is { Length: > 0 } => $@"""{envString}""",
+                                { Expression: MemberAccessExpressionSyntax { Name: { } member } } => model.GetSymbolInfo(member) switch
                                 {
-                                    { Expression: LiteralExpressionSyntax { Token.ValueText: { } envString } } when envString.Trim() is { Length: > 0 } => $@"""{envString}""",
-                                    { Expression: MemberAccessExpressionSyntax { Name: { } member } } => model.GetSymbolInfo(member) switch
-                                        {
-                                            { Symbol: IFieldSymbol {} field } => field.GlobalNamespaced,
-                                            _ => DefaultEnvName
-                                        },
-                                    { Expression: IdentifierNameSyntax member } => isInterfaceProvider ? $"{providerTypeName}.{member.Identifier.ValueText}" : member.Identifier.ValueText,
+                                    { Symbol: IFieldSymbol { } field } => field.GlobalNamespaced,
                                     _ => DefaultEnvName
                                 },
+                                { Expression: IdentifierNameSyntax member } => isInterfaceProvider ? $"{providerTypeName}.{member.Identifier.ValueText}" : member.Identifier.ValueText,
+                                _ => DefaultEnvName
+                            },
                             { ConstructorArguments: [{ Value: string v }, ..] } => $@"""{v}""",
                             _ => DefaultEnvName
                         };
@@ -1542,7 +1538,6 @@ public static class ").Append(typeName).Append(@"Extensions
                             break;
                     }
                 }
-
 
                 foreach (var (param, arg) in GetAttrParamsMap(attrParams, _attrSyntax.ArgumentList?.Arguments ?? []))
                 {
@@ -1584,6 +1579,8 @@ public static class ").Append(typeName).Append(@"Extensions
                             {
                                 case { Symbol: (IFieldSymbol or IPropertySymbol) and { Kind: var kind, IsStatic: var isStatic } fieldOrProp }:
 
+                                    CheckInnerFactorySpecs(fieldOrProp);
+
                                     factory = fieldOrProp;
                                     factoryKind = kind;
                                     isFactory = true;
@@ -1599,6 +1596,8 @@ public static class ").Append(typeName).Append(@"Extensions
                                     continue;
 
                                 case { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [IMethodSymbol { ReturnsVoid: false, IsStatic: var isStatic } method] }:
+
+                                    CheckInnerFactorySpecs(method);
 
                                     factory = method;
                                     isStaticFactory = isStatic;
@@ -1617,6 +1616,19 @@ public static class ").Append(typeName).Append(@"Extensions
 
                             continue;
 
+                            void CheckInnerFactorySpecs(ISymbol method)
+                            {
+                                if (!isInterfaceProvider
+                                    && lifetime == Lifetime.Transient
+                                    && (SymbolEqualityComparer.Default.Equals(method.ContainingType, providerType)
+                                    || method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == className)
+                                    && (method.DeclaredAccessibility != Accessibility.Private || !method.Name.StartsWith("_"))
+                                        && method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax()?.GetLocation() is Location location2)
+                                {
+                                    diagnostics.Add(ServiceContainerGeneratorDiagnostics.ThrowInnerFactorySpecs(method.Name, location2));
+                                }
+                            }
+
                         case "disposability" when param.HasExplicitDefaultValue:
 
                             disposability = (Disposability)(byte)param.ExplicitDefaultValue!;
@@ -1624,6 +1636,7 @@ public static class ").Append(typeName).Append(@"Extensions
                             continue;
                     }
                 }
+
                 exportType ??= interfaceType ?? type!;
 
                 if (!(isValid = exportType is not null && type is not null && attrClass is not null && _attrSyntax is not null)) return false;

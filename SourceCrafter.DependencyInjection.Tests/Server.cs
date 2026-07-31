@@ -16,11 +16,11 @@ namespace SourceCrafter.DependencyInjection.Tests
     public interface IServer : IServiceProvider
     {
         internal const string EnvName = "ASPNETCORE_ENVIRONMENT";
-        static Task<int> CountAsync(IServer _) => Task.FromResult(1);
+        static Task<int> CountAsync(Server _) => Task.FromResult(1);
 
         static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
 
-        static int GetCount(int count, [Root] IServer _) => count;
+        static int GetCount(int count, [Root] Server _) => count;
     }
 
     #region TestType
