@@ -24,7 +24,7 @@ internal static class ServiceContainerGeneratorDiagnostics
         return Diagnostic.Create(rule, attrSyntax.GetLocation(), typeName);
     }
 
-    internal static Diagnostic PrimitiveDependencyShouldBeKeyed(
+    internal static Diagnostic PrimitiveDependencyMustBeKeyed(
         Lifetime lifetime,
         SyntaxNode? node,
         string typeName,
@@ -32,7 +32,7 @@ internal static class ServiceContainerGeneratorDiagnostics
     {
         DiagnosticDescriptor rule = new(
             id: "SCDI02",
-            title: $"[{lifetime}, {exportTypeFullName}] should be keyed",
+            title: $"[{lifetime}, {exportTypeFullName}] must be keyed",
             messageFormat: "'{0}' should be properly keyed as service to provide multiple primitive value as dependency",
             category: "SourceCrafter.DependencyInjection.Usage",
             defaultSeverity: DiagnosticSeverity.Warning,
@@ -137,14 +137,15 @@ internal static class ServiceContainerGeneratorDiagnostics
         string interfaceName,
         string providerClassName)
     {
+        interfaceName = interfaceName.TrimStart('I');
         DiagnosticDescriptor rule = new(
             id: "SCDI08",
             title: "Dependency has unresolved types",
-            messageFormat: "Interface {0} has not registered implementation at container {1}",
+            messageFormat: "Interface {0} has not registered implementation at container {1}.",
             category: "SourceCrafter.DependencyInjection.Definition",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true,
-            description: "Define a [LifeTime]<{0}, {0}Implementation> as decorator attribute over type {1} definition"
+            description: "Define a [LifeTime<I{0}, {0}>] as decorator attribute over type {1} definition"
         );
 
         return Diagnostic.Create(
@@ -154,29 +155,29 @@ internal static class ServiceContainerGeneratorDiagnostics
             providerClassName);
     }
 
-    internal static Diagnostic DependencyCallMustBeScoped(string providerName, IdentifierNameSyntax methodNameSyntax)
-    {
-        DiagnosticDescriptor rule = new(
-            id: "SCDI09",
-            title: "Resolver method called on non-scoped instance.",
-            messageFormat: $"Method [{methodNameSyntax.Identifier.ValueText}] must be called from scoped instance using [{providerName}.CreateScope()]",
-            category: "SourceCrafter.DependencyInjection.Usage",
-            defaultSeverity: DiagnosticSeverity.Error,
-            isEnabledByDefault: true,
-            description: "Please, just use a CreateScope reference to call the indicated method"
-        );
+    //internal static Diagnostic DependencyCallMustBeScoped(string providerName, IdentifierNameSyntax methodNameSyntax)
+    //{
+    //    DiagnosticDescriptor rule = new(
+    //        id: "SCDI09",
+    //        title: "Resolver method called on non-scoped instance.",
+    //        messageFormat: $"Method [{methodNameSyntax.Identifier.ValueText}] must be called from scoped instance using [{providerName}.CreateScope()].",
+    //        category: "SourceCrafter.DependencyInjection.Usage",
+    //        defaultSeverity: DiagnosticSeverity.Error,
+    //        isEnabledByDefault: true,
+    //        description: "Please, just use a CreateScope reference to call the indicated method"
+    //    );
 
-        return Diagnostic.Create(
-            rule,
-            methodNameSyntax.GetLocation());
-    }
+    //    return Diagnostic.Create(
+    //        rule,
+    //        methodNameSyntax.GetLocation());
+    //}
 
     internal static Diagnostic FactoryReturnMismatch(IMethodSymbol method, ITypeSymbol type, ITypeSymbol returnType, AttributeSyntax attrSyntax)
     {
         DiagnosticDescriptor rule = new(
             id: "SCDI10",
             title: "Return type doesn't match service {4} type",
-            messageFormat: "{0} {1} as return type for method {2}, should match {3} as service base {4}",
+            messageFormat: "{0} {1} as return type for method {2}, should match {3} as service base {4}.",
             category: "SourceCrafter.DependencyInjection.Design",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true
@@ -192,12 +193,12 @@ internal static class ServiceContainerGeneratorDiagnostics
             type.TypeKind is TypeKind.Interface || type.IsAbstract ? "base" : type.Kind.ToString().ToLower());
     }
 
-    internal static Diagnostic UncoveredGenericResolver(MemberAccessExpressionSyntax method, string providerFullTypeName)
+    internal static Diagnostic UncoveredGenericResolver(Location location, string type, string providerFullTypeName, bool isScopedCall)
     {
         DiagnosticDescriptor rule = new(
             id: "SCDI11",
             title: "Generic service resolver support couldn't cover this call",
-            messageFormat: "Generic service {0} resolver support couldn't cover this call at container {1}",
+            messageFormat: "No dependency resolver was found for '{0}' at '{1}' container{2}.",
             category: "SourceCrafter.DependencyInjection.Design",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true
@@ -205,9 +206,10 @@ internal static class ServiceContainerGeneratorDiagnostics
 
         return Diagnostic.Create(
             rule,
-            method.GetLocation(),
-            method.Parent,
-            providerFullTypeName);
+            location,
+            type,
+            providerFullTypeName,
+            isScopedCall ? " scope" : null);
     }
 
     internal static Diagnostic ThrowInnerFactorySpecs(string name, Location location)
@@ -215,12 +217,26 @@ internal static class ServiceContainerGeneratorDiagnostics
         DiagnosticDescriptor rule = new(
             id: "SCDI12",
             title: "Internal factory must be private and name must have underscore leading (Eg: _Name)",
-            messageFormat: "Internal factory '{0}' must be private and name must have underscore leading (Eg: _{0})",
+            messageFormat: "Internal factory '{0}' must be private and name must have underscore leading (Eg: _{0}).",
             category: "SourceCrafter.DependencyInjection.Design",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true
         );
 
         return Diagnostic.Create(rule, location, name);
+    }
+
+    internal static Diagnostic InvalidAsyncTypeArgument(Location location, AsyncType asyncType, string methodName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI12",
+            title: "IServiceProvider-like method must not use Task<T> or ValueTask<T> as generic argument",
+            messageFormat: "IServiceProvider-like '{0}' method must not use {1}<T> as generic argument.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true
+        );
+
+        return Diagnostic.Create(rule, location, methodName, asyncType);
     }
 }
