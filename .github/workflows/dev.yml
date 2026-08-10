@@ -91,7 +91,7 @@ jobs:
         }
         
         #Read published telegram packages
-        $packages = $(Get-Content -Path nuget_pkgs.json -Raw | ConvertFrom-Json | Sort-Object { $_.package.Length })
+        $packages = $( $( if( Test-Path "nuget_pkgs.json" ) { Get-Content -Path nuget_pkgs.json -Raw } else { "[]" } ) | ConvertFrom-Json | Sort-Object { $_.package.Length })
         
         $telegramPackages, $githubPackages = if($packages){
         @"

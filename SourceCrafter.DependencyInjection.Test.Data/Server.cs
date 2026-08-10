@@ -1,24 +1,24 @@
 ﻿using SourceCrafter.DependencyInjection.Attributes;
 using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
 
+[assembly: JsonConfiguration]
 
 namespace SourceCrafter.DependencyInjection.Tests
 {
     [ServiceContainer("ASPNETCORE_ENVIRONMENT")]
-    [JsonConfiguration]
-    [Transient<IA, A>]
+    [Scoped<IA, A>]
     [Singleton<IA, AA>]
     [Singleton<B>]
     [JsonSetting<AppSettings>("AppSettings")]
-    [Scoped("count", source: nameof(GetCountAsync))]
-    [Singleton("reqId", source: nameof(ResolveRequestIdTask))]
+    [Transient("count", source: nameof(CountAsync))]
+    [Scoped("reqId", source: nameof(ResolveRequestIdTask))]
     [Scoped("finalCount", source: nameof(GetCount))]
     [Singleton<IDatabase, Database>]
     [Scoped<IAuthService, AuthService>]
-    [Transient<EmployeeController>]
+    [Scoped<EmployeeController>]
     public interface IServer : IServiceProvider
     {
-        static Task<int> GetCountAsync(IServer _, CancellationToken token) => Task.FromResult(1);
+        static Task<int> CountAsync(IServer _, CancellationToken token) => Task.FromResult(1);
 
         static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
 
@@ -56,7 +56,7 @@ namespace SourceCrafter.DependencyInjection.Tests
     {
         public void TrySave(out string setting1)
         {
-            setting1 = settings.Setting1;
+            setting1 = "Value3"/*config.Setting1*/;
         }
 
         public ValueTask DisposeAsync()
@@ -86,27 +86,4 @@ namespace SourceCrafter.DependencyInjection.Tests
 
 
     #endregion
-}
-
-
-
-namespace SourceCrafter.DependencyInjection.Tests.Sub
-{
-    [ServiceContainer("DOTNET_ENVIRONMENT")]
-    [JsonConfiguration]
-    [JsonSetting<AppSettings>("AppSettings")]
-    [Scoped("count", source: nameof(GetCountAsync))]
-    [Singleton("reqId", source: nameof(ResolveRequestIdTask))]
-    [Scoped("finalCount", source: nameof(GetCount))]
-    [Singleton<IDatabase, Database>]
-    [Scoped<IAuthService, AuthService>]
-    [Transient<EmployeeController>]
-    public interface IServer : IServiceProvider
-    {
-        static Task<int> GetCountAsync(IServer _, CancellationToken token) => Task.FromResult(1);
-
-        static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
-
-        static int GetCount(int count, [Root] IServer _) => count;
-    }
 }

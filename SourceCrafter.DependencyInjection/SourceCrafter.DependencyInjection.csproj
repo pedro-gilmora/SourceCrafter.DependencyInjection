@@ -1,7 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
 	<PropertyGroup>
-		<TargetFramework>netstandard2.0</TargetFramework>
+		<TargetFramework>net10.0</TargetFramework>
 		<LangVersion>preview</LangVersion>	
 		<PackageVersion>
 			$([System.Convert]::ToUInt16(
@@ -20,6 +20,7 @@
 			))
 		</PackageVersion>
 		<Nullable>enable</Nullable>
+		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
 		<IsRoslynComponent>true</IsRoslynComponent>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<Configurations>Debug;Release;Pack;DEBUG_SG;DISG_HOST;DISG</Configurations>
@@ -41,12 +42,15 @@
 	</PropertyGroup>
 
 	<ItemGroup>
-		<PackageReference Include="IndexRange" Version="1.0.3" PrivateAssets="all" />
 		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.11.0">
 		  <PrivateAssets>all</PrivateAssets>
-		  <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+		  <IncludeAssets>runtime; Append; native; contentfiles; analyzers; Appendtransitive</IncludeAssets>
 		</PackageReference>
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+	</ItemGroup>
+
+	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
+		<PackageReference Include="IndexRange" Version="1.0.3" PrivateAssets="all" />
 		<PackageReference Include="System.Diagnostics.Tools" Version="4.3.0" PrivateAssets="all" />
 		<PackageReference Include="System.Memory" Version="4.5.5" Private="True" PrivateAssets="all" />
 		<PackageReference Include="System.Runtime.InteropServices" PrivateAssets="all" Version="4.3.0" />
@@ -58,13 +62,38 @@
 		  <Pack>True</Pack>
 		  <PackagePath>\</PackagePath>
 		</None>
-		<Compile Include="..\Solution\Utils\Map.cs">
+		<Compile Include="Containers.cs">
+			<DependentUpon>Containers.cs</DependentUpon>
+		</Compile>
+		<Compile Include="Containers.Delegates.cs">
+			<DependentUpon>Containers.cs</DependentUpon>
+		</Compile>
+		<Compile Include="Containers.Enums.cs">
+			<DependentUpon>Containers.cs</DependentUpon>
+		</Compile>
+		<Compile Include="Containers.Models.cs">
+			<DependentUpon>Containers.cs</DependentUpon>
+		</Compile>
+		<Compile Include="GlobalUsings.cs" />
+		<Compile Include="Helpers.cs">
+			<DependentUpon>Containers.cs</DependentUpon>
+		</Compile>
+		<Compile Include="ServiceContainerGeneratorDiagnostics.cs">
+			<DependentUpon>Containers.cs</DependentUpon>
+		</Compile>
+		<Compile Include="Containers.Parser.cs">
+			<DependentUpon>Containers.cs</DependentUpon>
+		</Compile>
+		<Compile Include="Containers.Emitter.cs">
+			<DependentUpon>Containers.cs</DependentUpon>
+		</Compile>
+		<!--<Compile Include="..\Solution\Utils\Map.cs">
 			<Link>Utils\Map.cs</Link>
 		</Compile>
 
 		<Compile Include="..\Solution\Utils\Set.cs">
 			<Link>Utils\Set.cs</Link>
-		</Compile>
+		</Compile>-->
 	</ItemGroup>
 
 	<!--<ItemGroup>
@@ -80,7 +109,7 @@
 	</ItemGroup>-->
 	
 	<!--<ItemGroup Condition="$(Configuration) != 'Release'">
-		<None Include="..\Solution\Metadata\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/Metadata" BuildAction="Compile"/>
+		<None Include="..\Solution\Metadata\*.cs" Pack="true" PackagePath="contentFiles/cs/netstandard2.0/SCDI/Metadata" AppendAction="Compile"/>
 	</ItemGroup>-->
 
 	<!--<PropertyGroup>
