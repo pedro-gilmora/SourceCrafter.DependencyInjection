@@ -103,7 +103,7 @@ public partial class Containers
             var hasAsync = false;
             foreach (var memberResolver in dependencyMemberBuilder.Values)
             {
-                hasAsync = memberResolver.AsyncType > 0;
+                hasAsync = memberResolver.AsyncKind > 0;
                 memberResolver.BuildAndExpose(code, scopedExposers, singletonDisposers, scopedDisposers);
             }
 
@@ -330,6 +330,7 @@ public static class ").Append(typeName).Append(@"Extensions
         internal void AddOrUpdateIntercerceptor(
             InvokeInfo serviceCall,
             bool multiple,
+            AsyncKind asyncKind,
             bool passCancelToken,
             AppendValue AppendValue)
         {
@@ -340,10 +341,10 @@ public static class ").Append(typeName).Append(@"Extensions
                     serviceCall.MethodName,
                     multiple,
                     passCancelToken,
-                    serviceCall.AsyncType,
+                    serviceCall.AsyncKind,
                     serviceCall.ReturnType,
                     serviceCall.IsKeyed,
-                    AppendDependency);
+                    (serviceCall.AsyncKind > 0, AppendDependency));
 
             if (!serviceCall.Acknowledged) serviceCall.Acknowledged = true;
 
@@ -351,14 +352,15 @@ public static class ").Append(typeName).Append(@"Extensions
 
             if (exists && multiple)
             {
-                interceptor.AppendInterceptorValue.Add(AppendDependency);
+                if (interceptor.AsyncKind < asyncKind) 
+                    interceptor.AsyncKind = asyncKind;
+                interceptor.IsKeyed = serviceCall.IsKeyed;
+                interceptor.AppendInterceptorValue.Add((serviceCall.AsyncKind > 0, AppendDependency));
             }
 
-            void AppendDependency(StringBuilder code)
+            void AppendDependency(StringBuilder code, bool useAsync)
             {
-                code.Append("provider.");
-
-                AppendValue(code, interceptorContext: true);
+                AppendValue(code, useAsync, true);
             }
         }
 

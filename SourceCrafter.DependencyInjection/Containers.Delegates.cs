@@ -17,7 +17,7 @@ delegate bool ChildDependencyHandler(
     bool childExists,
     bool isChildValid,
     Lifetime childLifetime,
-    AsyncType isChildAsync,
+    AsyncKind isChildAsync,
     int childParamCount,
     AppendValue AppendParam,
     bool isNullChildType,

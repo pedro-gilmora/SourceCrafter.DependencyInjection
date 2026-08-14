@@ -2,6 +2,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 using SourceCrafter.DependencyInjection;
 using System;
 using System.Collections.Generic;
@@ -85,9 +86,9 @@ public sealed partial class Containers : IIncrementalGenerator
                         {
                             foreach (var item in msCalls)
                             {
-                                if(item.InvalidAsyncTypeArg)
+                                if (item.InvalidAsyncTypeArg)
                                     context.ReportDiagnostic(
-                                        ServiceContainerGeneratorDiagnostics.InvalidAsyncTypeArgument(item.Location, item.AsyncType, item.MethodName));
+                                        ServiceContainerGeneratorDiagnostics.InvalidAsyncTypeArgument(item.Location, item.AsyncKind, item.MethodName));
                                 if (!item.Acknowledged)
                                     context.ReportDiagnostic(
                                         ServiceContainerGeneratorDiagnostics.UncoveredGenericResolver(item.Location, item.ReturnType, item.ContainerTypeFullName, item.IsScopedCall));
@@ -114,6 +115,9 @@ public sealed partial class Containers : IIncrementalGenerator
                                 }
                             }
                         }
+
+                        emitters.Clear();
+                        emitters = default;
 
                         if (interceptorsCount > 0)
                             context.AddSource("Utils.g", UtilsFileContent);
@@ -187,33 +191,48 @@ internal static class Extensions
         var (emitter, msCalls) = context;
 
         foreach (var serviceCall in msCalls)
-            if (!serviceCall.Acknowledged 
-                && ((serviceCall.IsScopedCall && serviceCall.ContainerTypeFullName is "global::Microsoft.Extensions.DependencyInjection.IServiceScope") 
+            if (!serviceCall.Acknowledged
+                && ((serviceCall.IsScopedCall && serviceCall.ContainerTypeFullName is "global::Microsoft.Extensions.DependencyInjection.IServiceScope")
                     || serviceCall.ContainerTypeFullName == emitter.ContainerFullTypeName
                     || serviceCall.ContainerTypeNameOnly == emitter.ClassName
-                    || serviceCall.IsScopedCall)
-                    && emitter.DependencyValueBuilders.TryGetValue((serviceCall.ReturnType, serviceCall.Key), out var resolvers))
+                    || serviceCall.IsScopedCall))
             {
-                var typeHashCode = serviceCall.ReturnType;
-
-                if (serviceCall.IsMultiple)
+                if (emitter.DependencyValueBuilders.TryGetValue((serviceCall.ReturnType, serviceCall.Key), out var resolvers))
                 {
-                    foreach (var resolver in resolvers.Values)
+                    if (serviceCall.IsMultiple)
+                    {
+                        foreach (var resolver in resolvers.Values)
+                        {
+                            emitter.AddOrUpdateIntercerceptor(
+                                serviceCall,
+                                true,
+                                resolver.AsyncKind,
+                                resolver.PassCancelToken,
+                                resolver.AppendValue);
+                        }
+                    }
+                    else if (resolvers.Values.LastOrDefault(e => e.Key.key == serviceCall.Key) is { } resolver2)
+                    {
+                        emitter.AddOrUpdateIntercerceptor(
+                            serviceCall,
+                            false,
+                            resolver2.AsyncKind,
+							resolver2.PassCancelToken,
+                            resolver2.AppendValue);
+                    }
+                }
+                else if (serviceCall.Key == "" && serviceCall.IsMultiple 
+                    && emitter.DependencyValueBuilders.SelectMany(dvb => dvb.Value.Where(rb => rb.Key.type == serviceCall.ReturnType).Select(e => e.Value)).ToArray() is { Length: > 0 } items)
+                {
+                    foreach (var resolver in items)
                     {
                         emitter.AddOrUpdateIntercerceptor(
                             serviceCall,
                             true,
-                            resolver.PassCancelToken,
+							resolver.AsyncKind,
+							resolver.PassCancelToken,
                             resolver.AppendValue);
                     }
-                }
-                else if (resolvers.Values.LastOrDefault(e => e.Key.key == serviceCall.Key) is { } resolver2)
-                {
-                    emitter.AddOrUpdateIntercerceptor(
-                        serviceCall,
-                        false,
-                        resolver2.PassCancelToken,
-                        resolver2.AppendValue);
                 }
             }
 
@@ -337,10 +356,10 @@ internal static class Extensions
         };
 
 
-        var asyncType = depTypeResult.TryGetAsyncType(out depTypeResult);
-        var methodWithTaskTypeArg = asyncType > 0;
+        var AsyncKind = depTypeResult.TryGetAsyncType(out depTypeResult);
+        var methodWithTaskTypeArg = AsyncKind > 0;
 
-        if (asyncType is 0 && methodName.EndsWith("Async")) asyncType = AsyncType.Task;
+        if (AsyncKind is 0 && methodName.EndsWith("Async")) AsyncKind = AsyncKind.Task;
         return new(
             callContainerType.AllInterfaces.Any(i => i.GetAttributes().Any(IsGeneratedServiceContainer)),
             callContainerType.NameOnly,
@@ -348,7 +367,7 @@ internal static class Extensions
             methodName,
             (callContainerType.Name is "Scoped" && callContainerType.ContainingType is not null)
                 || scopedInference,
-            asyncType,
+            AsyncKind,
             depTypeResult.FullGlobalQualifiedName,
             interceptor,
             keyHash,
@@ -367,7 +386,7 @@ internal static class Extensions
         {
             switch ((declaration.GetSyntax() as VariableDeclaratorSyntax)?.Initializer?.Value)
             {
-                case ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax : 
+                case ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax:
                     return (true, type);
 
                 case InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax source } }:

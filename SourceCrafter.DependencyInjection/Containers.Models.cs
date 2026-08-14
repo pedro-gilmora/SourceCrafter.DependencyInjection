@@ -33,7 +33,7 @@ internal record InvokeInfo(
     string ContainerTypeFullName,
     string MethodName,
     bool IsScopedCall,
-    AsyncType AsyncType,
+    AsyncKind AsyncKind,
     string ReturnType,
     InterceptableLocation Interceptor,
     string Key,
@@ -69,12 +69,12 @@ class GenericResolverBuilderComparer : IEqualityComparer<ResolverBuilder>
     public bool Equals([DisallowNull] ResolverBuilder x, [DisallowNull] ResolverBuilder y)
 #pragma warning restore CS8767 // La nulabilidad de los tipos de referencia del tipo de parámetro no coincide con el miembro implementado de forma implícita (posiblemente debido a los atributos de nulabilidad).
     {
-        return (x.Key.key != "", x.AsyncType, x.PassCancelToken) == (y.Key.key != "", y.AsyncType, y.PassCancelToken);
+        return (x.Key.key != "", x.AsyncKind, x.PassCancelToken) == (y.Key.key != "", y.AsyncKind, y.PassCancelToken);
     }
 
     public int GetHashCode([DisallowNull] ResolverBuilder obj)
     {
-        return HashCode.Combine(obj.Key.key != "", obj.AsyncType, obj.PassCancelToken);
+        return HashCode.Combine(obj.Key.key != "", obj.AsyncKind, obj.PassCancelToken);
     }
 }
 
@@ -83,7 +83,7 @@ internal class ResolverBuilder(string toStr)
     private static int _id = 0;
     internal int Id = _id++;
     internal DependencyKey Key;
-    internal AsyncType AsyncType;
+    internal AsyncKind AsyncKind;
     internal HashSet<(int, bool)> AsyncNestedDeps = [];
     internal Dictionary<DependencyKey, AsyncLocalResolver> AsyncLocalResolvers = new(EqualityComparer<DependencyKey>.Default);
     internal AppendValue AppendValue = null!;
@@ -91,56 +91,73 @@ internal class ResolverBuilder(string toStr)
     internal int ParamsLength;
     internal int ImplTypeKey;
     internal bool PassCancelToken;
+    internal bool TransientWithoutCachedDeps;
 
     internal void GenericMemberSignature(StringBuilder code)
     {
-        code.Append(@"
+        AppendMethod();
+        AppendMethod(true);
+
+        void AppendMethod(bool isMultiple = false)
+        {
+            code.Append(@"
     public ");
 
-        switch (AsyncType)
-        {
-            case AsyncType.None:
-                code.Append("TOut");
-                break;
-            case AsyncType.ValueTask:
-                code.Append("global::System.Threading.Tasks.ValueTask<TOut>");
-                break;
-            case AsyncType.Task:
-                code.Append("global::System.Threading.Tasks.Task<TOut>");
-                break;
-        }
+            switch (AsyncKind)
+            {
+                case AsyncKind.None:
+                    code.Append("TOut");
+                    if (isMultiple) code.Append("[]");
+                    break;
+                case AsyncKind.ValueTask:
+                    code.Append("global::System.Threading.Tasks.ValueTask<TOut");
+                    if (isMultiple) code.Append("[]"); 
+                    code.Append('>');
+                    break;
+                case AsyncKind.Task:
+                    code.Append("global::System.Threading.Tasks.Task<TOut");
+                    if (isMultiple) code.Append("[]");
+                    code.Append('>');
+                    break;
+            }
 
-        code.Append(" GetRequired");
+            code.Append(" GetRequired");
 
-        bool hasKey = Key.key != "";
+            bool hasKey = Key.key != "";
 
-        if (hasKey) code.Append("Keyed");
+            if (hasKey) code.Append("Keyed");
 
-        if(AsyncType == AsyncType.ValueTask) code.Append("Value");
+            if (AsyncKind == AsyncKind.ValueTask) code.Append("Value");
 
-        code.Append("Service").Append(AsyncType > 0 ? "Async<TOut>(" : "<TOut>(");
+            code.Append("Service");
 
-        if (hasKey) code.Append("string key");
+            if (isMultiple) code.Append('s');
 
-        if (AsyncType > 0 && PassCancelToken)
-        {
-            if (hasKey) code.Append(", ");
-            code.Append("global::System.Threading.CancellationToken token = default");
-        }
+            code.Append(AsyncKind > 0 ? "Async<TOut>(" : "<TOut>(");
 
-        code.Append(@") where TOut : notnull => throw new global::System.NotImplementedException();
+            if (hasKey) code.Append("string key");
+
+            if (AsyncKind > 0 && PassCancelToken)
+            {
+                if (hasKey) code.Append(", ");
+                code.Append("global::System.Threading.CancellationToken token = default");
+            }
+
+            code.Append(@") where TOut : notnull => throw new global::System.NotImplementedException();
 ");
+        }
     }
 
     public override string ToString() => toStr;
 }
-internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool multiple, bool passCancelToken, AsyncType asyncType, string exportTypeFullName, bool isKeyed, Action<StringBuilder> firstDependency)
+internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool multiple, bool passCancelToken, AsyncKind asyncKind, string exportTypeFullName, bool isKeyed, (bool, Action<StringBuilder, bool>) firstDependency)
 {
     internal FirstLevelDependencyKey Key = key;
-    internal AsyncType AsyncType = asyncType;
+    internal bool IsKeyed = isKeyed;
+    internal AsyncKind AsyncKind = asyncKind;
     internal HashSet<InterceptableLocation> Locations = [];
     internal readonly string Method = methodName;
-    internal List<Action<StringBuilder>> AppendInterceptorValue = [firstDependency];
+    internal List<(bool, Action<StringBuilder, bool>)> AppendInterceptorValue = [firstDependency];
 
     public override bool Equals(object? obj)
     {
@@ -169,21 +186,24 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
         code.Append(@"
     public static ");
 
-        //if (multiple)
+        var useAsync = multiple && AsyncKind > 0;
 
-        switch (AsyncType)
+        if (useAsync) code.Append("async ");
+
+        switch (AsyncKind)
         {
-            case AsyncType.None:
-                AppendReturnType();
+            case AsyncKind.None:
+                code.Append(exportTypeFullName);
+                if (multiple) code.Append("[]");
                 break;
-            case AsyncType.ValueTask:
-                code.Append("global::System.Threading.Tasks.ValueTask<");
-                AppendReturnType();
+            case AsyncKind.ValueTask:
+                code.Append("global::System.Threading.Tasks.ValueTask<").Append(exportTypeFullName);
+                if(multiple) code.Append("[]");
                 code.Append('>');
                 break;
-            case AsyncType.Task:
-                code.Append("global::System.Threading.Tasks.Task<");
-                AppendReturnType();
+            case AsyncKind.Task:
+                code.Append("global::System.Threading.Tasks.Task<").Append(exportTypeFullName);
+                if(multiple) code.Append("[]");
                 code.Append('>');
                 break;
         }
@@ -194,47 +214,45 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
 
         code.Append(" provider");
 
-        if (isKeyed) code.Append(", string _");
+        if (IsKeyed) code.Append(", string _");
 
-        if (AsyncType > 0 && passCancelToken) code.Append(", global::System.Threading.CancellationToken cancellationToken");
+        if (AsyncKind > 0 && passCancelToken) code.Append(", global::System.Threading.CancellationToken cancellationToken");
 
         code.Append(@") => ");
 
         if (multiple)
         {
             code.Append(@"[
-            ");
+        ");
 
             string? comma = null;
 
-            foreach (var appendValue in AppendInterceptorValue)
+            foreach (var (isAsync, appendValue) in AppendInterceptorValue)
             {
-                if (comma is null) code.Append(comma = @",
-        ");
-                appendValue(code);
+                if (comma is null) comma = @",
+        ";
+                else code.Append(comma);
+                if (useAsync && isAsync) code.Append("await ");
+                appendValue(code, useAsync);
             }
 
             code.Append(']');
         }
         else
         {
-            AppendInterceptorValue[^1](code);
+            AppendInterceptorValue[^1].Item2(code, useAsync);
         }
 
 
         code.Append(@";
 ");
-        void AppendReturnType() => _ = multiple
-
-            ? code.Append("global::System.Collections.Generic.IEnumerable<").Append(exportTypeFullName).Append('>')
-            : code.Append(exportTypeFullName);
     }
 }
 
 
 static class Helpers
 {
-    internal static AsyncType TryGetAsyncType(this ITypeSymbol typeSymbol, out ITypeSymbol factoryType)
+    internal static AsyncKind TryGetAsyncType(this ITypeSymbol typeSymbol, out ITypeSymbol factoryType)
     {
         switch (typeSymbol.FullGlobalQualifiedNonGenericName)
         {
@@ -242,12 +260,12 @@ static class Helpers
                 when typeSymbol is INamedTypeSymbol { TypeArguments: [{ } firstTypeArg] }:
 
                 factoryType = firstTypeArg;
-                return typeSymbol.Name is "ValueTask" ? AsyncType.ValueTask : AsyncType.Task;
+                return typeSymbol.Name is "ValueTask" ? AsyncKind.ValueTask : AsyncKind.Task;
 
             default:
                 // TODO: if there's a case of inheriting from task, a recursive approach should be taken here 
                 factoryType = typeSymbol;
-                return AsyncType.None;
+                return AsyncKind.None;
         }
     }
 
@@ -273,7 +291,7 @@ static class Helpers
     }
 }
 
-sealed record MemberBuilder(Lifetime Lifetime, string TypeFullName, string Key, AsyncType AsyncType, Disposability Disposability, string? NameOrFormat)
+sealed record MemberBuilder(Lifetime Lifetime, string TypeFullName, string Key, AsyncKind AsyncKind, Disposability Disposability, string? NameOrFormat)
 {
     internal required bool RequiresCancelToken;
 
@@ -287,14 +305,14 @@ sealed record MemberBuilder(Lifetime Lifetime, string TypeFullName, string Key, 
                 && Lifetime == other.Lifetime
                 && TypeFullName == other.TypeFullName
                 && Key == other.Key
-                && AsyncType == other.AsyncType
+                && AsyncKind == other.AsyncKind
                 && Disposability == other.Disposability
                 && NameOrFormat == other.NameOrFormat);
     }
 
     public override int GetHashCode()
     {
-        return HashCode.Combine(Lifetime, TypeFullName, Key, AsyncType, Disposability, NameOrFormat);
+        return HashCode.Combine(Lifetime, TypeFullName, Key, AsyncKind, Disposability, NameOrFormat);
     }
 }
 

@@ -27,9 +27,9 @@ namespace SourceCrafter.DependencyInjection.Tests
 
     #region TestType
 
-    public interface IA { }
-    public class A : IA { }
-    public class AA : IA { }
+    public interface IA;
+    public record A : IA;
+    public record AA : IA;
     public record B(IA[] IAs);
 
     public class AuthService(IDatabase application, int count) : IAuthService
@@ -90,23 +90,23 @@ namespace SourceCrafter.DependencyInjection.Tests
 
 
 
-namespace SourceCrafter.DependencyInjection.Tests.Sub
-{
-    [ServiceContainer("DOTNET_ENVIRONMENT")]
-    [JsonConfiguration]
-    [JsonSetting<AppSettings>("AppSettings")]
-    [Scoped("count", source: nameof(GetCountAsync))]
-    [Singleton("reqId", source: nameof(ResolveRequestIdTask))]
-    [Scoped("finalCount", source: nameof(GetCount))]
-    [Singleton<IDatabase, Database>]
-    [Scoped<IAuthService, AuthService>]
-    [Transient<EmployeeController>]
-    public interface IServer : IServiceProvider
-    {
-        static Task<int> GetCountAsync(IServer _, CancellationToken token) => Task.FromResult(1);
+//namespace SourceCrafter.DependencyInjection.Tests.Sub
+//{
+//    [ServiceContainer("DOTNET_ENVIRONMENT")]
+//    [JsonConfiguration]
+//    [JsonSetting<AppSettings>("AppSettings")]
+//    [Scoped("count", source: nameof(GetCountAsync))]
+//    [Singleton("reqId", source: nameof(ResolveRequestIdTask))]
+//    [Scoped("finalCount", source: nameof(GetCount))]
+//    [Singleton<IDatabase, Database>]
+//    [Scoped<IAuthService, AuthService>]
+//    [Transient<EmployeeController>]
+//    public interface IServer : IServiceProvider
+//    {
+//        static Task<int> GetCountAsync(IServer _, CancellationToken token) => Task.FromResult(1);
 
-        static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
+//        static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
 
-        static int GetCount(int count, [Root] IServer _) => count;
-    }
-}
+//        static int GetCount(int count, [Root] IServer _) => count;
+//    }
+//}

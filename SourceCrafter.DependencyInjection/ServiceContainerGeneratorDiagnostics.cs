@@ -226,7 +226,7 @@ internal static class ServiceContainerGeneratorDiagnostics
         return Diagnostic.Create(rule, location, name);
     }
 
-    internal static Diagnostic InvalidAsyncTypeArgument(Location location, AsyncType asyncType, string methodName)
+    internal static Diagnostic InvalidAsyncTypeArgument(Location location, AsyncKind AsyncKind, string methodName)
     {
         DiagnosticDescriptor rule = new(
             id: "SCDI12",
@@ -237,6 +237,6 @@ internal static class ServiceContainerGeneratorDiagnostics
             isEnabledByDefault: true
         );
 
-        return Diagnostic.Create(rule, location, methodName, asyncType);
+        return Diagnostic.Create(rule, location, methodName, AsyncKind);
     }
 }

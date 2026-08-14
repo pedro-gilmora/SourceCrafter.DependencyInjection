@@ -19,13 +19,11 @@ public partial class Containers
         INamedTypeSymbol providerType)
     {
         HashSet<Diagnostic> diagnostics = [];
-        var ProviderTypeId = SymbolEqualityComparer.Default.GetHashCode(providerType);
         var ProviderFullTypeName = providerType.FullGlobalQualifiedName;
         var isInterfaceProvider = providerType.TypeKind == TypeKind.Interface;
-        var ProviderTypeName = providerType.TypeNameFormat;
-        var className = isInterfaceProvider ? ProviderTypeName[1..] : ProviderTypeName;
+        var providerTypeName = providerType.TypeNameFormat;
+        var className = isInterfaceProvider ? providerTypeName[1..] : providerTypeName;
         var fullProviderImplName = providerType.ContainingNamespace.FullGlobalQualifiedName + '.' + className;
-        var ProviderTypeNameId = ProviderFullTypeName.GetHashCode();
         var attributes = providerType.GetAttributes();
 
         bool
@@ -36,6 +34,7 @@ public partial class Containers
 
         var defaultKeyComparer = EqualityComparer<FirstLevelDependencyKey>.Default;
         var defaultSubKeyComparer = EqualityComparer<DependencyKey>.Default;
+
         DependencyDictionary dependencyValueBuilders = [];
         Dictionary<DependencyKey, string> methodNamesMap = new(defaultSubKeyComparer);
         HashSet<string> methodsRegistry = [];
@@ -152,8 +151,8 @@ public partial class Containers
                 factoryName = null,
                 interfaceFullTypeName = null;
 
-            AsyncType
-                asyncType = default,
+            AsyncKind
+                AsyncKind = default,
                 initialAsyncType = default;
 
             FirstLevelDependencyKey key = default;
@@ -192,7 +191,7 @@ public partial class Containers
             {
                 if ((sourceType ?? type)?.FullGlobalQualifiedName is { } fullName && attr?.ApplicationSyntaxReference?.GetSyntax() is { } attrSyntx)
                 {
-                    diagnostics.Add(ServiceContainerGeneratorDiagnostics.UnresolvedDependency(attrSyntx, ProviderTypeName, fullName));
+                    diagnostics.Add(ServiceContainerGeneratorDiagnostics.UnresolvedDependency(attrSyntx, providerTypeName, fullName));
                 }
                 //(lifetime, exportType?.ToDisplayString(), type?.ToDisplayString(), name, false).Dump("Checking:");
                 return false;
@@ -215,6 +214,8 @@ public partial class Containers
                 return false;
             }
 
+            bool hasNoCachedDeps = lifetime is Lifetime.Transient;
+
             // Takes or create a new Resolver instance
             resolver = CollectionsMarshal.GetValueRefOrAddDefault(services, subKey, out var implExists) ??=
                 new($"{lifetime} {(exportTypeFullName + (exportTypeFullName == typeFullName ? null : $"<{typeFullName}>"))} {name}".Trim())
@@ -222,8 +223,9 @@ public partial class Containers
                     Key = subKey,
                     ExportTypeFullName = exportTypeFullName,
                     AppendValue = AppendValue,
-                    AsyncType = asyncType,
-                    ParamsLength = prms.Length
+                    AsyncKind = AsyncKind,
+                    ParamsLength = prms.Length,
+                    TransientWithoutCachedDeps = isSimpleTransient
                 };
 
             // If it comes from params check, validates the symbols as dependency
@@ -231,7 +233,7 @@ public partial class Containers
                     exportSignatureExists,
                     isValid,
                     lifetime,
-                    implExists ? resolver.AsyncType : asyncType,
+                    implExists ? resolver.AsyncKind : AsyncKind,
                     implExists ? resolver.ParamsLength : prms.Length,
                     AppendValue,
                     type is null,
@@ -324,7 +326,7 @@ public partial class Containers
 
                 SubDependencyDictionary foundServices = null!;
                 ResolverBuilder foundService = null!;
-                var foundAsyncType = AsyncType.None;
+                var foundAsyncType = AsyncKind.None;
                 HashSet<(int, bool)> existingAsyncDepsCalls = [];
                 DependencyKey resolvedSubKey = default;
 
@@ -350,9 +352,12 @@ public partial class Containers
                     if (getServices)
                     {
                         int i = 0, len = foundServices.Values.Count - 1;
-                        foreach (var sevice in foundServices.Values)
+                        foreach (var service in foundServices.Values)
                         {
-                            resolvedSubKey = (foundService = sevice).Key;
+                            if (hasNoCachedDeps && !service.TransientWithoutCachedDeps)
+                                hasNoCachedDeps = false;
+
+                            resolvedSubKey = (foundService = service).Key;
                             CreateParamResolverBuilder(foundService, i == 0, i++ == len);
                         }
                     }
@@ -373,16 +378,16 @@ public partial class Containers
 
                         appendParams.Add(new(foundService.Key, (code, asyncContext, _) =>
                         {
-                            var awaits = asyncContext && foundService.AsyncType is not 0 && paramAsyncType is 0;
+                            var awaits = asyncContext && foundService.AsyncKind is not 0 && paramAsyncType is 0;
 
                             if (awaits)
                             {
                                 code.Append("await ");
                                 AppendParam(code, asyncContext);
                             }
-                            else if (paramAsyncType is not 0 && foundService.AsyncType is 0)
+                            else if (paramAsyncType is not 0 && foundService.AsyncKind is 0)
                             {
-                                if (paramAsyncType is AsyncType.Task)
+                                if (paramAsyncType is AsyncKind.Task)
                                 {
                                     code.Append("global::System.Threading.Tasks.Task.FromResult<")
                                         .Append(foundExportTypeFullName)
@@ -399,12 +404,12 @@ public partial class Containers
                                     code.Append(')');
                                 }
                             }
-                            else if (foundService.AsyncType is AsyncType.ValueTask && paramAsyncType is AsyncType.Task)
+                            else if (foundService.AsyncKind is AsyncKind.ValueTask && paramAsyncType is AsyncKind.Task)
                             {
                                 AppendParam(code, asyncContext);
                                 code.Append(".AsTask()");
                             }
-                            else if (foundService.AsyncType is AsyncType.Task && paramAsyncType is AsyncType.ValueTask)
+                            else if (foundService.AsyncKind is AsyncKind.Task && paramAsyncType is AsyncKind.ValueTask)
                             {
                                 code.Append("new global::System.Threading.Tasks.ValueTask<")
                                     .Append(foundExportTypeFullName)
@@ -419,12 +424,12 @@ public partial class Containers
                         }, startsCollectionExpression, endsCollectionExpression));
 
                         deepParamsCount += foundService.ParamsLength;
-                        foundAsyncType = foundService.AsyncType;
+                        foundAsyncType = foundService.AsyncKind;
 
                         if (foundAsyncType is not 0)
                         {
-                            if (asyncType is 0)
-                                asyncType = AsyncType.Task;
+                            if (AsyncKind is 0)
+                                AsyncKind = AsyncKind.Task;
 
                             if (!hasAsyncDependencies)
                                 hasAsyncDependencies = true;
@@ -450,7 +455,7 @@ public partial class Containers
                                     {
                                         ResolvedByParamIndex = paramIndex,
                                         ParamIndex = paramIndex,
-                                        IsValueTask = foundAsyncType is AsyncType.ValueTask,
+                                        IsValueTask = foundAsyncType is AsyncKind.ValueTask,
                                         ResolverDep = foundService.Key,
                                         AppendAsyncLocal = AppendAsyncLocalResolver
                                     });
@@ -495,7 +500,7 @@ public partial class Containers
                     bool childExists,
                     bool isChildValid,
                     Lifetime childLifetime,
-                    AsyncType childAsyncType,
+                    AsyncKind childAsyncType,
                     int childParamCount,
                     AppendValue AppendParam,
                     bool isNullChildType,
@@ -514,7 +519,7 @@ public partial class Containers
                             asyncLocalResolvers.TryAdd(resolvedSubKey, resolved = new(resolvedSubKey)
                             {
                                 ResolvedByParamIndex = paramIndex,
-                                IsValueTask = foundAsyncType is AsyncType.ValueTask,
+                                IsValueTask = foundAsyncType is AsyncKind.ValueTask,
                                 ResolverDep = resolvedSubKey,
                                 AppendAsyncLocal = AppendAsyncLocalResolver
                             });
@@ -531,9 +536,9 @@ public partial class Containers
                         }
                     }
 
-                    if (childAsyncType > asyncType)
+                    if (childAsyncType > AsyncKind)
                     {
-                        asyncType = childAsyncType;
+                        AsyncKind = childAsyncType;
                     }
 
                     if (childExists)
@@ -577,7 +582,7 @@ public partial class Containers
                 useWhenAll = asyncLocalResolvers.Values.Count(i => i.ParamIndex > -1 && !i.IsValueTask && !i.ResolvedBefore) > 2;
             }
 
-            //if (asyncParamCount > 0 && valueTaskCount == asyncParamCount) asyncType = AsyncType.ValueTask;
+            //if (asyncParamCount > 0 && valueTaskCount == asyncParamCount) AsyncKind = AsyncKind.ValueTask;
 
             (backingFieldName, methodName) = GetResolverName();
 
@@ -585,7 +590,7 @@ public partial class Containers
 
             if (disposability is not 0 && isCached)
             {
-                switch (asyncType is not 0, lifetime, disposability)
+                switch (AsyncKind is not 0, lifetime, disposability)
                 {
                     case (true, Lifetime.Scoped, Disposability.Disposable): asyncScopedDisposable++; break;
                     case (true, Lifetime.Singleton, Disposability.Disposable): asyncSingletonDisposable++; break;
@@ -602,13 +607,14 @@ public partial class Containers
             if (!isExternal && (isCached || !isSimpleTransient))
                 dependencyMemberBuilders
                     .TryAdd((lifetime, typeFullName, name),
-                        new(lifetime, exportTypeFullName, name, asyncType, disposability, nameOrFormat) 
+                        new(lifetime, exportTypeFullName, name, AsyncKind, disposability, nameOrFormat) 
                         {
                             RequiresCancelToken = needsCancelToken,
                             BuildAndExpose = AppendMethod 
                         });
 
-            resolver.AsyncType = asyncType;
+            resolver.TransientWithoutCachedDeps = hasNoCachedDeps;
+            resolver.AsyncKind = AsyncKind;
 
             //TryRegisterInterceptorMethod();
 
@@ -636,7 +642,7 @@ public partial class Containers
                                     { Symbol: IFieldSymbol { } field } => field.GlobalNamespaced,
                                     _ => DefaultEnvName
                                 },
-                                { Expression: IdentifierNameSyntax member } => isInterfaceProvider ? $"{ProviderTypeName}.{member.Identifier.ValueText}" : member.Identifier.ValueText,
+                                { Expression: IdentifierNameSyntax member } => isInterfaceProvider ? $"{providerTypeName}.{member.Identifier.ValueText}" : member.Identifier.ValueText,
                                 _ => DefaultEnvName
                             },
                             { ConstructorArguments: [{ Value: string v }, ..] } => $@"""{v}""",
@@ -725,7 +731,7 @@ public partial class Containers
                                     isFactoryFromCurrentProvider = SymbolEqualityComparer.Default.Equals(providerType, containingType);
 
                                     ITypeSymbol returnType;
-                                    (asyncType, isFactoryIndexerProperty) = fieldOrProp switch
+                                    (AsyncKind, isFactoryIndexerProperty) = fieldOrProp switch
                                     {
                                         IPropertySymbol { Type: ITypeSymbol type, IsIndexer: var isIndexer } => (initialAsyncType = type.TryGetAsyncType(out returnType), isIndexer),
                                         _ => (((IFieldSymbol)fieldOrProp).Type.TryGetAsyncType(out returnType), false)
@@ -752,7 +758,7 @@ public partial class Containers
                                     isStaticFactory = isStatic;
                                     factoryKind = SymbolKind.Method;
                                     defaultParamValues = method.Parameters;
-                                    initialAsyncType = asyncType = method.ReturnType.TryGetAsyncType(out returnType);
+                                    initialAsyncType = AsyncKind = method.ReturnType.TryGetAsyncType(out returnType);
                                     isFactory = true;
                                     isFactoryFromCurrentProvider = SymbolEqualityComparer.Default.Equals(providerType, containingType);
                                     factoryName = factory.Name;
@@ -803,7 +809,7 @@ public partial class Containers
                     hasScopedDependencies = true;
                 }
 
-                if (asyncType is not 0 && factoryKind is SymbolKind.Method && !((IMethodSymbol)factory!).Parameters.Any(p => p.Type.FullGlobalQualifiedName is CancelTokenFQMetaName))
+                if (AsyncKind is not 0 && factoryKind is SymbolKind.Method && !((IMethodSymbol)factory!).Parameters.Any(p => p.Type.FullGlobalQualifiedName is CancelTokenFQMetaName))
                 {
                     //factory.ToDisplayString().Dump("Cancellation token should be Appendd");
                     diagnostics.Add(ServiceContainerGeneratorDiagnostics.CancellationTokenShouldBeProvided(factory, attrSyntax));
@@ -931,6 +937,7 @@ public partial class Containers
             void AppendParams(
                 StringBuilder code,
                 bool completeAsyncContext,
+                bool appendInterceptorProvider,
                 string newIndentedLine)
             {
                 var needsComma = false;
@@ -995,7 +1002,7 @@ public partial class Containers
                 code.Append(@"
     public ");
 
-                //if (!isCached && (hasAsyncDependencies/* || (asyncType is not 0 && factory is not null)*/)) code.Append("async ");
+                //if (!isCached && (hasAsyncDependencies/* || (AsyncKind is not 0 && factory is not null)*/)) code.Append("async ");
 
                 AppendSignature(code);
 
@@ -1011,7 +1018,7 @@ public partial class Containers
                     code.Append(@" 
 			=> base.").Append(methodName);
 
-                    if (asyncType is not 0 && (hasAsyncDependencies || needsCancelToken))
+                    if (AsyncKind is not 0 && (hasAsyncDependencies || needsCancelToken))
                     {
                         code.Append('(');
                         if (needsCancelToken) code.Append("cancellationToken");
@@ -1043,9 +1050,9 @@ public partial class Containers
                     code.Append(@"
     {");
 
-                    if (asyncType is 0 || !(hasAsyncDependencies || needsCancelToken))
+                    if (AsyncKind is 0 || !(hasAsyncDependencies || needsCancelToken))
                     {
-                        var isValueType = asyncType is 0 ? type!.IsValueType : asyncType is AsyncType.ValueTask;
+                        var isValueType = AsyncKind is 0 ? type!.IsValueType : AsyncKind is AsyncKind.ValueTask;
 
                         code.Append(@"
         get
@@ -1081,9 +1088,9 @@ public partial class Containers
                         if (isCached)
                         {
                             code.Append(@"
-        if(").Append(backingFieldName).Append(asyncType is AsyncType.ValueTask ? ".HasValue" : " is not null").Append(") return ").Append(backingFieldName);
+        if(").Append(backingFieldName).Append(AsyncKind is AsyncKind.ValueTask ? ".HasValue" : " is not null").Append(") return ").Append(backingFieldName);
 
-                            if (asyncType is AsyncType.ValueTask) code.Append(".Value");
+                            if (AsyncKind is AsyncKind.ValueTask) code.Append(".Value");
 
                             code.Append(';');
                         }
@@ -1150,12 +1157,12 @@ public partial class Containers
 
                             if (isFactory)
                             {
-                                AppendFactoryCaller(code, false, @"
+                                AppendFactoryCaller(code, false, false, @"
 						");
                             }
                             else
                             {
-                                AppendInstance(code, false, @"
+                                AppendInstance(code, false, false, @"
 						");
                             }
 
@@ -1187,12 +1194,12 @@ public partial class Containers
 
                             if (isFactory)
                             {
-                                AppendFactoryCaller(code, true, @"
+                                AppendFactoryCaller(code, true, false, @"
 				" + indent);
                             }
                             else
                             {
-                                AppendInstance(code, true, @"
+                                AppendInstance(code, true, false, @"
 				" + indent);
                             }
 
@@ -1220,7 +1227,7 @@ public partial class Containers
                 code.Append(@"
         ");
 
-                if (asyncType > 0)
+                if (AsyncKind > 0)
                 {
                     code.Append(awaits ? "await " : "return ")
                         .Append(backingFieldName).Append(".TryDisposeAsync();");
@@ -1253,7 +1260,7 @@ public partial class Containers
             {
                 code.Append(GetTypeName(exportTypeFullName)).Append(' ').Append(methodName);
 
-                if (asyncType is not 0 && (hasAsyncDependencies || needsCancelToken))
+                if (AsyncKind is not 0 && (hasAsyncDependencies || needsCancelToken))
                 {
                     code.Append('(');
                     if (needsCancelToken) code.Append("global::System.Threading.CancellationToken cancellationToken = default");
@@ -1263,8 +1270,8 @@ public partial class Containers
 
             string GetTypeName(string typeName)
             {
-                return asyncType > 0
-                    ? $"global::System.Threading.Tasks.{(initialAsyncType is AsyncType.ValueTask ? "Value" : null)}Task<{exportTypeFullName}>"
+                return AsyncKind > 0
+                    ? $"global::System.Threading.Tasks.{(initialAsyncType is AsyncKind.ValueTask ? "Value" : null)}Task<{exportTypeFullName}>"
                     : typeName;
             }
 
@@ -1272,28 +1279,29 @@ public partial class Containers
             {
                 if (!interceptorContext && !isCached && isFactory)
                 {
-                    //if (asyncContext && asyncType is not 0) code.Append("await ");
+                    //if (asyncContext && AsyncKind is not 0) code.Append("await ");
 
                     AppendFactoryCaller(code, asyncContext);
                 }
-                else if (!interceptorContext && !isCached && !isExternal)
+                else if (hasNoCachedDeps && !isCached && !isExternal)
                 {
-                    AppendInstance(code, asyncContext);
+                    AppendInstance(code, asyncContext, interceptorContext);
                 }
                 else
                 {
-                    //if (asyncContext && (asyncType is not 0)) code.Append("await ");
+                    //if (asyncContext && (AsyncKind is not 0)) code.Append("await ");
 
-                    AppendCachedCaller(code);
+                    AppendCachedCaller(code, interceptorContext);
                 }
             }
 
-            void AppendCachedCaller(StringBuilder code, string newIndentedLine = @"
+            void AppendCachedCaller(StringBuilder code, bool interceptorContext = false, string newIndentedLine = @"
 				")
             {
+                if (interceptorContext) code.Append("provider.");
                 code.Append(methodName);
 
-                if (asyncType is not 0 && (hasAsyncDependencies || needsCancelToken))
+                if (AsyncKind is not 0 && (hasAsyncDependencies || needsCancelToken))
                 {
                     code.Append('(');
                     if (needsCancelToken) code.Append("cancellationToken");
@@ -1301,14 +1309,14 @@ public partial class Containers
                 }
             }
 
-            void AppendInstance(StringBuilder code, bool isAsyncContext, string newIndentedLine = @"
+            void AppendInstance(StringBuilder code, bool isAsyncContext, bool appendInterceptorProvider = false, string newIndentedLine = @"
 				")
             {
                 code.Append("new ")
                     .Append(typeFullName)
                     .Append('(');
 
-                AppendParams(code, isAsyncContext, newIndentedLine);
+                AppendParams(code, isAsyncContext, appendInterceptorProvider,  newIndentedLine);
 
                 code.Append(')');
             }
@@ -1316,6 +1324,7 @@ public partial class Containers
             void AppendFactoryCaller(
                 StringBuilder code,
                 bool allowAwait,
+                bool appendInterceptorProvider = false,
                 string newIndentedLine = @"
 				")
             {
@@ -1323,7 +1332,7 @@ public partial class Containers
                 {
                     case SymbolKind.Method:
 
-                        AppendFactoryContainingType(code);
+                        AppendFactoryContainingType(code, appendInterceptorProvider);
 
                         //if (initialAsyncType > 0)
                         //{
@@ -1341,7 +1350,7 @@ public partial class Containers
                         code.Append(factoryName)
                             .Append('(');
 
-                        AppendParams(code, allowAwait, newIndentedLine);
+                        AppendParams(code, allowAwait, appendInterceptorProvider, newIndentedLine);
 
                         code.Append(')');
                         //}
@@ -1350,14 +1359,14 @@ public partial class Containers
 
                     case SymbolKind.Property:
 
-                        AppendFactoryContainingType(code);
+                        AppendFactoryContainingType(code, appendInterceptorProvider);
 
                         if (isFactoryIndexerProperty)
                         {
                             code.Append(factoryName)
                                 .Append('[');
 
-                            AppendParams(code, allowAwait, newIndentedLine);
+                            AppendParams(code, allowAwait, appendInterceptorProvider, newIndentedLine);
 
                             code.Append(']');
                         }
@@ -1371,7 +1380,7 @@ public partial class Containers
 
                     case SymbolKind.Field:
 
-                        AppendFactoryContainingType(code);
+                        AppendFactoryContainingType(code, appendInterceptorProvider);
 
                         code.Append(factoryName);
 
@@ -1385,15 +1394,17 @@ public partial class Containers
                 }
             }
 
-            void AppendFactoryContainingType(StringBuilder code)
+            void AppendFactoryContainingType(StringBuilder code, bool appendInterceptorProvider)
             {
                 if (isFactoryFromCurrentProvider && !isInterfaceProvider)
                     return;
 
+                if (appendInterceptorProvider)
+                    code.Append("provider.");
                 if (isInterfaceProvider && !isStaticFactory)
-                    code.Append("((").Append(isFactoryFromCurrentProvider ? ProviderTypeName : ProviderFullTypeName).Append(")this)").Append('.');
+                    code.Append("((").Append(isFactoryFromCurrentProvider ? providerTypeName : ProviderFullTypeName).Append(")this)").Append('.');
                 else if (isStaticFactory)
-                    code.Append(isFactoryFromCurrentProvider ? ProviderTypeName : ProviderFullTypeName).Append('.');
+                    code.Append(isFactoryFromCurrentProvider ? providerTypeName : ProviderFullTypeName).Append('.');
             }
 
             void AppendDefault(StringBuilder code, bool _ = false, bool __ = false)
@@ -1419,9 +1430,9 @@ public partial class Containers
 
                 var fieldName = "_" + memberName.Camelize();
 
-                if (!isExternal && factory is null && asyncType is not 0 && !isSimpleTransient) memberName = "Get" + memberName;
+                if (!isExternal && factory is null && AsyncKind is not 0 && !isSimpleTransient) memberName = "Get" + memberName;
 
-                if (!(memberName.Contains("Async") || memberName.Contains("Task")) && asyncType is not 0)
+                if (!(memberName.Contains("Async") || memberName.Contains("Task")) && AsyncKind is not 0)
                     (memberName, fieldName) = (memberName + "Async", fieldName + "Task");
 
                 return (fieldName, memberName);
