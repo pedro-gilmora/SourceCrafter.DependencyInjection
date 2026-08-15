@@ -167,12 +167,17 @@ public class AppSettings
 
 ### 4. Attribute Reference
 
+#### Lifetime attributes' anatomy:
+
+- V1: [Lifetime()]
+
+
 | Attribute | Lifetime | Caching | Use Case |
 |-----------|----------|---------|----------|
-| `[Singleton<T, TImpl>]` | Application | Static | Stateless services, expensive resources |
-| `[Scoped<T, TImpl>]` | Per instance | Instance | Context-local services, repositories |
-| `[Transient<T>]` | Per request | None | Stateful objects, value types |
-| `[JsonSetting<T>(section)]` | Config | Static | Loaded from `appsettings.json` |
+| `[Singleton(typeof(T), typeof(TImpl)?)]` <br/>or `[Singleton<T>]` <br/>or `[Singleton<T, TImpl>]` | Application | Static | Stateless services, expensive resources |
+| `[Scoped(typeof(T), typeof(TImpl)?)]` <br/>or `[Scoped<T>]` <br/>or `[Scoped<T, TImpl>]` | Per instance | Instance | Context-local services, repositories |
+| `[Transient(typeof(T), typeof(TImpl)?)]` <br/>or `[Transient<T>]` <br/>or `[Transient<T, TImpl>]` | Per request | None | Stateful objects, value types |
+| `[JsonSetting<T>(section)]` | Config | Static | Maps a setting section loaded from `appsettings.json` |
 | `[Scoped(name, source: Method)]` | Per instance | Instance | Named factory-produced services |
 
 ### Key Behaviors
@@ -226,9 +231,9 @@ static Task<User> GetUserAsync() => /* ... */;
 
 The container calls this once per scope, caches the result, and reuses it for all dependents.
 
-### IServiceProvider Interception
+### IServiceProvider-like Interception
 
-Generated extension methods intercept `IServiceProvider` calls:
+Generated extension methods intercept `IServiceProvider`-like calls:
 
 ```csharp
 // Your code
@@ -258,17 +263,6 @@ The generator creates:
 3. **Disposal Routing**:
    - Automatic tracking of disposable dependencies
    - Proper disposal order in `DisposeAsync()` / `Dispose()`
-
-### Performance Characteristics
-
-| Scenario | Runtime Lookup | SourceCrafter | Benefit |
-|----------|----------------|---------------|---------|
-| Singleton access | ~5μs | <1μs | 5–10x faster |
-| Transient creation | ~10μs | ~0.3μs | 30x faster |
-| Async dependency | ~8μs + async overhead | Compiled + cached | No reflection → pure execution |
-
----
-
 ---
 
 ## Generated Code Example
