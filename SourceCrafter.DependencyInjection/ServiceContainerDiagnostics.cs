@@ -7,7 +7,7 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("SourceCrafter.DependencyInjection")]
 namespace SourceCrafter.DependencyInjection;
 
-internal static class ServiceContainerGeneratorDiagnostics
+internal static class ServiceContainerDiagnostics
 {
     internal static Diagnostic DuplicateService(Lifetime lifetime, string? key, AttributeSyntax attrSyntax, string typeName, string exportTypeFullName)
     {
@@ -132,39 +132,64 @@ internal static class ServiceContainerGeneratorDiagnostics
             providerClassName);
     }
 
-    internal static Diagnostic ParamInterfaceTypeWithoutImplementation(
-        SyntaxNode? attrSyntax,
-        string interfaceName,
-        string providerClassName)
+    internal static Diagnostic InterfaceWithNoImplementation(
+        Location attrLocation,
+        ITypeSymbol interfeis,
+        string providerClassName,
+        Lifetime lifetime)
     {
-        interfaceName = interfaceName.TrimStart('I');
+        var interfaceName = interfeis.NameOnly;
+        if(interfeis.TypeKind == TypeKind.Interface) interfaceName = interfaceName.TrimStart('I');
         DiagnosticDescriptor rule = new(
             id: "SCDI08",
             title: "Dependency has unresolved types",
-            messageFormat: "Interface {0} has not registered implementation at container {1}.",
+            messageFormat: "Interface {0} has not specified implementation at container {2}.",
             category: "SourceCrafter.DependencyInjection.Definition",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true,
-            description: "Define a [LifeTime<I{0}, {0}>] as decorator attribute over type {1} definition"
+            description: "Define or fix a [LifeTime<I{1}, {1}>] as decorator attribute over type {1} definition"
         );
 
         return Diagnostic.Create(
             rule,
-            attrSyntax?.GetLocation(),
+            attrLocation,
+            interfeis.GlobalNamespaced,
+            providerClassName,
             interfaceName,
-            providerClassName);
+            lifetime);
+    }
+
+    internal static Diagnostic BaseAndImplementationMissmatch(
+        Location attrLocation,
+        ITypeSymbol type,
+        ITypeSymbol interfeis)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI08",
+            title: "Dependency has unresolved types",
+            messageFormat: "Type '{0}' is not an implementation of '{1}'.",
+            category: "SourceCrafter.DependencyInjection.Definition",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true
+        );
+
+        return Diagnostic.Create(
+            rule,
+            attrLocation,
+            type.GlobalNamespaced,
+            interfeis.GlobalNamespaced);
     }
 
     //internal static Diagnostic DependencyCallMustBeScoped(string providerName, IdentifierNameSyntax methodNameSyntax)
     //{
     //    DiagnosticDescriptor rule = new(
     //        id: "SCDI09",
-    //        title: "Resolver method called on non-scoped instance.",
+    //        title: "Resolver factorySource called on non-scoped instance.",
     //        messageFormat: $"Method [{methodNameSyntax.Identifier.ValueText}] must be called from scoped instance using [{providerName}.CreateScope()].",
     //        category: "SourceCrafter.DependencyInjection.Usage",
     //        defaultSeverity: DiagnosticSeverity.Error,
     //        isEnabledByDefault: true,
-    //        description: "Please, just use a CreateScope reference to call the indicated method"
+    //        description: "Please, just use a CreateScope reference to call the indicated factorySource"
     //    );
 
     //    return Diagnostic.Create(
@@ -172,7 +197,7 @@ internal static class ServiceContainerGeneratorDiagnostics
     //        methodNameSyntax.GetLocation());
     //}
 
-    internal static Diagnostic FactoryReturnMismatch(IMethodSymbol method, ITypeSymbol type, ITypeSymbol returnType, AttributeSyntax attrSyntax)
+    internal static Diagnostic FactoryReturnMismatch(ISymbol factorySource, ITypeSymbol type, ITypeSymbol returnType, AttributeSyntax attrSyntax)
     {
         DiagnosticDescriptor rule = new(
             id: "SCDI10",
@@ -188,7 +213,7 @@ internal static class ServiceContainerGeneratorDiagnostics
             attrSyntax.GetLocation(),
             returnType.TypeKind,
             returnType.ToDisplayString(),
-            method.ToDisplayString(),
+            factorySource.ToDisplayString(),
             type.ToDisplayString(),
             type.TypeKind is TypeKind.Interface || type.IsAbstract ? "base" : type.Kind.ToString().ToLower());
     }

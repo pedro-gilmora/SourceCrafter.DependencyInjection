@@ -78,15 +78,13 @@
 		<Compile Include="Helpers.cs">
 			<DependentUpon>Containers.cs</DependentUpon>
 		</Compile>
-		<Compile Include="ServiceContainerGeneratorDiagnostics.cs">
-			<DependentUpon>Containers.cs</DependentUpon>
-		</Compile>
 		<Compile Include="Containers.Parser.cs">
 			<DependentUpon>Containers.cs</DependentUpon>
 		</Compile>
 		<Compile Include="Containers.Emitter.cs">
 			<DependentUpon>Containers.cs</DependentUpon>
 		</Compile>
+		<Compile Include="ServiceContainerDiagnostics.cs" />
 		<!--<Compile Include="..\Solution\Utils\Map.cs">
 			<Link>Utils\Map.cs</Link>
 		</Compile>

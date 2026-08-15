@@ -88,10 +88,10 @@ public sealed partial class Containers : IIncrementalGenerator
                             {
                                 if (item.InvalidAsyncTypeArg)
                                     context.ReportDiagnostic(
-                                        ServiceContainerGeneratorDiagnostics.InvalidAsyncTypeArgument(item.Location, item.AsyncKind, item.MethodName));
+                                        ServiceContainerDiagnostics.InvalidAsyncTypeArgument(item.Location, item.AsyncKind, item.MethodName));
                                 if (!item.Acknowledged)
                                     context.ReportDiagnostic(
-                                        ServiceContainerGeneratorDiagnostics.UncoveredGenericResolver(item.Location, item.ReturnType, item.ContainerTypeFullName, item.IsScopedCall));
+                                        ServiceContainerDiagnostics.UncoveredGenericResolver(item.Location, item.ReturnType, item.ContainerTypeFullName, item.IsScopedCall));
                             }
                         }
 
@@ -146,7 +146,7 @@ public sealed partial class Containers : IIncrementalGenerator
 namespace System.Runtime.CompilerServices
 {
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
-    public sealed class InterceptsLocationAttribute(int version, string data) : global::System.Attribute { }
+    public sealed class InterceptsLocationAttribute(int version, string data) : global::System.Attribute;
 }";
 
     private const string TaskExtensionsFileContent = @"#nullable enable

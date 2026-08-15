@@ -1,11 +1,13 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.VisualBasic;
 using SourceCrafter.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
+using System.Reflection.PortableExecutable;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -19,7 +21,7 @@ public partial class Containers
         INamedTypeSymbol providerType)
     {
         HashSet<Diagnostic> diagnostics = [];
-        var ProviderFullTypeName = providerType.FullGlobalQualifiedName;
+        var providerFullTypeName = providerType.FullGlobalQualifiedName;
         var isInterfaceProvider = providerType.TypeKind == TypeKind.Interface;
         var providerTypeName = providerType.TypeNameFormat;
         var className = isInterfaceProvider ? providerTypeName[1..] : providerTypeName;
@@ -63,9 +65,9 @@ public partial class Containers
             _ => ("", "")
         };
 
-        ResolverBuilder selfDepInfo = new($"{ProviderFullTypeName}")
+        ResolverBuilder selfDepInfo = new($"{providerFullTypeName}")
         {
-            Key = (Lifetime.Singleton, ProviderFullTypeName, ""),
+            Key = (Lifetime.Singleton, providerFullTypeName, ""),
             AppendValue = (_, _, _) => { }
         };
 
@@ -84,7 +86,7 @@ public partial class Containers
             providerType.MetadataLongName,
             nameSpace,
             diagnostics,
-            ProviderFullTypeName,
+            providerFullTypeName,
             isInterfaceProvider,
             providerType.AllInterfaces.Any(i => i.GlobalNamespaced == "global::System.IServiceProvider"),
             className,
@@ -189,10 +191,6 @@ public partial class Containers
 
             if (!IsValidServiceAttribute(attr))
             {
-                if ((sourceType ?? type)?.FullGlobalQualifiedName is { } fullName && attr?.ApplicationSyntaxReference?.GetSyntax() is { } attrSyntx)
-                {
-                    diagnostics.Add(ServiceContainerGeneratorDiagnostics.UnresolvedDependency(attrSyntx, providerTypeName, fullName));
-                }
                 //(lifetime, exportType?.ToDisplayString(), type?.ToDisplayString(), name, false).Dump("Checking:");
                 return false;
             }
@@ -208,7 +206,7 @@ public partial class Containers
                 (backingFieldName, methodName) = GetResolverName();
                 //new { lifetime, name, exportType }.Dump("Duplicated service:");
                 diagnostics.Add(
-                    ServiceContainerGeneratorDiagnostics
+                    ServiceContainerDiagnostics
                         .DuplicateService(lifetime, name, attrSyntax, typeFullName, exportTypeFullName));
 
                 return false;
@@ -260,7 +258,7 @@ public partial class Containers
             {
                 //exportTypeFullName.Dump($"Primitive {lifetime} type should be keyed:");
                 diagnostics.Add(
-                    ServiceContainerGeneratorDiagnostics
+                    ServiceContainerDiagnostics
                         .PrimitiveDependencyMustBeKeyed(lifetime, attrSyntax, typeFullName, exportTypeFullName));
             }
 
@@ -658,12 +656,14 @@ public partial class Containers
                 if (isExternal = _attrClass.ContainingNamespace.ToDisplayString() != BaseAttributesNS)
                     externalAssemblies.Add(_attrClass.ContainingAssembly.MetadataName.Replace(".Metadata", ""));
 
+                var foundInAttribute = false;
+
                 if (attr.AttributeClass!.TypeArguments.Length > 0 is { } isGeneric)
                 {
                     switch (_attrClass!.TypeArguments)
                     {
                         case [{ } t1, { } t2, ..]:
-
+                            foundInAttribute = true;
                             interfaceType = t1;
                             interfaceFullTypeName = interfaceType.FullGlobalQualifiedName;
                             type = t2;
@@ -671,26 +671,30 @@ public partial class Containers
                             break;
 
                         case [{ } t1]:
-
+                            foundInAttribute = true;
                             type = t1;
                             typeFullName = type.FullGlobalQualifiedName;
 
                             break;
                     }
                 }
-
+                ITypeSymbol? factoryReturnType = null;
                 foreach (var (param, arg) in GetAttributeParamsMap(attrParams, _attrSyntax.ArgumentList?.Arguments ?? []))
                 {
                     switch (param.Name)
                     {
-                        case ImplParamName when !isGeneric && arg is { Expression: TypeOfExpressionSyntax { Type: { } _type } }:
+                        case ImplParamName when type is null && !isGeneric 
+                            && arg is { Expression: TypeOfExpressionSyntax { Type: { } _type } }:
 
                             type = (ITypeSymbol)model.GetSymbolInfo(_type).Symbol!;
                             typeFullName = type.FullGlobalQualifiedName;
 
                             continue;
 
-                        case IfaceParamName when sourceSymbol is IParameterSymbol { Type.TypeKind: not TypeKind.Interface } && !isGeneric && arg is { Expression: TypeOfExpressionSyntax { Type: { } type } }:
+                        case IfaceParamName when 
+                            interfaceType is null 
+                            && !isGeneric 
+                            && arg is { Expression: TypeOfExpressionSyntax { Type: { } type } }:
 
                             interfaceType = (ITypeSymbol)model.GetSymbolInfo(type).Symbol!;
                             interfaceFullTypeName = interfaceType.FullGlobalQualifiedName;
@@ -730,21 +734,20 @@ public partial class Containers
                                     isStaticFactory = isStatic;
                                     isFactoryFromCurrentProvider = SymbolEqualityComparer.Default.Equals(providerType, containingType);
 
-                                    ITypeSymbol returnType;
                                     (AsyncKind, isFactoryIndexerProperty) = fieldOrProp switch
                                     {
-                                        IPropertySymbol { Type: ITypeSymbol type, IsIndexer: var isIndexer } => (initialAsyncType = type.TryGetAsyncType(out returnType), isIndexer),
-                                        _ => (((IFieldSymbol)fieldOrProp).Type.TryGetAsyncType(out returnType), false)
+                                        IPropertySymbol { Type: ITypeSymbol type, IsIndexer: var isIndexer } => (initialAsyncType = type.TryGetAsyncType(out factoryReturnType), isIndexer),
+                                        _ => (((IFieldSymbol)fieldOrProp).Type.TryGetAsyncType(out factoryReturnType), false)
                                     };
 
-                                    if (returnType is not { TypeKind: TypeKind.Interface, IsAbstract: true })
+                                    if (factoryReturnType is not { TypeKind: TypeKind.Interface, IsAbstract: true })
                                     {
-                                        type ??= returnType;
+                                        type ??= factoryReturnType;
                                         typeFullName = type.FullGlobalQualifiedName;
                                     }
                                     else
                                     {
-                                        interfaceType ??= returnType;
+                                        interfaceType ??= factoryReturnType;
                                         interfaceFullTypeName = interfaceType.FullGlobalQualifiedName;
                                     }
 
@@ -758,19 +761,20 @@ public partial class Containers
                                     isStaticFactory = isStatic;
                                     factoryKind = SymbolKind.Method;
                                     defaultParamValues = method.Parameters;
-                                    initialAsyncType = AsyncKind = method.ReturnType.TryGetAsyncType(out returnType);
+                                    initialAsyncType = AsyncKind = method.ReturnType.TryGetAsyncType(out factoryReturnType);
                                     isFactory = true;
                                     isFactoryFromCurrentProvider = SymbolEqualityComparer.Default.Equals(providerType, containingType);
                                     factoryName = factory.Name;
-                                    if (returnType.TypeKind is TypeKind.Interface || returnType.IsAbstract)
+
+                                    if (factoryReturnType is not { TypeKind: TypeKind.Interface, IsAbstract: true })
                                     {
-                                        interfaceType ??= returnType;
-                                        interfaceFullTypeName = interfaceType.FullGlobalQualifiedName;
+                                        type ??= factoryReturnType;
+                                        typeFullName = type.FullGlobalQualifiedName;
                                     }
                                     else
                                     {
-                                        type ??= returnType;
-                                        typeFullName = type.FullGlobalQualifiedName;
+                                        interfaceType ??= factoryReturnType;
+                                        interfaceFullTypeName = interfaceType.FullGlobalQualifiedName;
                                     }
 
                                     continue;
@@ -787,22 +791,60 @@ public partial class Containers
                                     && (method.DeclaredAccessibility != Accessibility.Private || !method.Name.StartsWith("_"))
                                         && method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax()?.GetLocation() is Location location2)
                                 {
-                                    diagnostics.Add(ServiceContainerGeneratorDiagnostics.ThrowInnerFactorySpecs(method.Name, location2));
+                                    diagnostics.Add(ServiceContainerDiagnostics.ThrowInnerFactorySpecs(method.Name, location2));
                                 }
                             }
 
-                        case "disposability" when param.HasExplicitDefaultValue:
+                        //case "disposability" when param.HasExplicitDefaultValue:
 
-                            disposability = (Disposability)(byte)param.ExplicitDefaultValue!;
+                        //    disposability = (Disposability)(byte)param.ExplicitDefaultValue!;
 
-                            continue;
+                        //    continue;
+                    }
+                }
+
+                if (interfaceType != null)
+                {
+                    var count = diagnostics.Count;
+                    if (type is null)
+                    {
+                        if (factoryReturnType is null)
+                            diagnostics.Add(ServiceContainerDiagnostics.InterfaceWithNoImplementation(attrSyntax.GetLocation(), interfaceType, providerFullTypeName, lifetime));
+                    }
+                    else if(!foundInAttribute 
+                        && !HasBaseType(type, interfaceType)
+                        && !type.AllInterfaces.Any(i => SymbolEqualityComparer.Default.Equals(i, interfaceType)))
+
+                            diagnostics.Add(ServiceContainerDiagnostics.BaseAndImplementationMissmatch(attrSyntax.GetLocation(), type, interfaceType));
+
+                    if (factoryReturnType is not null)
+                    {
+                        var typeToMatch = type ?? interfaceType;
+                        if (!SymbolEqualityComparer.Default.Equals(typeToMatch, factoryReturnType)
+                            && !HasBaseType(typeToMatch, interfaceType)
+                            && !typeToMatch.AllInterfaces.Any(i => SymbolEqualityComparer.Default.Equals(i, interfaceType)))
+                        {
+                            diagnostics.Add(ServiceContainerDiagnostics.FactoryReturnMismatch(factory!, interfaceType, factoryReturnType, attrSyntax));
+                        }
+                    }
+
+                    if (count < diagnostics.Count)
+                        return false;
+
+                    static bool HasBaseType(ITypeSymbol type, ITypeSymbol baseType)
+                    {
+                        while (type != null)
+                            if (SymbolEqualityComparer.Default.Equals(type, baseType))
+                                return true;
+                            else type = type.BaseType!;
+                        return false;
                     }
                 }
 
                 exportType ??= interfaceType ?? type!;
                 exportTypeFullName = interfaceFullTypeName ?? typeFullName;
 
-                if (!(isValid = exportType is not null && type is not null && attrClass is not null && _attrSyntax is not null)) return false;
+                if (!(isValid = exportType is not null && type is not null && attrClass is not null && _attrSyntax is not null)) return ReturnNotFound();
 
                 if (!hasScopedDependencies && lifetime is Lifetime.Scoped)
                 {
@@ -812,7 +854,7 @@ public partial class Containers
                 if (AsyncKind is not 0 && factoryKind is SymbolKind.Method && !((IMethodSymbol)factory!).Parameters.Any(p => p.Type.FullGlobalQualifiedName is CancelTokenFQMetaName))
                 {
                     //factory.ToDisplayString().Dump("Cancellation token should be Appendd");
-                    diagnostics.Add(ServiceContainerGeneratorDiagnostics.CancellationTokenShouldBeProvided(factory, attrSyntax));
+                    diagnostics.Add(ServiceContainerDiagnostics.CancellationTokenShouldBeProvided(factory, attrSyntax));
                 }
 
                 key = (exportTypeFullName, name);
@@ -839,6 +881,12 @@ public partial class Containers
 
                 return true;
 
+
+                bool ReturnNotFound()
+                {
+                    diagnostics.Add(ServiceContainerDiagnostics.UnresolvedDependency(attrSyntax, providerTypeName, exportTypeFullName));
+                    return false;
+                }
 
 
                 static ImmutableArray<IParameterSymbol> GetConstructorParameters(ITypeSymbol? implType)
@@ -1402,9 +1450,9 @@ public partial class Containers
                 if (appendInterceptorProvider)
                     code.Append("provider.");
                 if (isInterfaceProvider && !isStaticFactory)
-                    code.Append("((").Append(isFactoryFromCurrentProvider ? providerTypeName : ProviderFullTypeName).Append(")this)").Append('.');
+                    code.Append("((").Append(isFactoryFromCurrentProvider ? providerTypeName : providerFullTypeName).Append(")this)").Append('.');
                 else if (isStaticFactory)
-                    code.Append(isFactoryFromCurrentProvider ? providerTypeName : ProviderFullTypeName).Append('.');
+                    code.Append(isFactoryFromCurrentProvider ? providerTypeName : providerFullTypeName).Append('.');
             }
 
             void AppendDefault(StringBuilder code, bool _ = false, bool __ = false)
