@@ -15,14 +15,14 @@ namespace SourceCrafter.DependencyInjection.Tests
     [Scoped("finalCount", source: nameof(GetCount))]
     [Singleton<IDatabase, Database>]
     [Scoped<IAuthService, AuthService>]
-    [Transient<EmployeeController>]
-    public interface IServer : IServiceProvider
+    [Transient(impl:typeof(EmployeeController))]
+    public partial class Server : IServiceProvider
     {
-        static Task<int> GetCountAsync(IServer _, CancellationToken token) => Task.FromResult(1);
+        static Task<int> GetCountAsync(Server _, CancellationToken token) => Task.FromResult(1);
 
         static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
 
-        static int GetCount(int count, [Root] IServer _) => count;
+        static int GetCount(int count, [Root] Server _) => count;
     }
 
     #region TestType

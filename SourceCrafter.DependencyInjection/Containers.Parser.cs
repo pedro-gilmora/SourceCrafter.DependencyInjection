@@ -363,6 +363,9 @@ public partial class Containers
                         paramLifeTime => (foundService = foundServices.LastOrDefault(
                             e => e.Key.lifetime == paramLifeTime && (e.Key.key == paramName || e.Key.key == "")).Value) is not null))
                     {
+                        if (hasNoCachedDeps && !foundService!.TransientWithoutCachedDeps)
+                            hasNoCachedDeps = false;
+
                         CreateParamResolverBuilder(foundService!);
                     }
 
