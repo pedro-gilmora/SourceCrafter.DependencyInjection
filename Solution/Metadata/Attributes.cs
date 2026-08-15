@@ -29,7 +29,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class SingletonAttribute<TImplementation>(string key = "", string? source = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+        class SingletonAttribute<TImplementation>(string key = "", string? source = null, string? nameFormat = null) : Attribute;
 
         [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct, AllowMultiple = true)]
 #if DISG_META
@@ -37,7 +37,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class SingletonAttribute<T, TImplementation>(string key = "", string? source = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+        class SingletonAttribute<T, TImplementation>(string key = "", string? source = null, string? nameFormat = null) : Attribute where TImplementation : T where T : notnull;
 
         [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META
@@ -45,7 +45,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class SingletonAttribute(string key = "", Type? impl = null, Type? iface = null, string? source = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+        class SingletonAttribute(string key = "", Type? impl = null, Type? iface = null, string? source = null, string? nameFormat = null) : Attribute;
 
         [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META
@@ -53,7 +53,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class ScopedAttribute<TImplementation>(string key = "", string? source = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+        class ScopedAttribute<TImplementation>(string key = "", string? source = null, string? nameFormat = null) : Attribute;
 
         [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct, AllowMultiple = true)]
 #if DISG_META
@@ -61,7 +61,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class ScopedAttribute<T, TImplementation>(string key = "", string? source = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+        class ScopedAttribute<T, TImplementation>(string key = "", string? source = null, string? nameFormat = null) : Attribute where TImplementation : T where T : notnull;
 
         [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META
@@ -69,7 +69,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class ScopedAttribute(string key = "", Type? impl = null, Type? iface = null, string? source = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+        class ScopedAttribute(string key = "", Type? impl = null, Type? iface = null, string? source = null, string? nameFormat = null) : Attribute;
 
         [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META
@@ -77,7 +77,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-            class TransientAttribute<TImplementation>(string key = "", string? source = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+            class TransientAttribute<TImplementation>(string key = "", string? source = null, string? nameFormat = null) : Attribute;
 
         [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct, AllowMultiple = true)]
 #if DISG_META
@@ -85,7 +85,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class TransientAttribute<T, TImplementation>(string key = "", string? source = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+        class TransientAttribute<T, TImplementation>(string key = "", string? source = null, string? nameFormat = null) : Attribute where TImplementation : T where T : notnull;
 
         [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META
@@ -93,13 +93,13 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class TransientAttribute(string key = "", Type? impl = null, Type? iface = null, string? source = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+        class TransientAttribute(string key = "", Type? impl = null, Type? iface = null, string? source = null, string? nameFormat = null) : Attribute;
 
 #if DISG_META
         public
 #else
         internal
 #endif
-        abstract class DependencyAttribute(Lifetime lifetime, string key = "", string? source = null, string? nameFormat = null, Disposability disposability = Disposability.None) : Attribute;
+        abstract class DependencyAttribute(Lifetime lifetime, string key = "", string? source = null, string? nameFormat = null) : Attribute;
     }
 }
