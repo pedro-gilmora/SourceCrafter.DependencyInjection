@@ -20,7 +20,7 @@ using System.Threading;
 [Generator(LanguageNames.CSharp)]
 #pragma warning restore RS1041 // Las extensiones del compilador deben implementarse en ensamblados que tengan como destino netstandard2.0
 #pragma warning disable CA1050 // Declarar tipos en espacios de nombres
-public sealed partial class Containers : IIncrementalGenerator
+internal sealed partial class Containers : IIncrementalGenerator
 #pragma warning restore CA1050 // Declarar tipos en espacios de nombres
 {
     internal const string
@@ -67,9 +67,9 @@ public sealed partial class Containers : IIncrementalGenerator
                     static (node, a) => true,
                     static (t, c) => TryParseContainer(t.SemanticModel, (INamedTypeSymbol)t.TargetSymbol)!)
                 .Where(e => e is not null)
-                .WithComparer(new EmitterEqualityComparer())
                 .Combine(msResolverCalls)
                 .Select(InterceptorsAppender)
+                .WithComparer(new EmitterEqualityComparer())
                 .Collect()
                 .WithTrackingName("SourceCrafterEmitters");
 
@@ -313,46 +313,45 @@ internal static class Extensions
                 Name: GenericNameSyntax { TypeArgumentList.Arguments: [{ } typeArgSyntax], Identifier.ValueText: { } methodName } method,
                 Expression: IdentifierNameSyntax { } refVar
             } memberAccess
-        ) return null!;
+        ) 
+            
+            return null!;
 
-        //var diagnostics = gsc.SemanticModel.GetDiagnostics();
+        var model = gsc.SemanticModel;
 
-        if (/*gsc.SemanticModel.GetSymbolInfo(method, cancellationToken) is not
+        if (model.GetInterceptableLocation(invocation, cancellationToken) is not { } interceptor
+            || model.GetTypeInfo(typeArgSyntax, cancellationToken).Type is not ITypeSymbol { } depTypeResult
+            || model.GetSymbolInfo(refVar, cancellationToken).Symbol switch
             {
-                Symbol: IMethodSymbol
-                {
-                    ReturnsVoid: false,
-                    ReturnType: ITypeSymbol returnType,
-                    FullGlobalQualifiedName: string methodFullName
-                }
-            }
-            || */gsc.SemanticModel.GetInterceptableLocation(invocation, cancellationToken) is not { } interceptor
-            || gsc.SemanticModel.GetTypeInfo(typeArgSyntax, cancellationToken).Type is not ITypeSymbol { } depTypeResult
-            || gsc.SemanticModel.GetSymbolInfo(refVar, cancellationToken).Symbol switch
-            {
-                ILocalSymbol local => (_ref: local, type: local.Type),
-                IParameterSymbol parameter => (_ref: parameter, type: parameter.Type),
-                IFieldSymbol field => (_ref: field, type: field.Type),
-                IPropertySymbol property => (_ref: property, type: property.Type),
-                _ => (_ref: default(ISymbol)!, type: default(ITypeSymbol)!)
-            }
-                    is not ({ } _ref, var type)) return null!;
+                ILocalSymbol local => (local, local.Type),
+                IParameterSymbol parameter => (parameter, parameter.Type),
+                IFieldSymbol field => (field, field.Type),
+                IPropertySymbol property => (property, property.Type),
+                _ => (default(ISymbol)!, default(ITypeSymbol)!)
+            } is not ({ } _ref, var type)) 
+            
+            return null!;
 
         bool scopedInference = type.AsNonNullable().ToDisplayString().Equals("Microsoft.Extensions.DependencyInjection.IServiceScope");
-        (bool isCtor, type) = GetContainerSource(gsc.SemanticModel, _ref, type, cancellationToken);
+
+        (bool isCtor, type) = GetContainerSource(model, _ref, type, cancellationToken);
+
         var callContainerType = (type.Name is "Scoped" && type.ContainingType is not null
             ? type.ContainingType
             : type).AsNonNullable();
+
         var keyHash = invocation.ArgumentList.Arguments switch
         {
             [{ Expression: LiteralExpressionSyntax { Token.RawKind: (int)SyntaxKind.StringLiteralToken, Token.ValueText: string text } }, ..]
                 => text,
-            [{ Expression: IdentifierNameSyntax id }, ..]
-                when TryGetIdentifier(gsc.SemanticModel.GetSymbolInfo(id, cancellationToken).Symbol, id, cancellationToken, out string text) => text,
-            [{ Expression: MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax id } }, ..]
-                when TryGetIdentifier(gsc.SemanticModel.GetSymbolInfo(id, cancellationToken).Symbol, id, cancellationToken, out string text) => text,
-            _ => ""
 
+            [{ Expression: IdentifierNameSyntax id }, ..]
+                when TryGetIdentifier(model, id, cancellationToken, out string text) => text,
+
+            [{ Expression: MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax id } }, ..]
+                when TryGetIdentifier(model, id, cancellationToken, out string text) => text,
+
+            _ => ""
         };
 
 
@@ -360,13 +359,13 @@ internal static class Extensions
         var methodWithTaskTypeArg = AsyncKind > 0;
 
         if (AsyncKind is 0 && methodName.EndsWith("Async")) AsyncKind = AsyncKind.Task;
+
         return new(
             callContainerType.AllInterfaces.Any(i => i.GetAttributes().Any(IsGeneratedServiceContainer)),
             callContainerType.NameOnly,
             callContainerType.FullGlobalQualifiedName,
             methodName,
-            (callContainerType.Name is "Scoped" && callContainerType.ContainingType is not null)
-                || scopedInference,
+            scopedInference || (callContainerType.Name is "Scoped" && callContainerType.ContainingType is not null),
             AsyncKind,
             depTypeResult.FullGlobalQualifiedName,
             interceptor,
@@ -384,7 +383,7 @@ internal static class Extensions
     {
         foreach (var declaration in _ref.DeclaringSyntaxReferences.Reverse())
         {
-            switch ((declaration.GetSyntax() as VariableDeclaratorSyntax)?.Initializer?.Value)
+            switch ((declaration.GetSyntax(token) as VariableDeclaratorSyntax)?.Initializer?.Value)
             {
                 case ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax:
                     return (true, type);
@@ -403,9 +402,9 @@ internal static class Extensions
         return (false, type);
     }
 
-    private static bool TryGetIdentifier(ISymbol? symbol, IdentifierNameSyntax id, CancellationToken cancellationToken, out string text)
+    private static bool TryGetIdentifier(SemanticModel model, IdentifierNameSyntax id, CancellationToken cancellationToken, out string text)
     {
-        if (symbol is IFieldSymbol { IsConst: true, HasConstantValue: true, ConstantValue: string _text })
+        if (model.GetSymbolInfo(id, cancellationToken).Symbol is IFieldSymbol { IsConst: true, HasConstantValue: true, ConstantValue: string _text })
         {
             text = _text;
             return true;

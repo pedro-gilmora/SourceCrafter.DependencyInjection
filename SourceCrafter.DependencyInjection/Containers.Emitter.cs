@@ -10,7 +10,7 @@ using System.Text;
 using System.Xml.Linq;
 
 #pragma warning disable CA1050 // Declarar tipos en espacios de nombres
-public partial class Containers
+internal partial class Containers
 #pragma warning restore CA1050 // Declarar tipos en espacios de nombres
 {
     private sealed class Emitter(

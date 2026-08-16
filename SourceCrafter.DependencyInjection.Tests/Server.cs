@@ -90,23 +90,77 @@ namespace SourceCrafter.DependencyInjection.Tests
 
 
 
-//namespace SourceCrafter.DependencyInjection.Tests.Sub
-//{
-//    [ServiceContainer("DOTNET_ENVIRONMENT")]
-//    [JsonConfiguration]
-//    [JsonSetting<AppSettings>("AppSettings")]
-//    [Scoped("count", source: nameof(GetCountAsync))]
-//    [Singleton("reqId", source: nameof(ResolveRequestIdTask))]
-//    [Scoped("finalCount", source: nameof(GetCount))]
-//    [Singleton<IDatabase, Database>]
-//    [Scoped<IAuthService, AuthService>]
-//    [Transient<EmployeeController>]
-//    public interface IServer : IServiceProvider
-//    {
-//        static Task<int> GetCountAsync(IServer _, CancellationToken token) => Task.FromResult(1);
+namespace SourceCrafter.DependencyInjection.Tests.Sub
+{
+    [ServiceContainer("DOTNET_ENVIRONMENT")]
+    [JsonConfiguration]
+    [JsonSetting<AppSettings>("AppConfig")]
+    [Scoped("times", source: nameof(IConfigModule.GetCountAsync))]
+    [Singleton("serverId", source: nameof(IConfigModule.ServerRequestId))]
+    [Scoped("counter", source: nameof(IConfigModule.GetCount))]
+    //[Singleton(iface:typeof(IList<>), impl: typeof(List<>))]
+    [Singleton<IDatabase, Database>]
+    [Scoped<IAuthService, AuthService>]
+    [Transient<EmployeeController>]
+    public interface IServer;
 
-//        static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
+    public interface IConfigModule
+    {
+        static ValueTask<int> GetCountAsync(IServer _, CancellationToken token) => new(1);
 
-//        static int GetCount(int count, [Root] IServer _) => count;
-//    }
-//}
+        static Guid ServerRequestId => Guid.NewGuid();
+
+        static int GetCount(int times, [Root] IServer _) => times;
+    }
+    public class AuthService(IDatabase application, int times) : IAuthService
+    {
+        public IDatabase Database { get; } = application;
+
+        public ValueTask DisposeAsync()
+        {
+            return default;
+        }
+
+        public void Dispose()
+        {
+
+        }
+    }
+
+    public interface IAuthService : IAsyncDisposable
+    {
+        IDatabase Database { get; }
+    }
+
+    public class Database(AppSettings settings, Guid serverId) : IDatabase
+    {
+        public void TrySave(out string setting1)
+        {
+            setting1 = settings.Setting1;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            return default;
+        }
+
+        public void Dispose()
+        {
+
+        }
+    }
+
+    public interface IDatabase : IAsyncDisposable
+    {
+        void TrySave(out string setting1);
+    }
+
+    public class EmployeeController(IAuthService authService, IDatabase application, int counter, Guid serverId);
+
+    public class AppSettings
+
+    {
+        public string Setting1 { get; set; }
+        public string Setting2 { get; set; }
+    }
+}

@@ -13,7 +13,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 
 #pragma warning disable CA1050 // Declarar tipos en espacios de nombres
-public partial class Containers
+internal partial class Containers
 #pragma warning restore CA1050 // Declarar tipos en espacios de nombres
 {
     private static Emitter? TryParseContainer(
@@ -146,7 +146,8 @@ public partial class Containers
                 name = string.Empty,
                 whenAll = string.Empty,
                 exportTypeFullName = string.Empty,
-                typeFullName = string.Empty;
+                typeFullName = string.Empty,
+                factoryProviderName = string.Empty;
 
             string?
                 nameOrFormat = null,
@@ -754,6 +755,8 @@ public partial class Containers
                                         interfaceFullTypeName = interfaceType.FullGlobalQualifiedName;
                                     }
 
+                                    factoryProviderName = isFactoryFromCurrentProvider ? providerTypeName : containingType.GlobalNamespaced;
+
                                     continue;
 
                                 case { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [IMethodSymbol { ContainingType: ITypeSymbol containingType, ReturnsVoid: false, IsStatic: var isStatic } method] }:
@@ -779,6 +782,8 @@ public partial class Containers
                                         interfaceType ??= factoryReturnType;
                                         interfaceFullTypeName = interfaceType.FullGlobalQualifiedName;
                                     }
+
+                                    factoryProviderName = isFactoryFromCurrentProvider ? providerTypeName : containingType.GlobalNamespaced;
 
                                     continue;
                             }
@@ -1453,9 +1458,9 @@ public partial class Containers
                 if (appendInterceptorProvider)
                     code.Append("provider.");
                 if (isInterfaceProvider && !isStaticFactory)
-                    code.Append("((").Append(isFactoryFromCurrentProvider ? providerTypeName : providerFullTypeName).Append(")this)").Append('.');
+                    code.Append("((").Append(factoryProviderName).Append(")this)").Append('.');
                 else if (isStaticFactory)
-                    code.Append(isFactoryFromCurrentProvider ? providerTypeName : providerFullTypeName).Append('.');
+                    code.Append(factoryProviderName).Append('.');
             }
 
             void AppendDefault(StringBuilder code, bool _ = false, bool __ = false)
