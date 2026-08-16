@@ -1171,7 +1171,11 @@ internal partial class Containers
 					
 		lock(this)
 		{
-			if(").Append(backingFieldName).Append(" is not null) return ").Append(backingFieldName).Append(@";
+			if(").Append(backingFieldName).Append(AsyncKind is AsyncKind.ValueTask ? ".HasValue" : " is not null").Append(") return ").Append(backingFieldName);
+
+                            if (AsyncKind is AsyncKind.ValueTask) code.Append(".Value");
+
+                            code.Append(@";
 ");
                             //ct = global::System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ct, __scopedCancellationTokenSrc.Token).Token;
 
