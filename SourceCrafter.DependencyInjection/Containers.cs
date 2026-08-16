@@ -65,7 +65,7 @@ internal sealed partial class Containers : IIncrementalGenerator
         var servicesContainers = context.SyntaxProvider
                 .ForAttributeWithMetadataName(serviceContainerFullTypeName,
                     static (node, a) => true,
-                    static (t, c) => TryParseContainer(t.SemanticModel, (INamedTypeSymbol)t.TargetSymbol)!)
+                    static (gasc, c) => TryParseContainer(gasc, c))
                 .Where(e => e is not null)
                 .Combine(msResolverCalls)
                 .Select(InterceptorsAppender)

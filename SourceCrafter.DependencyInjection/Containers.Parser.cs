@@ -16,10 +16,12 @@ using System.Text;
 internal partial class Containers
 #pragma warning restore CA1050 // Declarar tipos en espacios de nombres
 {
-    private static Emitter? TryParseContainer(
-        SemanticModel model,
-        INamedTypeSymbol providerType)
+    private static Emitter TryParseContainer(
+        in GeneratorAttributeSyntaxContext gasc,
+        in CancellationToken cancelToken)
     {
+        SemanticModel model = gasc.SemanticModel;
+        INamedTypeSymbol providerType = (INamedTypeSymbol)gasc.TargetSymbol;
         HashSet<Diagnostic> diagnostics = [];
         var providerFullTypeName = providerType.FullGlobalQualifiedName;
         var isInterfaceProvider = providerType.TypeKind == TypeKind.Interface;
@@ -56,7 +58,7 @@ internal partial class Containers
             scopedAsyncDisposable = 0,
             singletonAsyncDisposable = 0;
 
-        var (modifiers, typeName) = providerType.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() switch
+        var (modifiers, typeName) = providerType.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancelToken) switch
         {
             ClassDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var typeParamsList } =>
                 ($"{mods} {keyword}".TrimStart(), $"{identifier}{typeParamsList}"),
@@ -75,10 +77,10 @@ internal partial class Containers
 
         foreach (var attr in attributes)
         {
-            TryRegisterService(attr, null, out _);
+            TryRegisterService(attr, null, out _, cancelToken);
         }
 
-        if (dependencyValueBuilders.Count == 0) return null;
+        if (dependencyValueBuilders.Count == 0) return null!;
 
         var nameSpace = providerType.ContainingNamespace is { } ns ? ns.ToDisplayString() : null;
 
@@ -118,7 +120,7 @@ internal partial class Containers
 
         return emitter;
 
-        bool TryRegisterService(AttributeData? attr, ISymbol? sourceSymbol, out ResolverBuilder? resolver, ChildDependencyHandler? validateAsChildDependency = null)
+        bool TryRegisterService(AttributeData? attr, ISymbol? sourceSymbol, out ResolverBuilder? resolver, CancellationToken cancelToken, ChildDependencyHandler? validateAsChildDependency = null)
         {
             (SymbolKind sourceKind, ITypeSymbol? sourceType) = sourceSymbol switch
             {
@@ -190,7 +192,7 @@ internal partial class Containers
 
             var (backingFieldName, methodName) = ("", "");
 
-            if (!IsValidServiceAttribute(attr))
+            if (!IsValidServiceAttribute(attr, cancelToken))
             {
                 //(lifetime, exportType?.ToDisplayString(), type?.ToDisplayString(), name, false).Dump("Checking:");
                 return false;
@@ -333,7 +335,7 @@ internal partial class Containers
                 {
                     foreach (var paramAttr in paramAttrs)
                     {
-                        if (TryRegisterService(paramAttr, prm, out foundService!, ValidateChildParameterDependency))
+                        if (TryRegisterService(paramAttr, prm, out foundService!, cancelToken, ValidateChildParameterDependency))
                         {
                             break;
                         }
@@ -491,7 +493,7 @@ internal partial class Containers
                 }
                 else if (paramType.TypeKind is not TypeKind.Interface)
                 {
-                    TryRegisterService(null, prm, out _, ValidateChildParameterDependency);
+                    TryRegisterService(null, prm, out _, cancelToken, ValidateChildParameterDependency);
                 }
                 else
                 {
@@ -622,14 +624,14 @@ internal partial class Containers
 
             return true;
 
-            bool IsValidServiceAttribute(AttributeData? attr)
+            bool IsValidServiceAttribute(AttributeData? attr, CancellationToken cancelToken)
             {
                 var isContainerAttr = false;
 
                 if (attr is not { AttributeClass: { } _attrClass, ApplicationSyntaxReference: { } attrSyntaxRef }
                     || (isContainerAttr = _attrClass.FullGlobalQualifiedName is ServiceContainerAttr)
-                    || attrSyntaxRef.GetSyntax() is not AttributeSyntax { } _attrSyntax
-                    || !TryGetAttributeParamsDefinition(model.GetSymbolInfo(_attrSyntax), out ImmutableArray<IParameterSymbol> attrParams)
+                    || attrSyntaxRef.GetSyntax(cancelToken) is not AttributeSyntax { } _attrSyntax
+                    || !TryGetAttributeParamsDefinition(model.GetSymbolInfo(_attrSyntax, cancellationToken: cancelToken), out ImmutableArray<IParameterSymbol> attrParams)
                     || !TryGetLifetime(_attrSyntax, ref _attrClass, ref isExternal, out lifetime))
                 {
                     if (isContainerAttr)
@@ -639,7 +641,7 @@ internal partial class Containers
                             { Syntax.ArgumentList.Arguments: [{ } arg, ..] } => arg switch
                             {
                                 { Expression: LiteralExpressionSyntax { Token.ValueText: { } envString } } when envString.Trim() is { Length: > 0 } => $@"""{envString}""",
-                                { Expression: MemberAccessExpressionSyntax { Name: { } member } } => model.GetSymbolInfo(member) switch
+                                { Expression: MemberAccessExpressionSyntax { Name: { } member } } => model.GetSymbolInfo(member, cancellationToken: cancelToken) switch
                                 {
                                     { Symbol: IFieldSymbol { } field } => field.GlobalNamespaced,
                                     _ => DefaultEnvName
@@ -690,7 +692,7 @@ internal partial class Containers
                         case ImplParamName when type is null && !isGeneric 
                             && arg is { Expression: TypeOfExpressionSyntax { Type: { } _type } }:
 
-                            type = (ITypeSymbol)model.GetSymbolInfo(_type).Symbol!;
+                            type = (ITypeSymbol)model.GetSymbolInfo(_type, cancellationToken: cancelToken).Symbol!;
                             typeFullName = type.FullGlobalQualifiedName;
 
                             continue;
@@ -700,7 +702,7 @@ internal partial class Containers
                             && !isGeneric 
                             && arg is { Expression: TypeOfExpressionSyntax { Type: { } type } }:
 
-                            interfaceType = (ITypeSymbol)model.GetSymbolInfo(type).Symbol!;
+                            interfaceType = (ITypeSymbol)model.GetSymbolInfo(type, cancellationToken: cancelToken).Symbol!;
                             interfaceFullTypeName = interfaceType.FullGlobalQualifiedName;
 
                             continue;
@@ -725,7 +727,7 @@ internal partial class Containers
                                 ArgumentList.Arguments: [{ } methodRef]
                             }:
 
-                            switch (model.GetSymbolInfo(methodRef.Expression))
+                            switch (model.GetSymbolInfo(methodRef.Expression, cancellationToken: cancelToken))
                             {
                                 case { Symbol: (IFieldSymbol or IPropertySymbol) and { ContainingType: ITypeSymbol containingType, Kind: var kind, IsStatic: var isStatic } fieldOrProp }:
 
@@ -797,7 +799,7 @@ internal partial class Containers
                                     && (SymbolEqualityComparer.Default.Equals(method.ContainingType, providerType)
                                     || method.ContainingType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == className)
                                     && (method.DeclaredAccessibility != Accessibility.Private || !method.Name.StartsWith("_"))
-                                        && method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax()?.GetLocation() is Location location2)
+                                        && method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancelToken)?.GetLocation() is Location location2)
                                 {
                                     diagnostics.Add(ServiceContainerDiagnostics.ThrowInnerFactorySpecs(method.Name, location2));
                                 }
