@@ -20,9 +20,22 @@ internal partial class Containers
         in GeneratorAttributeSyntaxContext gasc,
         in CancellationToken cancelToken)
     {
-        SemanticModel model = gasc.SemanticModel;
-        INamedTypeSymbol providerType = (INamedTypeSymbol)gasc.TargetSymbol;
-        HashSet<Diagnostic> diagnostics = [];
+        var model = gasc.SemanticModel;
+        var providerType = (INamedTypeSymbol)gasc.TargetSymbol;
+        var providerDeclarationSyntax = providerType.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancelToken);        
+        string modifiers, typeName;
+
+        switch(providerDeclarationSyntax)
+        {
+            case ClassDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var typeParamsList }:
+                (modifiers, typeName) = ($"{mods} {keyword}".TrimStart(), $"{identifier}{typeParamsList}");
+                break;
+            case InterfaceDeclarationSyntax { Modifiers: var mods, Identifier: { } identifier, TypeParameterList: var typeParamsList }:
+                (modifiers, typeName) = ($"{mods/*.Except([SyntaxFactory.Token(SyntaxKind.InterfaceKeyword)])*/} partial class".TrimStart(), $"{identifier.ValueText[1..]}{typeParamsList}");
+                break;
+            default: return null!;
+        };
+
         var providerFullTypeName = providerType.FullGlobalQualifiedName;
         var isInterfaceProvider = providerType.TypeKind == TypeKind.Interface;
         var providerTypeName = providerType.TypeNameFormat;
@@ -44,6 +57,7 @@ internal partial class Containers
         HashSet<string> methodsRegistry = [];
         Dictionary<DependencyKey, MemberBuilder> dependencyMemberBuilders = [];
         Dictionary<FirstLevelDependencyKey, Interceptor> interceptors = new(defaultKeyComparer);
+        HashSet<ResolverBuilder> genericResolvers = new(new GenericResolverBuilderComparer());
 
         Disposability
             containerDisposability = Disposability.None,
@@ -58,14 +72,7 @@ internal partial class Containers
             scopedAsyncDisposable = 0,
             singletonAsyncDisposable = 0;
 
-        var (modifiers, typeName) = providerType.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancelToken) switch
-        {
-            ClassDeclarationSyntax { Modifiers: var mods, Keyword: { } keyword, Identifier: { } identifier, TypeParameterList: var typeParamsList } =>
-                ($"{mods} {keyword}".TrimStart(), $"{identifier}{typeParamsList}"),
-            InterfaceDeclarationSyntax { Modifiers: var mods, Identifier: { } identifier, TypeParameterList: var typeParamsList } =>
-                ($"{mods/*.Except([SyntaxFactory.Token(SyntaxKind.InterfaceKeyword)])*/} partial class".TrimStart(), $"{identifier.ValueText[1..]}{typeParamsList}"),
-            _ => ("", "")
-        };
+        HashSet<Diagnostic> diagnostics = [];
 
         ResolverBuilder selfDepInfo = new($"{providerFullTypeName}")
         {
@@ -77,7 +84,8 @@ internal partial class Containers
 
         foreach (var attr in attributes)
         {
-            TryRegisterService(attr, null, out _, cancelToken);
+            if(TryRegisterService(attr, null, out var resolver, cancelToken))
+                genericResolvers.Add(resolver!); ;
         }
 
         if (dependencyValueBuilders.Count == 0) return null!;
@@ -87,16 +95,13 @@ internal partial class Containers
         Emitter emitter = new(
             providerType.MetadataLongName,
             nameSpace,
-            diagnostics,
             providerFullTypeName,
+            modifiers,
             isInterfaceProvider,
             providerType.AllInterfaces.Any(i => i.GlobalNamespaced == "global::System.IServiceProvider"),
             className,
-            dependencyValueBuilders,
-            dependencyMemberBuilders,
-            interceptors,
-            containerDisposability,
-            scopedDisposability,
+            typeName,
+            envName,
             asyncScopedDisposable,
             asyncSingletonDisposable,
             asyncScopedAsyncDisposable,
@@ -105,18 +110,19 @@ internal partial class Containers
             singletonDisposable,
             scopedAsyncDisposable,
             singletonAsyncDisposable,
-            modifiers,
-            typeName,
-            envName);
-
-        foreach (var item in dependencyValueBuilders.Values)
-            foreach (var resolver in item.Values)
-                emitter.genericResolvers.Add(resolver);
+            containerDisposability,
+            scopedDisposability,
+            dependencyValueBuilders,
+            dependencyMemberBuilders,
+            interceptors,
+            diagnostics,
+            genericResolvers);
 
         diagnostics = null!;
         dependencyValueBuilders = null!;
         dependencyMemberBuilders = null!;
         interceptors = null!;
+        genericResolvers = null!;
 
         return emitter;
 

@@ -11,7 +11,7 @@ namespace SourceCrafter.DependencyInjection.Tests
     public class Tests
     {
         [Fact]
-        public async Task _0RawGeneratedResolverMembers()
+        public async Task _0_RawGeneratedResolverMembers()
         {
             await using Server serverContainer = new();
 
@@ -39,7 +39,7 @@ namespace SourceCrafter.DependencyInjection.Tests
         }
 
         [Fact]
-        public async Task _1IServiceProviderGeneratedInterceptors()
+        public async Task _1_IServiceProviderGeneratedInterceptors()
         {
             await using Server serverContainer = new();
 
@@ -52,7 +52,7 @@ namespace SourceCrafter.DependencyInjection.Tests
             ias[0].Should().Be(iasFromB[0]);
             ias[1].Should().Be(iasFromB[1]);
 
-            //Uncommenting this will fail with SCDI11: No dependency resolver was found for 'global::System.DateTime' at 'Server' container
+            //Uncommenting this will complain with SCDI11: No dependency resolver was found for 'global::System.DateTime' at 'Server' container
             //var _ = serverContainer.GetRequiredService<DateTime>();
 
             var db = await serverContainer.GetRequiredServiceAsync<IDatabase>();
@@ -63,7 +63,7 @@ namespace SourceCrafter.DependencyInjection.Tests
 
             await using var scope = serverContainer.CreateScope();
 
-            //Uncommenting this will fail with SCDI11: No dependency resolver was found for 'global::System.DateTime' at 'Server' container scope
+            //Uncommenting this will complain with SCDI11: No dependency resolver was found for 'global::System.DateTime' at 'Server' container scope
             //var __ = scope.GetRequiredService<DateTime>();
 
             var id = await scope.GetRequiredKeyedServiceAsync<int>("count");

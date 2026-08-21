@@ -16,16 +16,13 @@ internal partial class Containers
     private sealed class Emitter(
         string metadataLongName,
         string? nameSpace,
-        HashSet<Diagnostic> diagnostics,
         string containerFullTypeName,
+        string modifiers,
         bool isInterfaceProvider,
         bool useInterceptors,
         string className,
-        DependencyDictionary dependencyValueBuilders,
-        Dictionary<DependencyKey, MemberBuilder> dependencyMemberBuilder,
-        Dictionary<FirstLevelDependencyKey, Interceptor> interceptors,
-        Disposability containerDisposability,
-        Disposability scopedDisposability,
+        string typeName,
+        string envName,
         int asyncScopedDisposable,
         int asyncSingletonDisposable,
         int asyncScopedAsyncDisposable,
@@ -34,14 +31,17 @@ internal partial class Containers
         int singletonDisposable,
         int scopedAsyncDisposable,
         int singletonAsyncDisposable,
-        string modifiers,
-        string typeName,
-        string envName) : IDisposable, IEquatable<Emitter>
+        Disposability containerDisposability,
+        Disposability scopedDisposability,
+        DependencyDictionary dependencyValueBuilders,
+        Dictionary<DependencyKey, MemberBuilder> dependencyMemberBuilder,
+        Dictionary<FirstLevelDependencyKey, Interceptor> interceptors,
+        HashSet<Diagnostic> diagnostics,
+        HashSet<ResolverBuilder> genericResolvers) : IDisposable, IEquatable<Emitter>
     {
 #pragma warning disable CS9124 // El parámetro se captura en el estado del tipo envolvente y su valor también se usa para inicializar un campo, propiedad o evento.
         internal HashSet<Diagnostic> Diagnostics = diagnostics;
         internal DependencyDictionary DependencyValueBuilders = dependencyValueBuilders;
-        internal HashSet<ResolverBuilder> genericResolvers = new(new GenericResolverBuilderComparer());
 #pragma warning restore CS9124 // El parámetro se captura en el estado del tipo envolvente y su valor también se usa para inicializar un campo, propiedad o evento.
         internal readonly string ContainerFullTypeName = containerFullTypeName;
         internal readonly string ClassName = className;
