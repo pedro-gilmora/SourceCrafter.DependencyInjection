@@ -3,7 +3,6 @@
 using Microsoft.Extensions.DependencyInjection;
 
 using Xunit;
-using Xunit.Abstractions;
 
 namespace SourceCrafter.DependencyInjection.Tests
 {
@@ -25,13 +24,13 @@ namespace SourceCrafter.DependencyInjection.Tests
 
             await using var scope = serverContainer.CreateScope();
 
-            var id = await scope.GetCountAsyncCached();
+            var id = await scope.GetCountAsyncCached(TestContext.Current.CancellationToken);
 
             id.Should().Be(1);
 
             var database = await serverContainer.GetDatabaseAsync();
 
-            var authService = await scope.GetAuthServiceAsync();
+            var authService = await scope.GetAuthServiceAsync(TestContext.Current.CancellationToken);
 
             authService.Database.TrySave(out setting1);
 
@@ -66,15 +65,15 @@ namespace SourceCrafter.DependencyInjection.Tests
             //Uncommenting this will complain with SCDI11: No dependency resolver was found for 'global::System.DateTime' at 'Server' container scope
             //var __ = scope.GetRequiredService<DateTime>();
 
-            var id = await scope.GetRequiredKeyedServiceAsync<int>("count");
+            var id = await scope.GetRequiredKeyedServiceAsync<int>("count", TestContext.Current.CancellationToken);
 
             id.Should().Be(1);
 
-            var ids = await scope.GetRequiredServicesAsync<int>(default);
+            var ids = await scope.GetRequiredServicesAsync<int>(TestContext.Current.CancellationToken);
 
             var database = await scope.GetRequiredServiceAsync<IDatabase>();
 
-            var authService = await scope.GetRequiredServiceAsync<IAuthService>(default);
+            var authService = await scope.GetRequiredServiceAsync<IAuthService>(TestContext.Current.CancellationToken);
 
             authService.Database.TrySave(out setting1);
 

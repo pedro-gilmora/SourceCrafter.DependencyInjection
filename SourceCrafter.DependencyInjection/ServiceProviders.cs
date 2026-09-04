@@ -15,12 +15,13 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
+using static System.Net.WebRequestMethods;
 
 #pragma warning disable RS1041 // Las extensiones del compilador deben implementarse en ensamblados que tengan como destino netstandard2.0
 [Generator(LanguageNames.CSharp)]
 #pragma warning restore RS1041 // Las extensiones del compilador deben implementarse en ensamblados que tengan como destino netstandard2.0
 #pragma warning disable CA1050 // Declarar tipos en espacios de nombres
-internal sealed partial class Containers : IIncrementalGenerator
+internal sealed partial class ServiceProviders : IIncrementalGenerator
 #pragma warning restore CA1050 // Declarar tipos en espacios de nombres
 {
     internal const string
@@ -67,32 +68,29 @@ internal sealed partial class Containers : IIncrementalGenerator
                     static (node, a) => true,
                     static (gasc, c) => TryParseContainer(gasc, c))
                 .Where(e => e is not null)
-                .Combine(msResolverCalls)
-                .Select(InterceptorsAppender)
-                .WithComparer(new EmitterEqualityComparer())
+                .WithComparer(EmitterEqualityComparer.Default)
+                .WithTrackingName("EmitterCreation")
                 .Collect()
-                .WithTrackingName("SourceCrafterEmitters");
-
-        context.RegisterSourceOutput(
-            servicesContainers
-                .Combine(msResolverCalls),
-            static (context, artifacts) =>
+                .Combine(msResolverCalls)
+                .Select(static (result, c) =>
                 {
+                    var diagnostics = ImmutableArray.CreateBuilder<Diagnostic>();
+                    var files = ImmutableArray.CreateBuilder<(string fileName, string code)>();
                     try
                     {
-                        var (emitters, msCalls) = artifacts;
+                        var (emitters, msCalls) = result;
 
-                        if (msCalls.Length > 0)
+                        foreach (var emitter in emitters) InterceptorsAppender(emitter, msCalls, c);
+
+                        foreach (var call in msCalls)
                         {
-                            foreach (var item in msCalls)
-                            {
-                                if (item.InvalidAsyncTypeArg)
-                                    context.ReportDiagnostic(
-                                        ServiceContainerDiagnostics.InvalidAsyncTypeArgument(item.Location, item.AsyncKind, item.MethodName));
-                                if (!item.Acknowledged)
-                                    context.ReportDiagnostic(
-                                        ServiceContainerDiagnostics.UncoveredGenericResolver(item.Location, item.ReturnType, item.ContainerTypeFullName, item.IsScopedCall));
-                            }
+                            if (call.InvalidAsyncTypeArg)
+                                diagnostics.Add(
+                                    ServiceContainerDiagnostics.InvalidAsyncTypeArgument(call.Location, call.AsyncKind, call.MethodName));
+
+                            if (!call.Acknowledged)
+                                diagnostics.Add(
+                                    ServiceContainerDiagnostics.UncoveredGenericResolver(call.Location, call.ReturnType, call.ContainerTypeFullName, call.IsScopedCall));
                         }
 
                         msCalls.Clear();
@@ -107,11 +105,11 @@ internal sealed partial class Containers : IIncrementalGenerator
                             using (emitter)
                             {
                                 emitter.Emit(countedNames, ref requiresTaskExtensions, ref interceptorsCount, out var file, out var code);
-                                context.AddSource(file + ".g", code);
+                                files.Add((file + ".g", code));
 
                                 foreach (var item in emitter.Diagnostics)
                                 {
-                                    context.ReportDiagnostic(item);
+                                    diagnostics.Add(item);
                                 }
                             }
                         }
@@ -120,10 +118,10 @@ internal sealed partial class Containers : IIncrementalGenerator
                         emitters = default;
 
                         if (interceptorsCount > 0)
-                            context.AddSource("Utils.g", UtilsFileContent);
+                            files.Add(("Utils.g", UtilsFileContent));
 
                         if (requiresTaskExtensions)
-                            context.AddSource("TaskExtensions.g", TaskExtensionsFileContent);
+                            files.Add(("TaskExtensions.g", TaskExtensionsFileContent));
                     }
                     catch (Exception e)
                     {
@@ -137,7 +135,27 @@ internal sealed partial class Containers : IIncrementalGenerator
                             description: e.ToString()
                         );
 
-                        context.ReportDiagnostic(Diagnostic.Create(rule, null));
+                        diagnostics.Add(Diagnostic.Create(rule, null));
+                    }
+                    
+                    return (diagnostics.ToImmutable(), files.ToImmutable());
+                })
+                .WithTrackingName("SourceCrafterEmitters");
+
+        context.RegisterSourceOutput(
+            servicesContainers,
+            static (context, artifacts) =>
+                {
+                    var (diagnostics, files) = artifacts;
+
+                    foreach (var diagnostic in diagnostics)
+                    {
+                        context.ReportDiagnostic(diagnostic);
+                    }
+
+                    foreach (var (fileName, code) in files)
+                    {
+                        context.AddSource(fileName, code);
                     }
                 });
     }
@@ -186,10 +204,8 @@ internal static class Extensions
 	}
 }";
 
-    private static Emitter InterceptorsAppender((Emitter Left, ImmutableArray<InvokeInfo> Right) context, CancellationToken c)
+    private static Emitter InterceptorsAppender(Emitter emitter, ImmutableArray<InvokeInfo> msCalls, CancellationToken c)
     {
-        var (emitter, msCalls) = context;
-
         foreach (var serviceCall in msCalls)
             if (!serviceCall.Acknowledged
                 && ((serviceCall.IsScopedCall && serviceCall.ContainerTypeFullName is "global::Microsoft.Extensions.DependencyInjection.IServiceScope")

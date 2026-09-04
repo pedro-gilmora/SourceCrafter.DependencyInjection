@@ -10,7 +10,7 @@ using System.Text;
 using System.Xml.Linq;
 
 #pragma warning disable CA1050 // Declarar tipos en espacios de nombres
-internal partial class Containers
+internal partial class ServiceProviders
 #pragma warning restore CA1050 // Declarar tipos en espacios de nombres
 {
     private sealed class Emitter(
@@ -434,7 +434,15 @@ public static class ").Append(typeName).Append(@"Extensions
     }
     sealed class EmitterEqualityComparer : IEqualityComparer<Emitter>
     {
+        public static EmitterEqualityComparer Default
+        {
+            get
+            {
+                if (field is not null) return field;
 
+                lock (typeof(EmitterEqualityComparer)) return field ??= new();
+            }
+        }
         public bool Equals(Emitter? x, Emitter? y)
         {
             return x?.Equals(y) is true;

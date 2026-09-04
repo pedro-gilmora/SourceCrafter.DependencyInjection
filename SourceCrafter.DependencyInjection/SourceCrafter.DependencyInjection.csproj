@@ -62,27 +62,25 @@
 		  <Pack>True</Pack>
 		  <PackagePath>\</PackagePath>
 		</None>
-		<Compile Include="Containers.cs">
-			<DependentUpon>Containers.cs</DependentUpon>
+		<Compile Include="ServiceProviders.cs" />
+		<Compile Include="ServiceProviders.Delegates.cs">
+			<DependentUpon>ServiceProviders.cs</DependentUpon>
 		</Compile>
-		<Compile Include="Containers.Delegates.cs">
-			<DependentUpon>Containers.cs</DependentUpon>
+		<Compile Include="ServiceProviders.Enums.cs">
+			<DependentUpon>ServiceProviders.cs</DependentUpon>
 		</Compile>
-		<Compile Include="Containers.Enums.cs">
-			<DependentUpon>Containers.cs</DependentUpon>
-		</Compile>
-		<Compile Include="Containers.Models.cs">
-			<DependentUpon>Containers.cs</DependentUpon>
+		<Compile Include="ServiceProviders.Models.cs">
+			<DependentUpon>ServiceProviders.cs</DependentUpon>
 		</Compile>
 		<Compile Include="GlobalUsings.cs" />
 		<Compile Include="Helpers.cs">
-			<DependentUpon>Containers.cs</DependentUpon>
+			<DependentUpon>ServiceProviders.cs</DependentUpon>
 		</Compile>
-		<Compile Include="Containers.Parser.cs">
-			<DependentUpon>Containers.cs</DependentUpon>
+		<Compile Include="ServiceProviders.Parser.cs">
+			<DependentUpon>ServiceProviders.cs</DependentUpon>
 		</Compile>
-		<Compile Include="Containers.Emitter.cs">
-			<DependentUpon>Containers.cs</DependentUpon>
+		<Compile Include="ServiceProviders.Emitter.cs">
+			<DependentUpon>ServiceProviders.cs</DependentUpon>
 		</Compile>
 		<Compile Include="ServiceContainerDiagnostics.cs" />
 		<!--<Compile Include="..\Solution\Utils\Map.cs">

@@ -78,7 +78,7 @@ jobs:
         # Export to GitHub Actions environment
         echo "$json" >> nuget_pkgs.json
 
-    - name: Notify Telegram & create GitHub Release
+    - name: Notify Telegram & GitHub Release
       if: always()
       shell: pwsh              
       env:

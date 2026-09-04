@@ -13,7 +13,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 
 #pragma warning disable CA1050 // Declarar tipos en espacios de nombres
-internal partial class Containers
+internal partial class ServiceProviders
 #pragma warning restore CA1050 // Declarar tipos en espacios de nombres
 {
     private static Emitter TryParseContainer(

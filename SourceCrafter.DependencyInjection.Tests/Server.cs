@@ -11,7 +11,7 @@ namespace SourceCrafter.DependencyInjection.Tests
     [Singleton<B>]
     [JsonSetting<AppSettings>("AppSettings")]
     [Scoped("count", source: nameof(GetCountAsync))]
-    [Singleton("reqId", source: nameof(ResolveRequestIdTask))]
+    [Singleton("reqId", source: nameof(ResolveRequestIdTask2))]
     [Scoped("finalCount", source: nameof(GetCount))]
     [Singleton<IDatabase, Database>]
     [Scoped<IAuthService, AuthService>]
@@ -20,7 +20,7 @@ namespace SourceCrafter.DependencyInjection.Tests
     {
         static Task<int> GetCountAsync(Server _, CancellationToken token) => Task.FromResult(1);
 
-        static ValueTask<Guid> ResolveRequestIdTask => new(Guid.NewGuid());
+        static ValueTask<Guid> ResolveRequestIdTask2 => new(Guid.NewGuid());
 
         static int GetCount(int count, [Root] Server _) => count;
     }
