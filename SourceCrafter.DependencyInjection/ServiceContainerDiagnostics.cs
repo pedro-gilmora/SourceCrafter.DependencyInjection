@@ -165,8 +165,8 @@ internal static class ServiceContainerDiagnostics
         ITypeSymbol interfeis)
     {
         DiagnosticDescriptor rule = new(
-            id: "SCDI08",
-            title: "Dependency has unresolved types",
+            id: "SCDI09",
+            title: "Implementation does not derive from the declared service type",
             messageFormat: "Type '{0}' is not an implementation of '{1}'.",
             category: "SourceCrafter.DependencyInjection.Definition",
             defaultSeverity: DiagnosticSeverity.Error,
@@ -251,10 +251,25 @@ internal static class ServiceContainerDiagnostics
         return Diagnostic.Create(rule, location, name);
     }
 
+    internal static Diagnostic AmbiguousContainerForCall(Location location, string methodName, string containerTypeFullName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI13",
+            title: "Ambiguous container for interceptable call",
+            messageFormat: "More than one service container can resolve '{0}' on '{1}'. Call it on the concrete container type so the generator can pick one.",
+            category: "SourceCrafter.DependencyInjection.Usage",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            description: "Two or more generated containers matched the same call location, which would emit duplicated [InterceptsLocation] attributes."
+        );
+
+        return Diagnostic.Create(rule, location, methodName, containerTypeFullName);
+    }
+
     internal static Diagnostic InvalidAsyncTypeArgument(Location location, AsyncKind AsyncKind, string methodName)
     {
         DiagnosticDescriptor rule = new(
-            id: "SCDI12",
+            id: "SCDI14",
             title: "IServiceProvider-like method must not use Task<T> or ValueTask<T> as generic argument",
             messageFormat: "IServiceProvider-like '{0}' method must not use {1}<T> as generic argument.",
             category: "SourceCrafter.DependencyInjection.Design",
@@ -263,5 +278,20 @@ internal static class ServiceContainerDiagnostics
         );
 
         return Diagnostic.Create(rule, location, methodName, AsyncKind);
+    }
+
+    internal static Diagnostic ConflictingParameterlessConstructor(Location location, string containerClassName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI15",
+            title: "Service container declares a parameterless constructor",
+            messageFormat: "'{0}' declares a parameterless constructor, which collides with the one the generator emits to initialize its cancellation source.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            description: "Move the initialization logic to a field initializer or to a constructor taking parameters."
+        );
+
+        return Diagnostic.Create(rule, location, containerClassName);
     }
 }

@@ -1,20 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <OutputType>Exe</OutputType>
+    <LangVersion>preview</LangVersion>
     <Configurations>Debug;Release;Pack;DEBUG_SG</Configurations>
-    <!--<PublishAot>true</PublishAot>
-    <PublishReadyToRun>true</PublishReadyToRun>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>-->
+    <!-- Los contenedores de la competencia generan miembros que no siempre consumimos. -->
+    <NoWarn>$(NoWarn);CS9113;CS8618</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="Jab" Version="0.10.2" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-    <PackageReference Include="MrMeeseeks.DIE" Version="3.3.1" OutputItemType="Analyzer" ReferenceOutputAssembly="true" />
-	<ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" OutputItemType="Analyzer" />
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+  </ItemGroup>
+  <ItemGroup Label="Contenedores compile-time con los que se compara">
+    <PackageReference Include="Jab" Version="0.12.0" PrivateAssets="all" />
+    <PackageReference Include="Pure.DI" Version="2.5.3" PrivateAssets="all" />
+    <PackageReference Include="StrongInject" Version="1.4.4" />
+    <PackageReference Include="MrMeeseeks.DIE" Version="3.8.0" />
+  </ItemGroup>
+  <ItemGroup Label="El generador propio, referenciado como analizador">
+	<ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" UndefineProperties="TargetFramework" />
 	<ProjectReference Include="..\SourceCrafter.DependencyInjection.Metadata\SourceCrafter.DependencyInjection.Metadata.csproj" />
-    <PackageReference Include="SharedMemory" Version="2.3.2" />
   </ItemGroup>
 </Project>

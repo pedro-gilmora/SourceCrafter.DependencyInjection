@@ -48,14 +48,6 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" PrivateAssets="all" />
 	</ItemGroup>
 
-	<ItemGroup Condition="'$(TargetFramework)' == 'netstandard2.0'">
-		<PackageReference Include="System.Diagnostics.Tools" Version="4.3.0" PrivateAssets="all" />
-		<PackageReference Include="IndexRange" Version="1.0.3" PrivateAssets="all" />
-		<PackageReference Include="System.Memory" Version="4.5.5" PrivateAssets="all" />
-		<PackageReference Include="System.Runtime.InteropServices" Version="4.3.0" PrivateAssets="all" />
-		<PackageReference Include="System.Text.Json" Version="8.0.5" PrivateAssets="all" />
-	</ItemGroup>
-	
 	<ItemGroup>
 		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
 		<None Include="$(NuGetPackageRoot)\sharedmemory\**\netstandard2.0\*.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />

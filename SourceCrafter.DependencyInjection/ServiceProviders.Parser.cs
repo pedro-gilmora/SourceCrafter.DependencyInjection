@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.VisualBasic;
@@ -45,7 +45,25 @@ internal partial class ServiceProviders
 
         bool
             hasScopedDependencies = false,
-            useInterceptors = providerType.AllInterfaces.Any(i => i.FullGlobalQualifiedName == "global::System.IServiceProvider");
+            implementsServiceProvider = providerType.AllInterfaces.Any(i => i.FullGlobalQualifiedName == "global::System.IServiceProvider"),
+            generateServiceProviderApi = false;
+
+        // Si el usuario ya declara estos miembros en su parcial, el generador no los emite.
+        var hasUserEnvironmentName =
+            providerType.GetMembers("EnvironmentName").Length > 0
+            || providerType.GetMembers("EnvironmentVariableName").Length > 0;
+
+        // El generador emite un constructor sin parametros para inicializar candados y
+        // cancelacion. Si el usuario ya declaro uno, se le avisa en vez de dejar que el
+        // compilador escupa un CS0111 apuntando a codigo que el no escribio.
+        var hasUserParameterlessConstructor = providerType
+            .GetMembers(WellKnownMemberNames.InstanceConstructorName)
+            .Any(m => m is IMethodSymbol { Parameters.Length: 0, IsImplicitlyDeclared: false, IsStatic: false });
+
+        // Se proyecta a cadena aqui: el renderizador no puede ver simbolos.
+        var lockTypeName = SupportsDedicatedLockType(model)
+            ? "global::System.Threading.Lock"
+            : "object";
 
         HashSet<string> externalAssemblies = [];
 
@@ -56,7 +74,6 @@ internal partial class ServiceProviders
         Dictionary<DependencyKey, string> methodNamesMap = new(defaultSubKeyComparer);
         HashSet<string> methodsRegistry = [];
         Dictionary<DependencyKey, MemberBuilder> dependencyMemberBuilders = [];
-        Dictionary<FirstLevelDependencyKey, Interceptor> interceptors = new(defaultKeyComparer);
         HashSet<ResolverBuilder> genericResolvers = new(new GenericResolverBuilderComparer());
 
         Disposability
@@ -67,8 +84,6 @@ internal partial class ServiceProviders
             asyncSingletonDisposable = 0,
             asyncScopedAsyncDisposable = 0,
             asyncSingletonAsyncDisposable = 0,
-            scopedDisposable = 0,
-            singletonDisposable = 0,
             scopedAsyncDisposable = 0,
             singletonAsyncDisposable = 0;
 
@@ -77,10 +92,10 @@ internal partial class ServiceProviders
         ResolverBuilder selfDepInfo = new($"{providerFullTypeName}")
         {
             Key = (Lifetime.Singleton, providerFullTypeName, ""),
-            AppendValue = (_, _, _) => { }
+            AppendValue = (_, _, _, _) => { }
         };
 
-        string envName = "";
+        string envName = DefaultEnvName;
 
         foreach (var attr in attributes)
         {
@@ -90,6 +105,14 @@ internal partial class ServiceProviders
 
         if (dependencyValueBuilders.Count == 0) return null!;
 
+        // El generador ya no emite constructor para los candados (se crean de forma
+        // perezosa), asi que solo hay conflicto real si algun resolver usa el token de vida.
+        if (hasUserParameterlessConstructor
+            && dependencyMemberBuilders.Values.Any(m => m.RequiresCancelToken))
+            diagnostics.Add(ServiceContainerDiagnostics.ConflictingParameterlessConstructor(
+                providerType.Locations.FirstOrDefault() ?? Location.None,
+                className));
+
         var nameSpace = providerType.ContainingNamespace is { } ns ? ns.ToDisplayString() : null;
 
         Emitter emitter = new(
@@ -98,7 +121,9 @@ internal partial class ServiceProviders
             providerFullTypeName,
             modifiers,
             isInterfaceProvider,
-            providerType.AllInterfaces.Any(i => i.GlobalNamespaced == "global::System.IServiceProvider"),
+            implementsServiceProvider,
+            generateServiceProviderApi,
+            hasUserEnvironmentName,
             className,
             typeName,
             envName,
@@ -106,25 +131,80 @@ internal partial class ServiceProviders
             asyncSingletonDisposable,
             asyncScopedAsyncDisposable,
             asyncSingletonAsyncDisposable,
-            scopedDisposable,
-            singletonDisposable,
             scopedAsyncDisposable,
             singletonAsyncDisposable,
             containerDisposability,
             scopedDisposability,
             dependencyValueBuilders,
             dependencyMemberBuilders,
-            interceptors,
             diagnostics,
             genericResolvers);
 
         diagnostics = null!;
         dependencyValueBuilders = null!;
         dependencyMemberBuilders = null!;
-        interceptors = null!;
         genericResolvers = null!;
 
         return emitter;
+
+        /// <summary>
+        /// Lee los parametros de <c>[ServiceContainer]</c> emparejando por nombre de
+        /// parametro y no por posicion: con argumentos con nombre el orden no es fiable
+        /// (antes, <c>[ServiceContainer(generateServiceProviderApi: true)]</c> acababa
+        /// tomando el booleano como nombre de la variable de entorno).
+        /// </summary>
+        void ReadContainerOptions(AttributeData attr, CancellationToken cancelToken)
+        {
+            var ctorParams = attr.AttributeConstructor?.Parameters ?? [];
+            var args = (attr.ApplicationSyntaxReference?.GetSyntax(cancelToken) as AttributeSyntax)?.ArgumentList?.Arguments;
+
+            if (args is not { Count: > 0 })
+            {
+                // Atributo sin sintaxis disponible: se usan los valores ya resueltos.
+                if (attr.ConstructorArguments is [{ Value: string v }, ..] && v.Trim().Length > 0)
+                    envName = $@"""{v}""";
+
+                if (attr.ConstructorArguments is [_, { Value: bool flag }, ..])
+                    generateServiceProviderApi = flag;
+
+                return;
+            }
+
+            var position = 0;
+
+            foreach (var arg in args)
+            {
+                var paramName = arg.NameColon?.Name.Identifier.ValueText
+                    ?? (position < ctorParams.Length ? ctorParams[position].Name : null);
+
+                if (arg.NameColon is null) position++;
+
+                switch (paramName)
+                {
+                    case "envName":
+
+                        envName = arg.Expression switch
+                        {
+                            LiteralExpressionSyntax { Token.ValueText: { } envString } when envString.Trim() is { Length: > 0 } => $@"""{envString}""",
+                            MemberAccessExpressionSyntax { Name: { } member } => model.GetSymbolInfo(member, cancellationToken: cancelToken) switch
+                            {
+                                { Symbol: IFieldSymbol { } field } => field.GlobalNamespaced,
+                                _ => DefaultEnvName
+                            },
+                            IdentifierNameSyntax member => isInterfaceProvider ? $"{providerTypeName}.{member.Identifier.ValueText}" : member.Identifier.ValueText,
+                            _ => DefaultEnvName
+                        };
+
+                        break;
+
+                    case "generateServiceProviderApi":
+
+                        generateServiceProviderApi = model.GetConstantValue(arg.Expression, cancelToken) is { HasValue: true, Value: true };
+
+                        break;
+                }
+            }
+        }
 
         bool TryRegisterService(AttributeData? attr, ISymbol? sourceSymbol, out ResolverBuilder? resolver, CancellationToken cancelToken, ChildDependencyHandler? validateAsChildDependency = null)
         {
@@ -147,12 +227,10 @@ internal partial class ServiceProviders
                 isStaticFactory = false,
                 isFactoryFromCurrentProvider = false,
                 isFactoryIndexerProperty = false,
-                useWhenAll = false,
                 needsCancelToken = false;
 
             string
                 name = string.Empty,
-                whenAll = string.Empty,
                 exportTypeFullName = string.Empty,
                 typeFullName = string.Empty,
                 factoryProviderName = string.Empty;
@@ -170,7 +248,6 @@ internal partial class ServiceProviders
             DependencyKey subKey = default;
 
             ImmutableArray<IParameterSymbol>
-                defaultParamValues = [],
                 prms = [];
             Disposability
                 disposability = default;
@@ -197,6 +274,12 @@ internal partial class ServiceProviders
             resolver = null!;
 
             var (backingFieldName, methodName) = ("", "");
+
+            // Estado de render, libre de simbolos y sintaxis. Los delegados que el
+            // emisor cachea apuntan a esta celda, nunca a la clase de cierre del
+            // parser (que retendria la Compilation entre pasadas incrementales).
+            // El modelo en si es inmutable: se construye entero en CommitRenderState.
+            ResolverRendererRef render = new();
 
             if (!IsValidServiceAttribute(attr, cancelToken))
             {
@@ -229,7 +312,7 @@ internal partial class ServiceProviders
                 {
                     Key = subKey,
                     ExportTypeFullName = exportTypeFullName,
-                    AppendValue = AppendValue,
+                    AppendValue = render.AppendValue,
                     AsyncKind = AsyncKind,
                     ParamsLength = prms.Length,
                     TransientWithoutCachedDeps = isSimpleTransient
@@ -242,7 +325,7 @@ internal partial class ServiceProviders
                     lifetime,
                     implExists ? resolver.AsyncKind : AsyncKind,
                     implExists ? resolver.ParamsLength : prms.Length,
-                    AppendValue,
+                    render.AppendValue,
                     type is null,
                     isExternal && name is "") is false)
             {
@@ -277,6 +360,7 @@ internal partial class ServiceProviders
             {
                 (backingFieldName, methodName) = GetResolverName();
                 //TryRegisterInterceptorMethod();
+                CommitRenderState();
                 return true;
             }
 
@@ -316,16 +400,15 @@ internal partial class ServiceProviders
                 if (paramType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == className || SymbolEqualityComparer.Default.Equals(paramType, providerType))
                 {
                     var asksForRoot = prm.GetAttributes().Any(a => a.AttributeClass?.FullGlobalQualifiedName == $"{GlobalBaseAttributeNS}.RootAttribute");
-                    appendParams.Add(new(selfDepInfo.Key, AppendProvider));
+                    appendParams.Add(new(selfDepInfo.Key, new SelfProviderAppender(asksForRoot).Append));
                     continue;
-                    void AppendProvider(StringBuilder code, bool _, bool __) => code.Append(asksForRoot ? "Root" : "this");
                 }
 
                 if (Equals(prm.Type.FullGlobalQualifiedName, CancelTokenFQMetaName))
                 {
                     needsCancelToken = true;
                     resolver.PassCancelToken = true;
-                    appendParams.Add(new(selfDepInfo.Key, AppendCancelToken));
+                    appendParams.Add(new(selfDepInfo.Key, render.AppendCancelToken));
                     continue;
                 }
 
@@ -386,52 +469,15 @@ internal partial class ServiceProviders
                         var AppendParam = foundService!.AppendValue;
                         var foundExportTypeFullName = foundService.ExportTypeFullName;
 
-                        appendParams.Add(new(foundService.Key, (code, asyncContext, _) =>
-                        {
-                            var awaits = asyncContext && foundService.AsyncKind is not 0 && paramAsyncType is 0;
-
-                            if (awaits)
-                            {
-                                code.Append("await ");
-                                AppendParam(code, asyncContext);
-                            }
-                            else if (paramAsyncType is not 0 && foundService.AsyncKind is 0)
-                            {
-                                if (paramAsyncType is AsyncKind.Task)
-                                {
-                                    code.Append("global::System.Threading.Tasks.Task.FromResult<")
-                                        .Append(foundExportTypeFullName)
-                                        .Append(">(");
-                                    AppendParam(code, asyncContext);
-                                    code.Append(')');
-                                }
-                                else
-                                {
-                                    code.Append("new global::System.Threading.Tasks.ValueTask<")
-                                        .Append(foundExportTypeFullName)
-                                        .Append(">(");
-                                    AppendParam(code, asyncContext);
-                                    code.Append(')');
-                                }
-                            }
-                            else if (foundService.AsyncKind is AsyncKind.ValueTask && paramAsyncType is AsyncKind.Task)
-                            {
-                                AppendParam(code, asyncContext);
-                                code.Append(".AsTask()");
-                            }
-                            else if (foundService.AsyncKind is AsyncKind.Task && paramAsyncType is AsyncKind.ValueTask)
-                            {
-                                code.Append("new global::System.Threading.Tasks.ValueTask<")
-                                    .Append(foundExportTypeFullName)
-                                    .Append(">(");
-                                AppendParam(code, asyncContext);
-                                code.Append(')');
-                            }
-                            else
-                            {
-                                AppendParam(code, asyncContext);
-                            }
-                        }, startsCollectionExpression, endsCollectionExpression));
+                        appendParams.Add(new(
+                            foundService.Key,
+                            new ParamValueAppender(foundService, AppendParam, foundExportTypeFullName, paramAsyncType).Append,
+                            startsCollectionExpression,
+                            endsCollectionExpression,
+                            // Toma algun candado al resolverse: o esta cacheado, o es un
+                            // transient que arrastra cacheados dentro. En ambos casos hay que
+                            // sacarlo fuera del 'lock' del resolver que lo consume.
+                            foundService.Key.lifetime is not Lifetime.Transient || !foundService.TransientWithoutCachedDeps));
 
                         deepParamsCount += foundService.ParamsLength;
                         foundAsyncType = foundService.AsyncKind;
@@ -445,6 +491,9 @@ internal partial class ServiceProviders
                                 hasAsyncDependencies = true;
 
                             AsyncLocalResolver resolved = null!;
+
+                            Action<StringBuilder, string?> AppendAsyncLocalResolver =
+                                new AsyncLocalAppender(paramIndex, AppendParam, "\r\n\t\t").Append;
 
                             if (paramAsyncType is 0)
                             {
@@ -482,28 +531,18 @@ internal partial class ServiceProviders
                                     ResolvedBefore = !childValue.IsValueTask && childValue.DepKey.lifetime is not Lifetime.Transient,
                                     AppendAsyncLocal = AppendAsyncLocalResolver
                                 });
-                            }
+							}
 
-                            void AppendAsyncLocalResolver(StringBuilder code, string? indent)
-                            {
-                                code.Append(@"
-		").Append(indent).Append("var __v").Append(paramIndex).Append(" = ");
-
-                                AppendParam(code);
-
-                                code.Append(';');
-                            }
-
-                        }
-                    }
-                }
+						}
+					}
+				}
                 else if (paramType.TypeKind is not TypeKind.Interface)
                 {
                     TryRegisterService(null, prm, out _, cancelToken, ValidateChildParameterDependency);
                 }
                 else
                 {
-                    appendParams.Add(new(resolvedSubKey, AppendDefault));
+                    appendParams.Add(new(resolvedSubKey, render.AppendDefault));
                 }
 
                 bool ValidateChildParameterDependency(
@@ -520,6 +559,9 @@ internal partial class ServiceProviders
 
                     if (paramAsyncType is 0)
                     {
+                        Action<StringBuilder, string?> AppendAsyncLocalResolver =
+                            new AsyncLocalAppender(paramIndex, AppendParam, "\r\n\t\t\t").Append;
+
                         if (asyncLocalResolvers.TryGetValue(resolvedSubKey, out var resolved))
                         {
                             resolved.AppendAsyncLocal = AppendAsyncLocalResolver;
@@ -533,34 +575,24 @@ internal partial class ServiceProviders
                                 ResolverDep = resolvedSubKey,
                                 AppendAsyncLocal = AppendAsyncLocalResolver
                             });
-                        }
+						}
+					}
 
-                        void AppendAsyncLocalResolver(StringBuilder code, string? indent)
-                        {
-                            code.Append(@"
-			").Append(indent).Append("var __v").Append(paramIndex).Append(" = ");
-
-                            AppendParam(code);
-
-                            code.Append(';');
-                        }
-                    }
-
-                    if (childAsyncType > AsyncKind)
+					if (childAsyncType > AsyncKind)
                     {
                         AsyncKind = childAsyncType;
                     }
 
                     if (childExists)
                     {
-                        childParamCount += childParamCount;
+                        deepParamsCount += childParamCount;
                         appendParams.Add(new(resolvedSubKey, AppendParam));
                         return false;
                     }
                     else if ((isNullChildType && isPrimitiveParamType) || (isUnkeyedInternalPrimitive && prm.Type.IsPrimitive()) || !isChildValid)
                     {
                         deepParamsCount += 1;
-                        appendParams.Add(new(resolvedSubKey, AppendDefault));
+                        appendParams.Add(new(resolvedSubKey, render.AppendDefault));
                         return false;
                     }
 
@@ -580,16 +612,6 @@ internal partial class ServiceProviders
                 asyncLocalResolvers = asyncLocalResolvers.Values
                     .Where(lr => lr.ParamIndex > -1).OrderBy(lr => lr.ParamIndex)
                     .ToDictionary(i => i.DepKey);
-
-                if (asyncLocalResolvers.Values
-                    .Where(i => !i.IsValueTask && !i.ResolvedBefore && i.ParamIndex > -1)
-                    .Select(i => "__v" + i.ParamIndex)
-                    .ToArray() is { Length: > 1 } vars)
-                {
-                    whenAll = string.Join(", ", vars);
-                }
-
-                useWhenAll = asyncLocalResolvers.Values.Count(i => i.ParamIndex > -1 && !i.IsValueTask && !i.ResolvedBefore) > 2;
             }
 
             //if (asyncParamCount > 0 && valueTaskCount == asyncParamCount) AsyncKind = AsyncKind.ValueTask;
@@ -606,8 +628,6 @@ internal partial class ServiceProviders
                     case (true, Lifetime.Singleton, Disposability.Disposable): asyncSingletonDisposable++; break;
                     case (true, Lifetime.Scoped, Disposability.AsyncDisposable): asyncScopedAsyncDisposable++; break;
                     case (true, Lifetime.Singleton, Disposability.AsyncDisposable): asyncSingletonAsyncDisposable++; break;
-                    case (false, Lifetime.Scoped, Disposability.Disposable): scopedDisposable++; break;
-                    case (false, Lifetime.Singleton, Disposability.Disposable): singletonDisposable++; break;
                     case (false, Lifetime.Scoped, Disposability.AsyncDisposable): scopedAsyncDisposable++; break;
                     case (false, Lifetime.Singleton, Disposability.AsyncDisposable): singletonAsyncDisposable++; break;
                 }
@@ -620,7 +640,7 @@ internal partial class ServiceProviders
                         new(lifetime, exportTypeFullName, name, AsyncKind, disposability, nameOrFormat) 
                         {
                             RequiresCancelToken = needsCancelToken,
-                            BuildAndExpose = AppendMethod 
+                            BuildAndExpose = render.AppendMethod 
                         });
 
             resolver.TransientWithoutCachedDeps = hasNoCachedDeps;
@@ -628,7 +648,46 @@ internal partial class ServiceProviders
 
             //TryRegisterInterceptorMethod();
 
+            CommitRenderState();
+
             return true;
+
+            // Congela el estado del parser en un renderizador inmutable, ya proyectado a
+            // cadenas, banderas y enumeraciones. Se invoca en cada salida exitosa,
+            // siempre antes de que el emisor pueda ejecutar los delegados.
+            void CommitRenderState()
+            {
+                render.Value = new()
+                {
+                    typeFullName = typeFullName,
+                    exportTypeFullName = exportTypeFullName,
+                    factoryProviderName = factoryProviderName,
+                    backingFieldName = backingFieldName,
+                    methodName = methodName,
+                    factoryName = factoryName,
+                    AsyncKind = AsyncKind,
+                    initialAsyncType = initialAsyncType,
+                    lifetime = lifetime,
+                    disposability = disposability,
+                    factoryKind = factoryKind,
+                    isCached = isCached,
+                    isFactory = isFactory,
+                    isExternal = isExternal,
+                    hasNoCachedDeps = hasNoCachedDeps,
+                    hasAsyncDependencies = hasAsyncDependencies,
+                    needsCancelToken = needsCancelToken,
+                    isStaticFactory = isStaticFactory,
+                    isFactoryFromCurrentProvider = isFactoryFromCurrentProvider,
+                    isFactoryIndexerProperty = isFactoryIndexerProperty,
+                    isInterfaceProvider = isInterfaceProvider,
+                    typeIsValueType = type?.IsValueType is true,
+                    typeIsNonNullable = type?.IsNullable is false,
+                    hasFactorySymbol = factory is not null,
+                    lockTypeName = lockTypeName,
+                    appendParams = appendParams,
+                    asyncLocalResolvers = asyncLocalResolvers
+                };
+            }
 
             bool IsValidServiceAttribute(AttributeData? attr, CancellationToken cancelToken)
             {
@@ -640,25 +699,8 @@ internal partial class ServiceProviders
                     || !TryGetAttributeParamsDefinition(model.GetSymbolInfo(_attrSyntax, cancellationToken: cancelToken), out ImmutableArray<IParameterSymbol> attrParams)
                     || !TryGetLifetime(_attrSyntax, ref _attrClass, ref isExternal, out lifetime))
                 {
-                    if (isContainerAttr)
-                    {
-                        envName = attr switch
-                        {
-                            { Syntax.ArgumentList.Arguments: [{ } arg, ..] } => arg switch
-                            {
-                                { Expression: LiteralExpressionSyntax { Token.ValueText: { } envString } } when envString.Trim() is { Length: > 0 } => $@"""{envString}""",
-                                { Expression: MemberAccessExpressionSyntax { Name: { } member } } => model.GetSymbolInfo(member, cancellationToken: cancelToken) switch
-                                {
-                                    { Symbol: IFieldSymbol { } field } => field.GlobalNamespaced,
-                                    _ => DefaultEnvName
-                                },
-                                { Expression: IdentifierNameSyntax member } => isInterfaceProvider ? $"{providerTypeName}.{member.Identifier.ValueText}" : member.Identifier.ValueText,
-                                _ => DefaultEnvName
-                            },
-                            { ConstructorArguments: [{ Value: string v }, ..] } => $@"""{v}""",
-                            _ => DefaultEnvName
-                        };
-                    }
+                    if (isContainerAttr) ReadContainerOptions(attr!, cancelToken);
+
                     return false;
                 }
 
@@ -774,7 +816,6 @@ internal partial class ServiceProviders
                                     factory = method;
                                     isStaticFactory = isStatic;
                                     factoryKind = SymbolKind.Method;
-                                    defaultParamValues = method.Parameters;
                                     initialAsyncType = AsyncKind = method.ReturnType.TryGetAsyncType(out factoryReturnType);
                                     isFactory = true;
                                     isFactoryFromCurrentProvider = SymbolEqualityComparer.Default.Equals(providerType, containingType);
@@ -998,490 +1039,6 @@ internal partial class ServiceProviders
                 }
             }
 
-            void AppendParams(
-                StringBuilder code,
-                bool completeAsyncContext,
-                bool appendInterceptorProvider,
-                string newIndentedLine)
-            {
-                var needsComma = false;
-                byte pos = 0;
-
-                foreach (var item in appendParams)
-                {
-                    if (needsComma.Exchange(true)) code.Append(',');
-
-                    code.Append(newIndentedLine);
-
-                    if (item.StartsCollectionExpression) code.Append('[');
-
-                    if (asyncLocalResolvers.TryGetValue(item.Key, out var task))
-                    {
-                        if (completeAsyncContext && (!task.ResolvedBefore && !whenAll.Contains("__v" + pos)))
-                        {
-                            code.Append("await ");
-                            code.Append("__v").Append(pos).Append(".ConfigureAwait(false)");
-                        }
-                        else
-                        {
-                            code.Append("__v").Append(pos).Append(".Result");
-                            if (completeAsyncContext && task.ResolvedBefore)
-                                code.Append($" /* resolved previously by param {task.ResolvedByParamIndex} */");
-                        }
-                    }
-                    else
-                    {
-                        item.Append(code, completeAsyncContext);
-                    }
-
-                    if (item.EndsCollectionExpression) code.Append(']');
-
-                    pos++;
-                }
-            }
-
-            void AppendMethod(StringBuilder code, List<Action> scopedExposers, List<DisposeBuilder> singletonDisposers, List<DisposeBuilder> scopedDisposers)
-            {
-                //hasAsyncDependencies.Dump($"Has [{typeFullName}] async dependencies?");
-
-                if (isCached)
-                {
-                    code.Append(@"
-    private ");
-                    if (lifetime is Lifetime.Singleton) code.Append("static ");
-
-                    code.Append(GetTypeName(typeFullName)).Append("? ").Append(backingFieldName).Append(';');
-
-                    if (disposability is not 0)
-                    {
-                        if (lifetime is Lifetime.Scoped)
-                            scopedDisposers
-                                .Add(disposability is Disposability.Disposable ? AppendDisposerStatement : AppendAsyncDisposerStatment);
-                        else if (lifetime is Lifetime.Singleton)
-                            singletonDisposers
-                                .Add(disposability is Disposability.Disposable ? AppendDisposerStatement : AppendAsyncDisposerStatment);
-                    }
-                }
-
-                code.Append(@"
-    public ");
-
-                //if (!isCached && (hasAsyncDependencies/* || (AsyncKind is not 0 && factory is not null)*/)) code.Append("async ");
-
-                AppendSignature(code);
-
-                if (lifetime is Lifetime.Scoped) scopedExposers.Add(AppendExposedSignature);
-
-                void AppendExposedSignature()
-                {
-                    code.Append(@"
-		public new ");
-
-                    AppendSignature(code);
-
-                    code.Append(@" 
-			=> base.").Append(methodName);
-
-                    if (AsyncKind is not 0 && (hasAsyncDependencies || needsCancelToken))
-                    {
-                        code.Append('(');
-                        if (needsCancelToken) code.Append("cancellationToken");
-                        code.Append(')');
-                    }
-
-                    code.Append(@";
-");
-                }
-
-                if (!isCached && !hasAsyncDependencies)
-                {
-                    code.Append(@" 
-        => ");
-
-                    if (isFactory)
-                    {
-                        AppendFactoryCaller(code, true);
-                    }
-                    else
-                    {
-                        AppendInstance(code, true);
-                    }
-                    code.Append(@";
-");
-                }
-                else
-                {
-                    code.Append(@"
-    {");
-
-                    if (AsyncKind is 0 || !(hasAsyncDependencies || needsCancelToken))
-                    {
-                        var isValueType = AsyncKind is 0 ? type!.IsValueType : AsyncKind is AsyncKind.ValueTask;
-
-                        code.Append(@"
-        get
-        {
-            if(").Append(backingFieldName).Append(isValueType ? ".HasValue" : " is not null").Append(") return ").Append(backingFieldName);
-
-                        if (isValueType) code.Append(".Value");
-
-                        code.Append(@";
-				
-            lock(this)
-			
-			return ").Append(backingFieldName).Append(@" ??= ");
-
-                        if (isFactory)
-                        {
-                            AppendFactoryCaller(code, false);
-                        }
-                        else
-                        {
-                            AppendInstance(code, false);
-                        }
-
-                        code.Append(@";
-        }");
-                    }
-                    else
-                    {
-                        var isAsyncEmptyFactory = factory is not null && !(hasAsyncDependencies || needsCancelToken);
-
-                        var indent = isCached ? "   " : null;
-
-                        if (isCached)
-                        {
-                            code.Append(@"
-        if(").Append(backingFieldName).Append(AsyncKind is AsyncKind.ValueTask ? ".HasValue" : " is not null").Append(") return ").Append(backingFieldName);
-
-                            if (AsyncKind is AsyncKind.ValueTask) code.Append(".Value");
-
-                            code.Append(';');
-                        }
-
-                        if (isAsyncEmptyFactory)
-                        {
-                            code.Append(@"
-					
-		lock(this)
-		
-		return ").Append(backingFieldName).Append(" ??= ");
-
-                            AppendFactoryCaller(code, false);
-
-                            code.Append(';');
-                        }
-                        else
-                        {
-                            var hasAsyncLocalResolvers = asyncLocalResolvers.Count > 0;
-
-                            if (isCached) code.Append(@"
-					
-		lock(this)
-		{
-			if(").Append(backingFieldName).Append(AsyncKind is AsyncKind.ValueTask ? ".HasValue" : " is not null").Append(") return ").Append(backingFieldName);
-
-                            if (AsyncKind is AsyncKind.ValueTask) code.Append(".Value");
-
-                            code.Append(@";
-");
-                            //ct = global::System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ct, __scopedCancellationTokenSrc.Token).Token;
-
-                            if (hasAsyncLocalResolvers)
-                            {
-                                foreach (var resolver in asyncLocalResolvers.Values)
-                                {
-                                    if (resolver.ParamIndex > -1) resolver.AppendAsyncLocal(code, indent);
-                                }
-
-                                code.Append(@"
-");
-                            }
-
-                            code.Append(@"
-		").Append(indent);
-
-                            code.Append("return ");
-
-                            if (isCached) code.Append(backingFieldName).Append(" ??= ");
-
-                            if (hasAsyncLocalResolvers)
-                            {
-                                var useAnd = false;
-
-                                foreach (var param in asyncLocalResolvers.Values)
-                                {
-                                    if (param.ParamIndex == -1) continue;
-                                    if (useAnd.Exchange(true)) code.Append(@"
-				").Append(indent).Append("&& ");
-
-                                    code.Append("__v").Append(param.ParamIndex).Append(".IsCompletedSuccessfully");
-                                }
-
-                                code.Append(@"
-		    ").Append(indent).Append("? global::System.Threading.Tasks.Task.FromResult<").Append(exportTypeFullName).Append(@">(
-				").Append(indent);
-                            }
-
-                            if (isFactory)
-                            {
-                                AppendFactoryCaller(code, false, false, @"
-						");
-                            }
-                            else
-                            {
-                                AppendInstance(code, false, false, @"
-						");
-                            }
-
-                            if (isCached && !hasAsyncLocalResolvers)
-                            {
-                                code.Append(';');
-                                goto exitLock;
-                            }
-                            else
-                            {
-                                code.Append(')');
-                            }
-
-                            code.Append(@"
-            ").Append(indent).Append(@": ResolveCoreAsync();
-
-		").Append(indent).Append("async global::System.Threading.Tasks.Task<").Append(exportTypeFullName).Append(@"> ResolveCoreAsync()
-		").Append(indent).Append('{');
-
-                            if (whenAll.Length > 1)
-                            {
-                                code.Append(@"
-			").Append(indent).Append("await global::System.Threading.Tasks.Task.WhenAll(").Append(whenAll).Append(@");
-");
-                            }
-
-                            code.Append(@"				
-			").Append(indent).Append("return ");
-
-                            if (isFactory)
-                            {
-                                AppendFactoryCaller(code, true, false, @"
-				" + indent);
-                            }
-                            else
-                            {
-                                AppendInstance(code, true, false, @"
-				" + indent);
-                            }
-
-                            code.Append(@";
-		").Append(indent).Append('}');
-                            exitLock:
-                            if (isCached) code.Append(@"
-		}");
-                        }
-                    }
-                    code.Append(@"
-    }
-");
-                }
-            }
-
-            void AppendDisposerStatement(StringBuilder code, bool awaits = true)
-            {
-                code.Append(@"
-        ").Append(backingFieldName).Append("?.").Append("Dispose();");
-            }
-
-            void AppendAsyncDisposerStatment(StringBuilder code, bool awaits = true)
-            {
-                code.Append(@"
-        ");
-
-                if (AsyncKind > 0)
-                {
-                    code.Append(awaits ? "await " : "return ")
-                        .Append(backingFieldName).Append(".TryDisposeAsync();");
-                }
-                else
-                {
-                    if (awaits)
-                    {
-
-                        code.Append("if(").Append(backingFieldName)
-                            .Append(type!.IsValueType ? ".HasValue) " : " is not null) ")
-                            .Append("await ")
-                            .Append(backingFieldName);
-
-                        if (type.IsValueType) code.Append(".Value");
-
-                        code.Append(".DisposeAsync();");
-                    }
-                    else
-                    {
-                        code.Append("return ")
-                            .Append(backingFieldName)
-                            .Append("?.DisposeAsync() ?? default!;");
-                    }
-                }
-            }
-
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            void AppendSignature(StringBuilder code)
-            {
-                code.Append(GetTypeName(exportTypeFullName)).Append(' ').Append(methodName);
-
-                if (AsyncKind is not 0 && (hasAsyncDependencies || needsCancelToken))
-                {
-                    code.Append('(');
-                    if (needsCancelToken) code.Append("global::System.Threading.CancellationToken cancellationToken = default");
-                    code.Append(')');
-                }
-            }
-
-            string GetTypeName(string typeName)
-            {
-                return AsyncKind > 0
-                    ? $"global::System.Threading.Tasks.{(initialAsyncType is AsyncKind.ValueTask ? "Value" : null)}Task<{exportTypeFullName}>"
-                    : typeName;
-            }
-
-            void AppendValue(StringBuilder code, bool asyncContext = false, bool interceptorContext = false)
-            {
-                if (!interceptorContext && !isCached && isFactory)
-                {
-                    //if (asyncContext && AsyncKind is not 0) code.Append("await ");
-
-                    AppendFactoryCaller(code, asyncContext);
-                }
-                else if (hasNoCachedDeps && !isCached && !isExternal)
-                {
-                    AppendInstance(code, asyncContext, interceptorContext);
-                }
-                else
-                {
-                    //if (asyncContext && (AsyncKind is not 0)) code.Append("await ");
-
-                    AppendCachedCaller(code, interceptorContext);
-                }
-            }
-
-            void AppendCachedCaller(StringBuilder code, bool interceptorContext = false, string newIndentedLine = @"
-				")
-            {
-                if (interceptorContext) code.Append("provider.");
-                code.Append(methodName);
-
-                if (AsyncKind is not 0 && (hasAsyncDependencies || needsCancelToken))
-                {
-                    code.Append('(');
-                    if (needsCancelToken) code.Append("cancellationToken");
-                    code.Append(')');
-                }
-            }
-
-            void AppendInstance(StringBuilder code, bool isAsyncContext, bool appendInterceptorProvider = false, string newIndentedLine = @"
-				")
-            {
-                code.Append("new ")
-                    .Append(typeFullName)
-                    .Append('(');
-
-                AppendParams(code, isAsyncContext, appendInterceptorProvider,  newIndentedLine);
-
-                code.Append(')');
-            }
-
-            void AppendFactoryCaller(
-                StringBuilder code,
-                bool allowAwait,
-                bool appendInterceptorProvider = false,
-                string newIndentedLine = @"
-				")
-            {
-                switch (factoryKind)
-                {
-                    case SymbolKind.Method:
-
-                        AppendFactoryContainingType(code, appendInterceptorProvider);
-
-                        //if (initialAsyncType > 0)
-                        //{
-                        //    code.Append(factoryName)
-                        //        .Append('<')
-                        //        .Append(exportTypeFullName)
-                        //        .Append(">(");
-
-                        //    AppendParams(code, allowAwait, newIndentedLine);
-
-                        //    code.Append(')');
-                        //}
-                        //else
-                        //{
-                        code.Append(factoryName)
-                            .Append('(');
-
-                        AppendParams(code, allowAwait, appendInterceptorProvider, newIndentedLine);
-
-                        code.Append(')');
-                        //}
-
-                        break;
-
-                    case SymbolKind.Property:
-
-                        AppendFactoryContainingType(code, appendInterceptorProvider);
-
-                        if (isFactoryIndexerProperty)
-                        {
-                            code.Append(factoryName)
-                                .Append('[');
-
-                            AppendParams(code, allowAwait, appendInterceptorProvider, newIndentedLine);
-
-                            code.Append(']');
-                        }
-                        else
-                        {
-                            code.Append(factoryName);
-                        }
-
-                        break;
-
-
-                    case SymbolKind.Field:
-
-                        AppendFactoryContainingType(code, appendInterceptorProvider);
-
-                        code.Append(factoryName);
-
-                        break;
-
-                    default:
-
-                        AppendDefault(code);
-
-                        break;
-                }
-            }
-
-            void AppendFactoryContainingType(StringBuilder code, bool appendInterceptorProvider)
-            {
-                if (isFactoryFromCurrentProvider && !isInterfaceProvider)
-                    return;
-
-                if (appendInterceptorProvider)
-                    code.Append("provider.");
-                if (isInterfaceProvider && !isStaticFactory)
-                    code.Append("((").Append(factoryProviderName).Append(")this)").Append('.');
-                else if (isStaticFactory)
-                    code.Append(factoryProviderName).Append('.');
-            }
-
-            void AppendDefault(StringBuilder code, bool _ = false, bool __ = false)
-            {
-                code.Append("default");
-
-                if (type?.IsNullable is false) code.Append('!');
-            }
-
             /// <summary>
             /// Resolves caching backing field member and resolver member names
             /// </summary>
@@ -1556,6 +1113,35 @@ internal partial class ServiceProviders
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Indica si el codigo generado puede declarar sus candados como
+    /// <c>System.Threading.Lock</c> en vez de <c>object</c>.
+    /// </summary>
+    /// <remarks>
+    /// Hacen falta las dos condiciones. El tipo existe desde .NET 9, pero es el compilador
+    /// quien reconoce <c>lock (x)</c> sobre el y emite <c>EnterScope</c>; con C# 12 o menos
+    /// la variable se convierte a <c>object</c>, se vuelve a caer en <c>Monitor</c> y ademas
+    /// se emite el aviso CS9216. Es decir: emitirlo sin C# 13 seria mas lento y mas ruidoso
+    /// que seguir usando <c>object</c>.
+    /// <para>
+    /// Se exige que el tipo venga del mismo ensamblado que <c>System.Object</c> para no
+    /// confundirlo con un <c>System.Threading.Lock</c> definido por el usuario, que no
+    /// recibe trato especial del compilador.
+    /// </para>
+    /// </remarks>
+    private static bool SupportsDedicatedLockType(SemanticModel model)
+    {
+        if (model.SyntaxTree.Options is not CSharpParseOptions { LanguageVersion: >= LanguageVersion.CSharp13 })
+            return false;
+
+        var compilation = model.Compilation;
+
+        return compilation.GetTypeByMetadataName("System.Threading.Lock") is { } lockType
+            && SymbolEqualityComparer.Default.Equals(
+                lockType.ContainingAssembly,
+                compilation.GetSpecialType(SpecialType.System_Object).ContainingAssembly);
     }
 
 }

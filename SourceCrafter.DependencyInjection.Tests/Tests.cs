@@ -24,13 +24,13 @@ namespace SourceCrafter.DependencyInjection.Tests
 
             await using var scope = serverContainer.CreateScope();
 
-            var id = await scope.GetCountAsyncCached(TestContext.Current.CancellationToken);
+            var id = await scope.GetCountAsyncCached();
 
             id.Should().Be(1);
 
             var database = await serverContainer.GetDatabaseAsync();
 
-            var authService = await scope.GetAuthServiceAsync(TestContext.Current.CancellationToken);
+            var authService = await scope.GetAuthServiceAsync();
 
             authService.Database.TrySave(out setting1);
 
@@ -54,7 +54,7 @@ namespace SourceCrafter.DependencyInjection.Tests
             //Uncommenting this will complain with SCDI11: No dependency resolver was found for 'global::System.DateTime' at 'Server' container
             //var _ = serverContainer.GetRequiredService<DateTime>();
 
-            var db = await serverContainer.GetRequiredServiceAsync<IDatabase>();
+var db = await serverContainer.GetRequiredServiceAsync<IDatabase>();
 
             db.TrySave(out var setting1);
 
@@ -65,15 +65,15 @@ namespace SourceCrafter.DependencyInjection.Tests
             //Uncommenting this will complain with SCDI11: No dependency resolver was found for 'global::System.DateTime' at 'Server' container scope
             //var __ = scope.GetRequiredService<DateTime>();
 
-            var id = await scope.GetRequiredKeyedServiceAsync<int>("count", TestContext.Current.CancellationToken);
+            var id = await scope.GetRequiredKeyedServiceAsync<int>("count");
 
             id.Should().Be(1);
 
-            var ids = await scope.GetRequiredServicesAsync<int>(TestContext.Current.CancellationToken);
+            var ids = await scope.GetRequiredServicesAsync<int>();
 
             var database = await scope.GetRequiredServiceAsync<IDatabase>();
 
-            var authService = await scope.GetRequiredServiceAsync<IAuthService>(TestContext.Current.CancellationToken);
+            var authService = await scope.GetRequiredServiceAsync<IAuthService>();
 
             authService.Database.TrySave(out setting1);
 

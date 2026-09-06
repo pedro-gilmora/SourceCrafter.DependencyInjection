@@ -15,7 +15,6 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
-using static System.Net.WebRequestMethods;
 
 #pragma warning disable RS1041 // Las extensiones del compilador deben implementarse en ensamblados que tengan como destino netstandard2.0
 [Generator(LanguageNames.CSharp)]
@@ -46,6 +45,18 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
     private const string serviceContainerFullTypeName = "SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute";
     internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
     internal readonly static Guid generatorGuid = new("31C54896-DE65-4FDC-8EBA-5A169A6E3CBB");
+
+    // RS2008: el seguimiento de versiones de analizador (AnalyzerReleases.*.md) no se usa
+    // en este proyecto; el resto de descriptores son locales y por eso no lo disparan.
+#pragma warning disable RS2008
+    private static readonly DiagnosticDescriptor FatalErrorRule = new(
+        id: "SCDIE00",
+        title: "Error at SourceCrafter.DependencyInjection generation time",
+        messageFormat: "{0}",
+        category: "SourceCrafter.DependencyInjection.FatalError",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+#pragma warning restore RS2008
 
     //static DependenciesServer? server;
 
@@ -80,7 +91,35 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                     {
                         var (emitters, msCalls) = result;
 
-                        foreach (var emitter in emitters) InterceptorsAppender(emitter, msCalls, c);
+                        // Estado por pasada: no debe vivir en los objetos que Roslyn
+                        // cachea entre compilaciones incrementales.
+                        HashSet<InterceptableLocation> acknowledged = [];
+                        List<(Emitter emitter, Dictionary<FirstLevelDependencyKey, Interceptor> interceptors)> pending = [];
+
+                        // Solo compiten por una llamada los contenedores que realmente
+                        // van a emitir interceptors. Se indexa por posicion porque dos
+                        // emisores pueden ser estructuralmente iguales.
+                        var claims = new List<InvokeInfo>?[emitters.Length];
+
+                        foreach (var call in msCalls)
+                        {
+                            var owner = ResolveOwner(emitters, call, diagnostics);
+
+                            if (owner < 0) continue;
+
+                            (claims[owner] ??= []).Add(call);
+                        }
+
+                        for (var i = 0; i < emitters.Length; i++)
+                        {
+                            Dictionary<FirstLevelDependencyKey, Interceptor> emitterInterceptors =
+                                new(EqualityComparer<FirstLevelDependencyKey>.Default);
+
+                            if (claims[i] is { } owned)
+                                InterceptorsAppender(emitters[i], owned, emitterInterceptors, acknowledged, c);
+
+                            pending.Add((emitters[i], emitterInterceptors));
+                        }
 
                         foreach (var call in msCalls)
                         {
@@ -88,34 +127,25 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                                 diagnostics.Add(
                                     ServiceContainerDiagnostics.InvalidAsyncTypeArgument(call.Location, call.AsyncKind, call.MethodName));
 
-                            if (!call.Acknowledged)
+                            if (!acknowledged.Contains(call.Interceptor))
                                 diagnostics.Add(
                                     ServiceContainerDiagnostics.UncoveredGenericResolver(call.Location, call.ReturnType, call.ContainerTypeFullName, call.IsScopedCall));
                         }
-
-                        msCalls.Clear();
-                        msCalls = default;
 
                         var requiresTaskExtensions = false;
                         var interceptorsCount = 0;
                         Dictionary<string, byte> countedNames = [];
 
-                        foreach (Emitter emitter in emitters)
+                        foreach (var (emitter, emitterInterceptors) in pending)
                         {
-                            using (emitter)
-                            {
-                                emitter.Emit(countedNames, ref requiresTaskExtensions, ref interceptorsCount, out var file, out var code);
-                                files.Add((file + ".g", code));
+                            emitter.Emit(countedNames, emitterInterceptors, ref requiresTaskExtensions, ref interceptorsCount, out var file, out var code);
+                            files.Add((file + ".g", code));
 
-                                foreach (var item in emitter.Diagnostics)
-                                {
-                                    diagnostics.Add(item);
-                                }
+                            foreach (var item in emitter.Diagnostics)
+                            {
+                                diagnostics.Add(item);
                             }
                         }
-
-                        emitters.Clear();
-                        emitters = default;
 
                         if (interceptorsCount > 0)
                             files.Add(("Utils.g", UtilsFileContent));
@@ -125,17 +155,7 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                     }
                     catch (Exception e)
                     {
-                        DiagnosticDescriptor rule = new(
-                            id: "SCDIE00",
-                            title: "Error at SourceCrafter.DependencyInjection generation time: " + e.ToString(),
-                            messageFormat: e.Message,
-                            category: "SourceCrafter.DependencyInjection.FatalError",
-                            defaultSeverity: DiagnosticSeverity.Error,
-                            isEnabledByDefault: true,
-                            description: e.ToString()
-                        );
-
-                        diagnostics.Add(Diagnostic.Create(rule, null));
+                        diagnostics.Add(Diagnostic.Create(FatalErrorRule, null, e.ToString()));
                     }
                     
                     return (diagnostics.ToImmutable(), files.ToImmutable());
@@ -160,17 +180,18 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                 });
     }
 
-    private const string UtilsFileContent = @"
+    private const string UtilsFileContent = @"// <auto-generated/>
 namespace System.Runtime.CompilerServices
 {
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
     public sealed class InterceptsLocationAttribute(int version, string data) : global::System.Attribute;
 }";
 
-    private const string TaskExtensionsFileContent = @"#nullable enable
+    private const string TaskExtensionsFileContent = @"// <auto-generated/>
+#nullable enable
 using global::System.Threading.Tasks;
 
-namespace SourceCrafter.DepedencyInjection.Extensions;
+namespace SourceCrafter.DependencyInjection.Extensions;
 
 internal static class Extensions
 {
@@ -204,56 +225,101 @@ internal static class Extensions
 	}
 }";
 
-    private static Emitter InterceptorsAppender(Emitter emitter, ImmutableArray<InvokeInfo> msCalls, CancellationToken c)
-    {
-        foreach (var serviceCall in msCalls)
-            if (!serviceCall.Acknowledged
-                && ((serviceCall.IsScopedCall && serviceCall.ContainerTypeFullName is "global::Microsoft.Extensions.DependencyInjection.IServiceScope")
-                    || serviceCall.ContainerTypeFullName == emitter.ContainerFullTypeName
-                    || serviceCall.ContainerTypeNameOnly == emitter.ClassName
-                    || serviceCall.IsScopedCall))
-            {
-                if (emitter.DependencyValueBuilders.TryGetValue((serviceCall.ReturnType, serviceCall.Key), out var resolvers))
-                {
-                    if (serviceCall.IsMultiple)
-                    {
-                        foreach (var resolver in resolvers.Values)
-                        {
-                            emitter.AddOrUpdateIntercerceptor(
-                                serviceCall,
-                                true,
-                                resolver.AsyncKind,
-                                resolver.PassCancelToken,
-                                resolver.AppendValue);
-                        }
-                    }
-                    else if (resolvers.Values.LastOrDefault(e => e.Key.key == serviceCall.Key) is { } resolver2)
-                    {
-                        emitter.AddOrUpdateIntercerceptor(
-                            serviceCall,
-                            false,
-                            resolver2.AsyncKind,
-							resolver2.PassCancelToken,
-                            resolver2.AppendValue);
-                    }
-                }
-                else if (serviceCall.Key == "" && serviceCall.IsMultiple 
-                    && emitter.DependencyValueBuilders.SelectMany(dvb => dvb.Value.Where(rb => rb.Key.type == serviceCall.ReturnType).Select(e => e.Value)).ToArray() is { Length: > 0 } items)
-                {
-                    foreach (var resolver in items)
-                    {
-                        emitter.AddOrUpdateIntercerceptor(
-                            serviceCall,
-                            true,
-							resolver.AsyncKind,
-							resolver.PassCancelToken,
-                            resolver.AppendValue);
-                    }
-                }
-            }
+	private const string ServiceScopeFullTypeName = "global::Microsoft.Extensions.DependencyInjection.IServiceScope";
 
-        return emitter;
-    }
+	/// <summary>
+	/// Decide que contenedor reclama una llamada interceptable. Primero se busca una
+	/// coincidencia exacta por tipo; solo si no hay ninguna se recurre a las laxas
+	/// (mismo nombre simple o inferencia por <c>IServiceScope</c>). Antes bastaba con
+	/// que la llamada fuese scoped para que <b>cualquier</b> contenedor la reclamase, lo
+	/// que con dos contenedores en la misma compilacion emitia dos
+	/// <c>[InterceptsLocation]</c> para la misma ubicacion.
+	/// </summary>
+	private static int ResolveOwner(ImmutableArray<Emitter> emitters, InvokeInfo call, ImmutableArray<Diagnostic>.Builder diagnostics)
+	{
+		int exact = -1, loose = -1, exactCount = 0, looseCount = 0;
+
+		for (var i = 0; i < emitters.Length; i++)
+		{
+			var emitter = emitters[i];
+
+			if (!emitter.EmitsInterceptors) continue;
+
+			if (call.ContainerTypeFullName == emitter.ContainerFullTypeName)
+			{
+				exact = i;
+				exactCount++;
+			}
+			else if (call.ContainerTypeNameOnly == emitter.ClassName
+				|| (call.IsScopedCall && call.ContainerTypeFullName is ServiceScopeFullTypeName))
+			{
+				loose = i;
+				looseCount++;
+			}
+		}
+
+		if (exactCount == 1) return exact;
+		if (exactCount == 0 && looseCount == 1) return loose;
+		if (exactCount == 0 && looseCount == 0) return -1;
+
+		diagnostics.Add(
+			ServiceContainerDiagnostics.AmbiguousContainerForCall(
+				call.Location,
+				call.MethodName,
+				call.ContainerTypeFullName));
+
+		return -1;
+	}
+
+	private static void InterceptorsAppender(
+		Emitter emitter,
+		List<InvokeInfo> msCalls,
+		Dictionary<FirstLevelDependencyKey, Interceptor> interceptors,
+		HashSet<InterceptableLocation> acknowledged,
+		CancellationToken c)
+	{
+		foreach (var serviceCall in msCalls)
+			if (!acknowledged.Contains(serviceCall.Interceptor))
+			{
+				if (emitter.DependencyValueBuilders.TryGetValue((serviceCall.ReturnType, serviceCall.Key), out var resolvers))
+				{
+					if (serviceCall.IsMultiple)
+					{
+						foreach (var resolver in resolvers.Values)
+						{
+							Emitter.AddOrUpdateIntercerceptor(
+								interceptors,
+								acknowledged,
+								serviceCall,
+								true,
+								resolver);
+						}
+					}
+					else if (resolvers.Values.LastOrDefault(e => e.Key.key == serviceCall.Key) is { } resolver2)
+					{
+						Emitter.AddOrUpdateIntercerceptor(
+							interceptors,
+							acknowledged,
+							serviceCall,
+							false,
+							resolver2);
+					}
+				}
+				else if (serviceCall.Key == "" && serviceCall.IsMultiple 
+					&& emitter.DependencyValueBuilders.Where(dvb => dvb.Key.type == serviceCall.ReturnType).SelectMany(dvb => dvb.Value.Select(e => e.Value)).ToArray() is { Length: > 0 } items)
+				{
+					foreach (var resolver in items)
+					{
+						Emitter.AddOrUpdateIntercerceptor(
+							interceptors,
+							acknowledged,
+							serviceCall,
+							true,
+							resolver);
+					}
+				}
+			}
+	}
 
     [GeneratedRegex("^GetRequired(?:Keyed)?(?:Value)?Services?(?:Async)?$")]
     internal static partial Regex MEDI_MethodDetector { get; }
@@ -266,11 +332,6 @@ internal static class Extensions
         } && MEDI_MethodDetector.IsMatch(name);
 
     readonly static ImmutableArray<Lifetime> lifeTimes = [Lifetime.Singleton, Lifetime.Scoped, Lifetime.Transient];
-
-    private static void AppendCancelToken(StringBuilder code, bool _, bool __)
-    {
-        code.Append("cancellationToken");
-    }
 
     static bool TryGetLifetime(AttributeSyntax attrSyntax, ref INamedTypeSymbol attrClass, ref bool isExternal, out Lifetime lifetime)
     {

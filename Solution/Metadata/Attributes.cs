@@ -13,7 +13,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class ServiceContainerAttribute(string envName = "DOTNET_ENVIRONMENT") : Attribute;
+        class ServiceContainerAttribute(string envName = "DOTNET_ENVIRONMENT", bool generateServiceProviderApi = false) : Attribute;
 
         [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META

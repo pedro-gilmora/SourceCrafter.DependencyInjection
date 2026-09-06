@@ -4,7 +4,7 @@ using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
 
 namespace SourceCrafter.DependencyInjection.Tests
 {
-    [ServiceContainer("ASPNETCORE_ENVIRONMENT")]
+    [ServiceContainer("ASPNETCORE_ENVIRONMENT", generateServiceProviderApi: true)]
     [JsonConfiguration]
     [Transient<IA, A>]
     [Singleton<IA, AA>]

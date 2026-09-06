@@ -1,304 +1,140 @@
-# SourceCrafter.DependencyInjection - Truly compile-time depedency injection
+﻿# SourceCrafter.DependencyInjection
 
-## Overview
+Truly compile-time dependency injection for .NET. Services are declared with attributes and
+the Roslyn generator emits plain, readable C# resolvers — no reflection, no expression
+trees, no runtime container.
 
-**SourceCrafter.DependencyInjection** is a compile-time dependency injection library utilizing attributes to simplify and automate service registration. The package is designed to provide flexibility in configuring service lifetimes, custom factory methods, and other advanced DI features while ensuring compile-time safety.
+```csharp
+[ServiceContainer]
+[Singleton<IClock, SystemClock>]
+[Scoped<DbSession>]
+[Transient<Handler>]
+public partial class AppContainer { }
 
-### Key Features
-- **Attribute-based Service Registration**: Register services directly on classes and interfaces using attributes.
-- **Flexible Lifetimes**: Supports `Singleton`, `Scoped`, and `Transient` lifetimes.
-- **Custom Factories**: Use factory static methods or existing instances (static properties or fields) to provide service implementations.
-- **Disposability Management**: Control how services are disposed with customizable `Disposability` settings. It scales at compile time according the disposability. 
-  If there are IDisposable services and just having a single one IAsynDiposable, automatically the service is async disposable
-- **Advanced Configuration Options**: Define settings like resolver method name formatting, caching, and more through attribute parameters.
----
+using var container = new AppContainer();
+var handler = container.CreateScope().Handler;
+```
 
-## Installation
+**Full documentation lives in [`SourceCrafter.DependencyInjection/README.md`](SourceCrafter.DependencyInjection/README.md)** —
+attribute reference, generated code walkthrough, cancellation semantics and the `SCDI`
+diagnostic table.
 
-Install the **`SourceCrafter.DependencyInjection`** NuGet package:
+## Packages
+
+| Package | What it is |
+|---------|------------|
+| `SourceCrafter.DependencyInjection` | The generator. This is the one you usually want. |
+| `SourceCrafter.DependencyInjection.Metadata` | Attributes only, no generator. For libraries that want to declare contracts without pulling in the generator. |
+| `SourceCrafter.DependencyInjection.MsConfiguration` | The generator plus `Microsoft.Extensions.Configuration` support (`[JsonSetting<T>]`). Use instead of the core generator. |
+| `SourceCrafter.DependencyInjection.MsConfiguration.Metadata` | Attributes only, configuration flavour. |
+
+## Repository layout
+
+- `SourceCrafter.DependencyInjection/` — the generator (netstandard2.0 is deliberately not targeted)
+- `SourceCrafter.DependencyInjection.Metadata/` — attribute definitions
+- `SourceCrafter.DependencyInjection.MsConfiguration*/` — configuration-aware variants
+- `SourceCrafter.DependencyInjection.Tests/` — the test suite
+- `Benchmarks/` — BenchmarkDotNet harness
+
+## Building and testing
 
 ```bash
-dotnet add package SourceCrafter.DependencyInjection
+dotnet build SourceCrafter.DependencyInjection.slnx
 ```
 
----
+The test project targets .NET 10 and runs through the xUnit v3 in-process runner. `dotnet test`
+is currently unreliable with the .NET 10 SDK here, so run the produced executable directly:
 
-## Example Usage
-
-Below is an example of how to apply the available attributes for service registration in a `Server` class, using **`SourceCrafter.DependencyInjection`**.
-
-### 1. Annotating the `Server` Class
-
-```csharp
-namespace SourceCrafter.DependencyInjection.Tests
-{
-    [ServiceContainer]
-    [JsonSetting<AppSettings>("AppSettings")] // Load settings into AppSettings class
-    [JsonSetting<string>("ConnectionStrings::DefaultConnection", nameFormat: "GetConnectionString")] // Connection string
-    [Transient<int>("count", nameof(ResolveAsync))] // Register a transient int value using the ResolveAsync method
-    [Singleton<IDatabase, Database>] // Register Database as a singleton service
-    [Scoped<IAuthService, AuthService>] // Register AuthService as a scoped service
-    public partial class Server
-    {
-        internal static ValueTask<int> ResolveAsync(CancellationToken _)
-        {
-            return ValueTask.FromResult(1);
-        }
-    }
-}
+```bash
+dotnet build SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj
+SourceCrafter.DependencyInjection.Tests/bin/Debug/net10.0/SourceCrafter.DependencyInjection.Tests.exe
 ```
 
-### 2. Service Definitions
+Filter with `-method "*SomePattern*"`.
 
-#### `AuthService`
+### Test layers
 
-This service is scoped, meaning it is created once per request.
+Changing the generator means keeping five different kinds of test honest:
 
-```csharp
-public class AuthService(IDatabase application, int count) : IAuthService, IDisposable
-{
-    public int Count => count;
-    public IDatabase Database { get; } = application;
+- **`Tests.cs` / `Server.cs`** — behaviour. A realistic container is compiled by the real
+  generator during the build, then exercised at runtime.
+- **`GeneratedCodeTests.cs`** — emission. Runs the generator in memory via
+  `GeneratorHarness` and asserts on the *text* it produces: lock scoping, the constructor,
+  disposal ordering, file shape, and determinism across repeated passes.
+- **`RootPropagationTests.cs`** — the `Root`/`CreateScope` virtual-dispatch contract.
+- **`LockingStrategyTests.cs`** — the locking scheme itself, modelled by hand with no
+  generator involved. Shows why one lock per lifetime deadlocks on cross-lifetime
+  dependencies, why a single lock is correct but serializing, and why an instance lock
+  cannot guard a static field.
+- **`EqualityContractTests.cs`** — guards every generator model type against declaring
+  `Equals` without a matching `==`, which silently breaks incremental caching.
 
-    public void Dispose()
-    {
-        // Cleanup resources, e.g., database connections
-    }
-}
+If you touch the emitter, `GeneratedCodeTests` is where a regression will surface first.
+
+### Inspecting generated output
+
+```bash
+dotnet build -p:EmitCompilerGeneratedFiles=true -p:CompilerGeneratedFilesOutputPath=obj/generated
 ```
 
-#### `Database`
+Emit to a directory *outside* the project folder, or the generated files get picked up by the
+next compilation and every type ends up declared twice.
 
-This is a singleton service that depends on `AppSettings` and a connection string. It implements `IDatabase` and uses `IAsyncDisposable` for asynchronous cleanup.
+### Benchmarks
 
-```csharp
-public class Database(AppSettings settings, string connection) : IDatabase, IAsyncDisposable
-{
-    public void TrySave(out string setting1)
-    {
-        setting1 = settings?.Setting1 ?? "Value3";
-    }
+`Benchmarks/` compares this generator against every actively maintained compile-time DI
+container — [Jab](https://github.com/pakrym/jab),
+[Pure.DI](https://github.com/DevTeam/Pure.DI),
+[StrongInject](https://github.com/YairHalberstadt/stronginject) and
+[MrMeeseeks.DIE](https://github.com/Yeah69/MrMeeseeks.DIE) — following the scenarios that
+[.NET Matrix](https://github.com/DevTeam/dotnet-matrix) has made the de facto standard for
+this category. Results are in the package README.
 
-    public ValueTask DisposeAsync()
-    {
-        return default;
-    }
-}
+```bash
+dotnet run -c Release --project Benchmarks -- --filter "*"
 ```
 
-### 3. Configuration and Settings
+Two rules the harness must keep:
 
-#### `AppSettings`
+- **Every branch does exactly the same work.** An earlier version of this harness only built
+  the container in the SourceCrafter branch while the others created a scope and resolved a
+  service, so the published numbers compared nothing.
+- **`Hand Coded` is the baseline**, not another container. Nested `new(...)` is the floor a
+  compile-time container is trying to reach.
 
-A simple class for application settings, loaded via `[JsonSetting<AppSettings>("AppSettings")]`.
+And one rule for reading the output:
 
-```csharp
-public class AppSettings
-{
-    public string Setting1 { get; set; }
-    public string Setting2 { get; set; }
-}
-```
+- **Do not publish a timing ratio from a single run.** These scenarios resolve in tens of
+  nanoseconds, where per-process JIT and heap-layout luck is a large fraction of the
+  measurement. A single-launch run once showed all three containers jumping from ~38 ns to
+  ~80 ns while the baseline held still — three independent libraries do not regress in
+  lockstep. `HarnessConfig` therefore pins three process launches plus memory randomization,
+  and even then the complex-graph scenario has been seen to vary 0.95x–2.10x across runs of
+  the same binary with byte-identical allocations. **Allocation counts are reproducible;
+  sub-100 ns timings are only approximately so.**
 
-### 4. Attribute Definitions and Explanation
+Where a library genuinely lacks a feature (StrongInject and MrMeeseeks.DIE have no request
+scope), the row is left empty rather than approximated: a made-up equivalent would measure
+something no user of that library could write.
 
-- **`[ServiceContainer]`**: Marks the `Server` class as a container for services.
-- **`[JsonSetting<T>]`**: Specifies that the configuration section `T` should be loaded from a JSON configuration file. In the example, `AppSettings` and `ConnectionStrings::DefaultConnection` are loaded.
-- **`[Singleton<T, TImplementation>]`**: Registers a singleton service of type `T` with an implementation of `TImplementation`. Singleton services are created once and shared across the application.
-- **`[Scoped<T, TImplementation>]`**: Registers a scoped service of type `T` with an implementation of `TImplementation`. Scoped services are created once per request.
-- **`[Transient<T>]`**: Registers a transient service, meaning a new instance of `T` is created each time it is requested. In this example, the `int` value is generated using the `ResolveAsync` method.
+Each container declaration lives in its own `Containers.*.cs` file, because the libraries ship
+attributes with colliding names (`[Transient<,>]`, `[Singleton<,>]`, `[Scoped<,>]`,
+`[Register]`).
 
----
+## Contributing
 
-## Advanced Configuration Options
+Issues and pull requests are welcome. A few conventions that are not obvious from the code:
 
-### 1. Disposability
+- The generator project sets `EnableDefaultCompileItems=false`. **Any new `.cs` file must be
+  added to the `.csproj` by hand**, or it will silently not compile.
+- Parsing and emission are separated on purpose. Anything reachable from a cached delegate
+  must be free of `ISymbol`, `SyntaxNode`, `SemanticModel` and `Compilation`, otherwise the
+  incremental pipeline keeps whole Roslyn compilations alive. `ResolverRenderer` is the
+  frozen, symbol-free projection that the emitter renders from.
+- New diagnostics go in `ServiceContainerDiagnostics.cs` with a fresh, unique `SCDI` id, and
+  a `DiagnosticDescriptor.Title` that is static text (dynamic titles break IDE grouping).
+- Generated code is normalized to tabs, CRLF and no trailing whitespace before it is emitted.
 
-You can control the lifecycle of services using the `Disposability` parameter, which supports the following options:
-- **`None`**: No specific disposal behavior is applied.
-- **`Dispose`**: Standard disposal pattern.
-- **`AsyncDispose`**: Asynchronous disposal pattern using `IAsyncDisposable`.
+## License
 
-### 2. Factory Methods
-
-For advanced scenarios, you can specify factory methods or instances directly using the `source` parameter in the attributes. This allows fine-grained control over how services are created and managed.
-
-### 3. Caching
-
-- Singleton services are cached at static level with appropiate thread-safe handling
-- Scoped services are at instance level with appropiate thread-safe handling
-
->Both of previous ones registered will consider even caching factory obtained values
-
----
-
-## Conclusion
-
-**SourceCrafter.DependencyInjection** provides a flexible and powerful approach to dependency injection using attributes. It removes much of the boilerplate code required for service registration while allowing you to leverage advanced DI techniques such as factory methods, caching, and disposability control.
-
-For more advanced scenarios and detailed API references, see the official documentation on GitHub.
-
---- 
-
-## Generated code
-
-As result of the previous example, we can notice some aspects:
-
-- Transient and non-cached services depedencies are called as they are defined: ()
-
-```cs
-#nullable enable
-namespace SourceCrafter.DependencyInjection.Tests;
-
-[global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-public partial class Server : global::System.IAsyncDisposable	
-{
-    public static string Environment => global::System.Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Development";
-    static readonly object __lock = new object();
-
-    private static readonly global::System.Threading.SemaphoreSlim __globalSemaphore = new global::System.Threading.SemaphoreSlim(1, 1);
-
-    private static global::System.Threading.CancellationTokenSource __globalCancellationTokenSrc = new global::System.Threading.CancellationTokenSource();
-
-    private bool isScoped = false;
-
-    [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    public Server CreateScope() =>
-		new global::SourceCrafter.DependencyInjection.Tests.Server { isScoped = true };
-
-    [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    private static global::SourceCrafter.DependencyInjection.Tests.Database? _getDatabase;
-
-    [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    public global::SourceCrafter.DependencyInjection.Tests.Database GetDatabase()
-    {
-		if (_getDatabase is not null) return _getDatabase;
-
-        lock(__lock) return _getDatabase ??= new global::SourceCrafter.DependencyInjection.Tests.Database(GetSettings(), GetConnectionString());
-    }
-
-    [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    private global::SourceCrafter.DependencyInjection.Tests.AuthService? _getAuthService;
-
-    [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    public async global::System.Threading.Tasks.ValueTask<global::SourceCrafter.DependencyInjection.Tests.AuthService> GetAuthServiceAsync(global::System.Threading.CancellationToken? cancellationToken = default)
-    {
-		if (_getAuthService is not null) return _getAuthService;
-
-        await __globalSemaphore.WaitAsync(cancellationToken ??= __globalCancellationTokenSrc.Token);
-
-        try
-        {
-            return _getAuthService ??= new global::SourceCrafter.DependencyInjection.Tests.AuthService(GetDatabase(), await ResolveAsync(cancellationToken.Value));
-        }
-        finally
-        {
-            __globalSemaphore.Release();
-        }
-    }
-
-    [global::System.CodeDom.Compiler.GeneratedCode("SourceCrafter.DependencyInjection", "0.24.280.49")]
-    public async global::System.Threading.Tasks.ValueTask DisposeAsync()
-    {
-		if(isScoped)
-        {
-           _getAuthService?.Dispose();
-		}
-		else
-        {
-            (_getConfiguration as global::System.IDisposable)?.Dispose();
-            if (_getDatabase is not null) await _getDatabase.DisposeAsync();
-		}
-	}
-}
-```
---- 
-
-## TODO
-
-- Support generic factory definitions like 
-```cs
-static IService Get<TServiceType>(...) where IService : TServiceType, class /*or struct*/;
-```
-- Modules like Jab
-
-----
-
-## Benchmark
-
-### Definitions 
-#### MrMeeseeks.DIE
-
-```cs
-    [ImplementationAggregation(
-        typeof(AppSettings),
-        typeof(Database),
-        typeof(AuthService))]
-    [CreateFunction(typeof(AuthService), "Create")]
-```
-#### Jab
-
-```cs
-    [ServiceProvider]
-    [Transient<AppSettings>]
-    [Singleton<IDatabase, Database>]
-    [Scoped<IAuthService, AuthService>]
-    public sealed partial class ServerJab;
-```
-#### SourceCrafter.Dependendcy
-
-```cs
-    [ServiceContainer]
-    [Transient<AppSettings>]
-    [Singleton<IDatabase, Database>]
-    [Scoped<IAuthService, AuthService>]
-    public sealed partial class ServerSCDI;
-```
-
-#### Benchmark methods
-
-```cs
-[Benchmark]
-public void MrMeeseeksDIE()
-{
-    var container = ServerMrMeeseeks.DIE_CreateContainer();
-    var authService = container.Create();
-}
-
-[Benchmark]
-public void Jab()
-{
-    var container = new Jab.Tests.ServerJab();
-    var scope = container.CreateScope();
-    var authService = scope.GetService<Jab.Tests.IAuthService>();
-}
-
-[Benchmark]
-public void SourceCrafter_DependencyInjection()
-{
-    var container = new SourceCrafter.DependencyInjection.Tests.ServerSCDI();
-    var scope = container.CreateScope();
-    var authService = scope.GetAuthService();
-}
-```
-
-### Results:
-
-```
-BenchmarkDotNet v0.14.0, Windows 11 (10.0.22631.4169/23H2/2023Update/SunValley3)
-Intel Core i9-14900HX, 1 CPU, 32 logical and 24 physical cores
-.NET SDK 9.0.100-rc.1.24452.12
-  [Host]     : .NET 8.0.8 (8.0.824.36612), X64 RyuJIT AVX2
-  DefaultJob : .NET 8.0.8 (8.0.824.36612), X64 RyuJIT AVX2
-```
-
-| Method                            | Job      | Runtime  | Mean      | Error     | Ratio | RatioSD | Gen0   | Gen1   | Gen2   | Allocated | Alloc Ratio |
-|---------------------------------- |--------- |--------- |----------:|----------:|------:|--------:|-------:|-------:|-------:|----------:|------------:|
-| MrMeeseeksDIE                     | .NET 8.0 | .NET 8.0 | 721.34 ns | 14.413 ns |  1.00 |    0.03 | 0.0372 | 0.0362 | 0.0048 |     616 B |        1.00 |
-| MrMeeseeksDIE                     | .NET 9.0 | .NET 9.0 | 694.30 ns | 11.764 ns |  0.96 |    0.02 | 0.0343 | 0.0334 | 0.0067 |     616 B |        1.00 |
-|                                   |          |          |           |           |       |         |        |        |        |           |             |
-| Jab                               | .NET 8.0 | .NET 8.0 |  32.79 ns |  0.586 ns |  1.00 |    0.02 | 0.0085 |      - |      - |     160 B |        1.00 |
-| Jab                               | .NET 9.0 | .NET 9.0 |  31.32 ns |  0.515 ns |  0.96 |    0.02 | 0.0085 |      - |      - |     160 B |        1.00 |
-|                                   |          |          |           |           |       |         |        |        |        |           |             |
-| SourceCrafter_DependencyInjection | .NET 8.0 | .NET 8.0 |  13.58 ns |  0.062 ns |  1.00 |    0.01 | 0.0030 |      - |      - |      56 B |        1.00 |
-| SourceCrafter_DependencyInjection | .NET 9.0 | .NET 9.0 |  14.07 ns |  0.166 ns |  1.04 |    0.01 | 0.0030 |      - |      - |      56 B |        1.00 |
+See [LICENSE.txt](LICENSE.txt).

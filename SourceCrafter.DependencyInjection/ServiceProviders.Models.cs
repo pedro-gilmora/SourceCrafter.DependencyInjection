@@ -8,16 +8,17 @@ using System.Diagnostics.CodeAnalysis;
 
 internal class DiagnosticLocationComparer : IEqualityComparer<Diagnostic>
 {
-#pragma warning disable CS8767 // La nulabilidad de los tipos de referencia del tipo de parámetro no coincide con el miembro implementado de forma implícita (posiblemente debido a los atributos de nulabilidad).
-    public bool Equals(Diagnostic x, Diagnostic y)
-#pragma warning restore CS8767 // La nulabilidad de los tipos de referencia del tipo de parámetro no coincide con el miembro implementado de forma implícita (posiblemente debido a los atributos de nulabilidad).
+    public bool Equals(Diagnostic? x, Diagnostic? y)
     {
-        return GetHashCode(x) == GetHashCode(y);
+        if (ReferenceEquals(x, y)) return true;
+        if (x is null || y is null) return false;
+
+        return x.Id == y.Id && x.Location.Equals(y.Location);
     }
 
     public int GetHashCode(Diagnostic obj)
     {
-        return (obj.Id, obj.Location.GetHashCode()).GetHashCode();
+        return HashCode.Combine(obj.Id, obj.Location);
     }
 }
 
@@ -41,7 +42,6 @@ internal record InvokeInfo(
     bool IsKeyed,
     bool IsMultiple)
 {
-    internal bool Acknowledged = false;
     internal required Location Location;
     internal bool InvalidAsyncTypeArg;
 }
@@ -55,7 +55,7 @@ class AsyncLocalResolver(DependencyKey dep)
 
     public override bool Equals(object? obj)
     {
-        return ((AsyncLocalResolver)obj!).GetHashCode() == GetHashCode();
+        return obj is AsyncLocalResolver other && DepKey.Equals(other.DepKey);
     }
     public override int GetHashCode()
     {
@@ -63,25 +63,29 @@ class AsyncLocalResolver(DependencyKey dep)
     }
 }
 
+/// <summary>
+/// Agrupa los resolvedores que producen la *misma* firma generica de compatibilidad.
+/// Solo cuentan "tiene clave" y el tipo de asincronia: el CancellationToken ya no
+/// aparece en la firma, asi que incluirlo aqui generaria dos miembros identicos.
+/// </summary>
 class GenericResolverBuilderComparer : IEqualityComparer<ResolverBuilder>
 {
-#pragma warning disable CS8767 // La nulabilidad de los tipos de referencia del tipo de parámetro no coincide con el miembro implementado de forma implícita (posiblemente debido a los atributos de nulabilidad).
-    public bool Equals([DisallowNull] ResolverBuilder x, [DisallowNull] ResolverBuilder y)
-#pragma warning restore CS8767 // La nulabilidad de los tipos de referencia del tipo de parámetro no coincide con el miembro implementado de forma implícita (posiblemente debido a los atributos de nulabilidad).
+    public bool Equals(ResolverBuilder? x, ResolverBuilder? y)
     {
-        return (x.Key.key != "", x.AsyncKind, x.PassCancelToken) == (y.Key.key != "", y.AsyncKind, y.PassCancelToken);
+        if (ReferenceEquals(x, y)) return true;
+        if (x is null || y is null) return false;
+
+        return (x.Key.key != "", x.AsyncKind) == (y.Key.key != "", y.AsyncKind);
     }
 
     public int GetHashCode([DisallowNull] ResolverBuilder obj)
     {
-        return HashCode.Combine(obj.Key.key != "", obj.AsyncKind, obj.PassCancelToken);
+        return HashCode.Combine(obj.Key.key != "", obj.AsyncKind);
     }
 }
 
 internal class ResolverBuilder(string toStr)
 {
-    private static int _id = 0;
-    internal int Id = _id++;
     internal DependencyKey Key;
     internal AsyncKind AsyncKind;
     internal HashSet<(int, bool)> AsyncNestedDeps = [];
@@ -93,71 +97,102 @@ internal class ResolverBuilder(string toStr)
     internal bool PassCancelToken;
     internal bool TransientWithoutCachedDeps;
 
+    /// <summary>
+    /// Emite los miembros genericos de compatibilidad con <c>IServiceProvider</c>.
+    ///
+    /// <para>Ninguna sobrecarga acepta un <c>CancellationToken</c>: el contenedor resuelve
+    /// con su propio token de vida (<c>__lifetimeToken</c>), asi que aceptar uno del
+    /// llamador solo prometeria una cancelacion que nunca se honra. Ademas, un valor
+    /// cacheado se entrega a todos los llamadores, por lo que grabar en el el token del
+    /// primero seria incorrecto.</para>
+    /// </summary>
     internal void GenericMemberSignature(StringBuilder code)
     {
-        AppendMethod();
-        AppendMethod(true);
+        AppendSignature(code, AsyncKind, Key.key != "", false);
+        AppendSignature(code, AsyncKind, Key.key != "", true);
+    }
 
-        void AppendMethod(bool isMultiple = false)
-        {
-            code.Append(@"
+    /// <summary>
+    /// Emite una firma de la API generica de compatibilidad.
+    /// </summary>
+    internal static void AppendSignature(StringBuilder code, AsyncKind asyncKind, bool hasKey, bool isMultiple)
+    {
+        code.Append(@"
     public ");
 
-            switch (AsyncKind)
-            {
-                case AsyncKind.None:
-                    code.Append("TOut");
-                    if (isMultiple) code.Append("[]");
-                    break;
-                case AsyncKind.ValueTask:
-                    code.Append("global::System.Threading.Tasks.ValueTask<TOut");
-                    if (isMultiple) code.Append("[]"); 
-                    code.Append('>');
-                    break;
-                case AsyncKind.Task:
-                    code.Append("global::System.Threading.Tasks.Task<TOut");
-                    if (isMultiple) code.Append("[]");
-                    code.Append('>');
-                    break;
-            }
-
-            code.Append(" GetRequired");
-
-            bool hasKey = Key.key != "";
-
-            if (hasKey) code.Append("Keyed");
-
-            if (AsyncKind == AsyncKind.ValueTask) code.Append("Value");
-
-            code.Append("Service");
-
-            if (isMultiple) code.Append('s');
-
-            code.Append(AsyncKind > 0 ? "Async<TOut>(" : "<TOut>(");
-
-            if (hasKey) code.Append("string key");
-
-            if (AsyncKind > 0 && PassCancelToken)
-            {
-                if (hasKey) code.Append(", ");
-                code.Append("global::System.Threading.CancellationToken token = default");
-            }
-
-            code.Append(@") where TOut : notnull => throw new global::System.NotImplementedException();
-");
+        switch (asyncKind)
+        {
+            case AsyncKind.None:
+                code.Append("TOut");
+                if (isMultiple) code.Append("[]");
+                break;
+            case AsyncKind.ValueTask:
+                code.Append("global::System.Threading.Tasks.ValueTask<TOut");
+                if (isMultiple) code.Append("[]");
+                code.Append('>');
+                break;
+            case AsyncKind.Task:
+                code.Append("global::System.Threading.Tasks.Task<TOut");
+                if (isMultiple) code.Append("[]");
+                code.Append('>');
+                break;
         }
+
+        code.Append(" GetRequired");
+
+        if (hasKey) code.Append("Keyed");
+
+        if (asyncKind == AsyncKind.ValueTask) code.Append("Value");
+
+        code.Append("Service");
+
+        if (isMultiple) code.Append('s');
+
+        code.Append(asyncKind > 0 ? "Async<TOut>(" : "<TOut>(");
+
+        if (hasKey) code.Append("string key");
+
+        code.Append(@") where TOut : notnull => throw new global::System.NotImplementedException();
+");
     }
 
     public override string ToString() => toStr;
 }
-internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool multiple, bool passCancelToken, AsyncKind asyncKind, string exportTypeFullName, bool isKeyed, (bool, Action<StringBuilder, bool>) firstDependency)
+/// <summary>
+/// Un elemento del array que devuelve un interceptor multiple.
+/// </summary>
+/// <param name="IsAsync">Si el valor se produce como tarea.</param>
+/// <param name="Append">Emite el valor del elemento.</param>
+/// <param name="Key">Identidad del resolvedor que produce el elemento.</param>
+/// <param name="ResolvedDeps">
+/// Dependencias asincronas que este elemento resuelve por el camino. Si otro elemento del
+/// mismo array esta aqui dentro <b>y</b> es cacheado, esperar a este ya lo deja completo.
+/// </param>
+internal readonly record struct InterceptorElement(
+    bool IsAsync,
+    Action<StringBuilder, bool> Append,
+    DependencyKey Key,
+    IReadOnlyCollection<DependencyKey> ResolvedDeps);
+
+internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool multiple, AsyncKind asyncKind, string exportTypeFullName, bool isKeyed, InterceptableLocation builtFrom, InterceptorElement firstDependency)
 {
     internal FirstLevelDependencyKey Key = key;
     internal bool IsKeyed = isKeyed;
     internal AsyncKind AsyncKind = asyncKind;
     internal HashSet<InterceptableLocation> Locations = [];
     internal readonly string Method = methodName;
-    internal List<(bool, Action<StringBuilder, bool>)> AppendInterceptorValue = [firstDependency];
+    internal List<InterceptorElement> AppendInterceptorValue = [firstDependency];
+
+    /// <summary>
+    /// Sitio de llamada que construyo la lista de valores.
+    ///
+    /// <para>Un interceptor multiple se arma recorriendo los resolvedores de *un* sitio de
+    /// llamada. Si otro sitio distinto resuelve la misma clave, comparte el mismo metodo
+    /// interceptor y solo debe aportar su localizacion: volver a acumular sus resolvedores
+    /// duplicaria los elementos del array. Comparar contra esta localizacion distingue
+    /// "otro resolvedor del mismo sitio" de "otro sitio".</para>
+    /// </summary>
+    internal readonly InterceptableLocation BuiltFrom = builtFrom;
 
     public override bool Equals(object? obj)
     {
@@ -216,8 +251,116 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
 
         if (IsKeyed) code.Append(", string _");
 
-        if (AsyncKind > 0 && passCancelToken) code.Append(", global::System.Threading.CancellationToken cancellationToken");
+        if (useAsync)
+        {
+            // Antes se emitia [await A, await B]: cada elemento esperaba al anterior.
+            // Se materializan primero todas las tareas para que avancen en paralelo y
+            // luego se esperan una a una.
+            code.Append(@")
+    {");
 
+            var index = 0;
+
+            foreach (var element in AppendInterceptorValue)
+            {
+                if (element.IsAsync)
+                {
+                    code.Append(@"
+        var __t").Append(index).Append(" = ");
+
+                    element.Append(code, true);
+
+                    code.Append(';');
+                }
+
+                index++;
+            }
+
+            // Un elemento cacheado que otro elemento ya resuelve por el camino comparte con
+            // el la *misma* tarea, asi que esperar al segundo lo deja completo: leer su
+            // Result evita un await por elemento. No vale para transitorios, que fabrican
+            // una tarea distinta en cada llamada.
+            var resolvedBy = ResolveCoverage();
+
+            var awaited = new Dictionary<int, int>();
+
+            foreach (var coveringIndex in resolvedBy.Values.Distinct().OrderBy(i => i))
+            {
+                code.Append(@"
+        var __r").Append(awaited.Count).Append(" = await __t").Append(coveringIndex).Append(';');
+
+                awaited.Add(coveringIndex, awaited.Count);
+            }
+
+            code.Append(@"
+
+        return [");
+
+            index = 0;
+
+            foreach (var element in AppendInterceptorValue)
+            {
+                if (index > 0) code.Append(',');
+
+                code.Append(@"
+            ");
+
+                if (!element.IsAsync) element.Append(code, true);
+                else if (resolvedBy.TryGetValue(index, out var coveringIndex))
+                    code.Append("__t").Append(index)
+                        .Append(".Result /* resolved previously by __t").Append(coveringIndex).Append(" */");
+                else if (awaited.TryGetValue(index, out var local)) code.Append("__r").Append(local);
+                else code.Append("await __t").Append(index);
+
+                index++;
+            }
+
+            code.Append(@"];
+    }
+");
+
+            return;
+        }
+
+        /// <summary>
+        /// Empareja cada elemento cacheado con un elemento del mismo array que lo resuelve
+        /// por el camino, para que baste con esperar a este ultimo.
+        /// </summary>
+        Dictionary<int, int> ResolveCoverage()
+        {
+            Dictionary<int, int> resolvedBy = [];
+
+            var elements = AppendInterceptorValue;
+
+            bool Covers(int covering, int covered) =>
+                covering != covered
+                && elements[covering].IsAsync
+                && elements[covered].IsAsync
+                // Un transitorio fabrica una tarea nueva en cada llamada, asi que la que
+                // resolvio el otro elemento no es la que este array tiene en su local.
+                && elements[covered].Key.lifetime is not Lifetime.Transient
+                && elements[covering].ResolvedDeps.Contains(elements[covered].Key);
+
+            bool IsCovered(int covered)
+            {
+                for (var i = 0; i < elements.Count; i++)
+                    if (Covers(i, covered)) return true;
+
+                return false;
+            }
+
+            for (var covered = 0; covered < elements.Count; covered++)
+                for (var covering = 0; covering < elements.Count; covering++)
+                    // El cubridor tiene que ser una raiz: si el mismo estuviese cubierto no
+                    // se emitiria su await y nadie garantizaria la tarea de este elemento.
+                    if (Covers(covering, covered) && !IsCovered(covering))
+                    {
+                        resolvedBy[covered] = covering;
+                        break;
+                    }
+
+            return resolvedBy;
+        }
         code.Append(@") => ");
 
         if (multiple)
@@ -227,22 +370,21 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
 
             string? comma = null;
 
-            foreach (var (isAsync, appendValue) in AppendInterceptorValue)
+            foreach (var element in AppendInterceptorValue)
             {
                 if (comma is null) comma = @",
         ";
                 else code.Append(comma);
-                if (useAsync && isAsync) code.Append("await ");
-                appendValue(code, useAsync);
+
+                element.Append(code, false);
             }
 
             code.Append(']');
         }
         else
         {
-            AppendInterceptorValue[^1].Item2(code, useAsync);
+            AppendInterceptorValue[^1].Append(code, false);
         }
-
 
         code.Append(@";
 ");
@@ -295,25 +437,40 @@ sealed record MemberBuilder(Lifetime Lifetime, string TypeFullName, string Key, 
 {
     internal required bool RequiresCancelToken;
 
+    /// <summary>
+    /// Renderiza el miembro en <paramref name="code"/> y registra en el contexto lo que
+    /// el contenedor debe emitir por el: candados a inicializar, liberadores y si
+    /// consume el token de vida.
+    /// </summary>
+    internal Action<StringBuilder, ContainerRenderContext> BuildAndExpose = null!;
 
-    internal Action<StringBuilder, List<Action>, List<DisposeBuilder>, List<DisposeBuilder>> BuildAndExpose = null!;
     public bool Equals(MemberBuilder? other)
     {
-        return this == other
-            || (this is not null
-                && other is not null
+        // No usar 'this == other': el operador == sintetizado por el compilador para
+        // un record llama de vuelta a Equals, produciendo recursion infinita y un
+        // StackOverflowException que mata el proceso host (Visual Studio incluido).
+        return ReferenceEquals(this, other)
+            || (other is not null
                 && Lifetime == other.Lifetime
                 && TypeFullName == other.TypeFullName
                 && Key == other.Key
                 && AsyncKind == other.AsyncKind
                 && Disposability == other.Disposability
+                && RequiresCancelToken == other.RequiresCancelToken
                 && NameOrFormat == other.NameOrFormat);
     }
 
     public override int GetHashCode()
     {
-        return HashCode.Combine(Lifetime, TypeFullName, Key, AsyncKind, Disposability, NameOrFormat);
+        return HashCode.Combine(Lifetime, TypeFullName, Key, AsyncKind, Disposability, RequiresCancelToken, NameOrFormat);
     }
 }
 
-record ParamBuildOptions(DependencyKey Key, AppendValue Append, bool StartsCollectionExpression = false, bool EndsCollectionExpression = false);
+/// <summary>
+/// Un parametro del constructor o de la fabrica.
+/// <para><paramref name="MustHoist"/>: el parametro adquiere algun candado al resolverse
+/// (es cacheado, o es un transient cuyo subarbol contiene cacheados). Esos deben resolverse
+/// <b>antes</b> de tomar el candado propio, o dos candados tomados en ordenes opuestos
+/// podrian interbloquearse.</para>
+/// </summary>
+record ParamBuildOptions(DependencyKey Key, AppendValue Append, bool StartsCollectionExpression = false, bool EndsCollectionExpression = false, bool MustHoist = false);

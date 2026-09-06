@@ -1,49 +1,55 @@
-﻿namespace Benchmarks;
+namespace Benchmarks;
 
-public class AuthService(Database application) : IAuthService
+/// <summary>
+/// Grafo de servicios compartido por <b>todos</b> los contenedores del banco de pruebas.
+/// <para>
+/// Que sea uno solo es deliberado: la version anterior duplicaba los tipos en un namespace
+/// por libreria, con formas ligeramente distintas, de modo que las cifras no eran
+/// comparables entre si. Aqui lo unico que cambia entre benchmarks es la declaracion del
+/// contenedor.
+/// </para>
+/// </summary>
+public interface ISettings;
+
+public sealed class Settings : ISettings;
+
+public interface IDatabase;
+
+public sealed class Database(ISettings settings) : IDatabase
 {
-    public IDatabase Database { get; } = application;
-
-    public void Dispose()
-    {
-    }
-
-    internal void Test()
-    {
-        application.TrySave(out var setting1);
-    }
+    public ISettings Settings { get; } = settings;
 }
 
-public interface IAuthService: IDisposable
+public interface ISession : IDisposable;
+
+public sealed class Session(IDatabase database) : ISession
 {
-    IDatabase Database { get; }
+    public IDatabase Database { get; } = database;
+
+    public void Dispose() { }
 }
 
-public class Database(AppSettings settings) : IDatabase, IAsyncDisposable
-{
-    public void TrySave(out string setting1)
-    {
-        setting1 = settings?.Setting1 ?? "Value3"/*config.Setting1*/;
-    }
+// ----- Grafo profundo para el escenario "Complex" -----
+// Cuatro niveles, 15 nodos: la misma forma que usan los benchmarks de Pure.DI, para que
+// el numero sea comparable con lo que publica la competencia.
 
-    public ValueTask DisposeAsync()
-    {
-        return default;
-    }
+public sealed class Leaf;
+
+public sealed class Level3(Leaf first, Leaf second)
+{
+    public Leaf First { get; } = first;
+    public Leaf Second { get; } = second;
 }
 
-public interface IDatabase
+public sealed class Level2(Level3 first, Level3 second)
 {
-    void TrySave(out string setting1);
+    public Level3 First { get; } = first;
+    public Level3 Second { get; } = second;
 }
 
-public class Configuration
+public sealed class Level1(Level2 first, Level2 second, IDatabase database)
 {
-
-}
-
-public class AppSettings
-{
-    public string Setting1 { get; set; } = "Test";
-    public string Setting2 { get; set; }
+    public Level2 First { get; } = first;
+    public Level2 Second { get; } = second;
+    public IDatabase Database { get; } = database;
 }

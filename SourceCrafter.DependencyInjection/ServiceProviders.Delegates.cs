@@ -6,7 +6,8 @@ using System.Text;
 delegate void AppendValue(
     StringBuilder code,
     bool asyncContext = false,
-    bool interceptorContext = false);
+    bool interceptorContext = false,
+    string? newIndentedLine = null);
 
 delegate void CommaSeparateBuilder(
     ref bool useIComma,
