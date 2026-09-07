@@ -491,6 +491,27 @@ public static class ").Append(typeName).Append(@"Extensions
         /// aqui, asi que el coste en caliente es cero; a cambio, crear un ambito deja de
         /// pagar un candado por cada servicio scoped declarado.
         /// </para>
+        /// <para>
+        /// Se emite una copia por contenedor y con el tipo de candado <b>concreto</b>, en vez
+        /// de una unica copia generica en el archivo compartido. Generico no valdria la pena:
+        /// <see cref="SupportsDedicatedLockType"/> decide el tipo por <i>compilacion</i>, asi
+        /// que <c>object</c> y <c>Lock</c> nunca conviven y el parametro de tipo tendria
+        /// siempre un unico argumento real.
+        /// </para>
+        /// <para>
+        /// Y costaria. Un generico no produce una copia por tipo salvo con tipos de valor: con
+        /// tipos de referencia el runtime comparte un unico cuerpo canonico, que al no conocer
+        /// el tipo concreto no puede emitir <c>newobj</c>. En el IL, <c>new T()</c> bajo
+        /// <c>where T : class, new()</c> se traduce a <c>call Activator.CreateInstance&lt;T&gt;()</c>
+        /// mientras que la version concreta emite <c>newobj Lock..ctor</c>. Medido sobre dos
+        /// millones de creaciones, 18-20 ms frente a 13-14 ms. Es camino frio -una vez por campo-
+        /// asi que apenas se nota, pero es peor a cambio de nada.
+        /// </para>
+        /// <para>
+        /// Centralizarlo <i>sin</i> generico si seria viable, pero solo ahorra estas pocas lineas
+        /// por contenedor <b>adicional</b>: con uno solo, que es el caso normal, el ahorro es cero
+        /// y a cambio hay que arrastrar la fontaneria del archivo compartido.
+        /// </para>
         /// </summary>
         static void AppendEnsureLockHelper(StringBuilder code, ContainerRenderContext ctx)
         {
