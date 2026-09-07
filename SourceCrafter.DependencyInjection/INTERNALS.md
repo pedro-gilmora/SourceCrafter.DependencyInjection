@@ -483,7 +483,7 @@ resolver**, because each service is exposed as a property. That needs `[JsonIgno
 For this container:
 
 ```csharp
-[ServiceContainer]
+[ServiceProvider]
 [Singleton<IClock, SystemClock>]
 [Scoped<DbSession>]
 [Transient<Handler>]

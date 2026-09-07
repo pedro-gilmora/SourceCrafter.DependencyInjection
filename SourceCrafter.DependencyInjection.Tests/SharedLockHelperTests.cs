@@ -26,14 +26,14 @@ public class SharedLockHelperTests
         public sealed class Alpha { }
         public sealed class Beta { }
 
-        [ServiceContainer]
+        [ServiceProvider]
         [Scoped(source: nameof(GetAlphaAsync))]
         public partial class FirstContainer
         {
             static Task<Alpha> GetAlphaAsync() => Task.FromResult(new Alpha());
         }
 
-        [ServiceContainer]
+        [ServiceProvider]
         [Scoped(source: nameof(GetBetaAsync))]
         public partial class SecondContainer
         {
@@ -101,7 +101,7 @@ public class SharedLockHelperTests
 
             public sealed class Plain { }
 
-            [ServiceContainer]
+            [ServiceProvider]
             [Singleton<Plain>]
             public partial class SyncContainer { }
             """);

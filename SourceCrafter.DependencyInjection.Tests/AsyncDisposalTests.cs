@@ -21,7 +21,7 @@ public sealed class Resource : IAsyncDisposable
 	}
 }
 
-[ServiceContainer]
+[ServiceProvider]
 [Singleton<Resource>(source: nameof(_GetAsync))]
 public partial class HealthyContainer
 {
@@ -35,7 +35,7 @@ public partial class HealthyContainer
 	}
 }
 
-[ServiceContainer]
+[ServiceProvider]
 [Singleton<Resource>(source: nameof(_GetAsync))]
 public partial class FaultedContainer
 {
@@ -105,7 +105,7 @@ public class AsyncDisposalTests
 				public ValueTask DisposeAsync() => default;
 			}
 
-			[ServiceContainer]
+			[ServiceProvider]
 			[Singleton<Resource>(source: nameof(_GetAsync))]
 			public partial class Container
 			{

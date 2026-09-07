@@ -15,7 +15,7 @@ public sealed class Beta(IService alpha) : IService { public string Name => alph
 public sealed class Gamma(IService beta, IService alpha) : IService { public string Name => beta.Name + "+" + alpha.Name + "->gamma"; }
 public sealed class Delta(IService gamma, IService beta, IService alpha) : IService { public string Name => gamma.Name + "+" + beta.Name + "+" + alpha.Name + "->delta"; }
 
-[ServiceContainer(generateServiceProviderApi: true)]
+[ServiceProvider(genericApi: true)]
 [Singleton<IService>("alpha", source: nameof(_GetAlphaAsync))]
 [Scoped<IService, Beta>("beta")]
 [Transient<IService, Gamma>("gamma")]
@@ -38,7 +38,7 @@ public interface IFailing { }
 public sealed class FailingRoot : IFailing { }
 public sealed class FailingLeaf(IFailing root) : IFailing { }
 
-[ServiceContainer(generateServiceProviderApi: true)]
+[ServiceProvider(genericApi: true)]
 [Singleton<IFailing>("root", source: nameof(_GetRootAsync))]
 [Scoped<IFailing, FailingLeaf>("leaf")]
 public partial class FailingContainer

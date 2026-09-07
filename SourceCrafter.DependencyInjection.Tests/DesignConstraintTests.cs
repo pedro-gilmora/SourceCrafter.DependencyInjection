@@ -25,7 +25,7 @@ public class DesignConstraintTests
 		public interface IService;
 		public sealed class Impl : IService;
 
-		[ServiceContainer]
+		[ServiceProvider]
 		[Singleton<IService>(source: nameof(_Build))]
 		public partial class Container
 		{
@@ -71,7 +71,7 @@ public class DesignConstraintTests
 		public sealed class Beta : IService;
 		public sealed class Consumer(IService first, IService second);
 
-		[ServiceContainer]
+		[ServiceProvider]
 		[Singleton<IService, Alpha>]
 		[Singleton<IService, Beta>]
 		[Singleton<Consumer>]
@@ -87,7 +87,7 @@ public class DesignConstraintTests
 		public sealed class Alpha : IService;
 		public sealed class Consumer(IService only);
 
-		[ServiceContainer]
+		[ServiceProvider]
 		[Singleton<IService, Alpha>]
 		[Singleton<Consumer>]
 		public partial class Container;
@@ -127,7 +127,7 @@ public class DesignConstraintTests
 			public sealed class Leaf;
 			public sealed class Consumer(Leaf first, Leaf second);
 
-			[ServiceContainer]
+			[ServiceProvider]
 			[Singleton<Leaf>]
 			[Singleton<Consumer>]
 			public partial class Container;
@@ -153,7 +153,7 @@ public class DesignConstraintTests
 			public sealed class Beta : IService;
 			public sealed class Consumer(IService first, IService second);
 
-			[ServiceContainer]
+			[ServiceProvider]
 			[Singleton<IService, Alpha>("first")]
 			[Singleton<IService, Beta>("second")]
 			[Singleton<Consumer>]

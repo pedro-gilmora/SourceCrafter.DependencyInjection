@@ -4,7 +4,7 @@ using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
 
 namespace SourceCrafter.DependencyInjection.Tests
 {
-    [ServiceContainer("ASPNETCORE_ENVIRONMENT", generateServiceProviderApi: true)]
+    [ServiceProvider("ASPNETCORE_ENVIRONMENT", genericApi: true)]
     [JsonConfiguration]
     [Transient<IA, A>]
     [Singleton<IA, AA>]
@@ -92,7 +92,7 @@ namespace SourceCrafter.DependencyInjection.Tests
 
 namespace SourceCrafter.DependencyInjection.Tests.Sub
 {
-    [ServiceContainer("DOTNET_ENVIRONMENT")]
+    [ServiceProvider("DOTNET_ENVIRONMENT")]
     [JsonConfiguration]
     [JsonSetting<AppSettings>("AppConfig")]
     [Scoped("times", source: nameof(IConfigModule.GetCountAsync))]

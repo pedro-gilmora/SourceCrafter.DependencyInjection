@@ -32,7 +32,7 @@ public class InterceptorShapeTests
 		public sealed class First : IImplementation { }
 		public sealed class Second : IImplementation { }
 
-		[ServiceContainer(generateServiceProviderApi: true)]
+		[ServiceProvider(genericApi: true)]
 		[Singleton<IImplementation>(source: nameof(GetFirstAsync))]
 		[Scoped<IImplementation>(source: nameof(GetSecondAsync))]
 		public partial class Container
@@ -108,7 +108,7 @@ public class InterceptorShapeTests
 		public sealed class Controller(IAuthService auth, IDatabase db, int count, Guid reqId) : IController;
 		public sealed class AdminController(IAuthService auth, Guid reqId) : IController;
 
-		[ServiceContainer(generateServiceProviderApi: true)]
+		[ServiceProvider(genericApi: true)]
 		[Singleton("reqId", source: nameof(_GetReqIdAsync))]
 		[Scoped("count", source: nameof(_GetCountAsync))]
 		[Singleton<IDatabase, Database>]
@@ -185,7 +185,7 @@ public class InterceptorShapeTests
 		public sealed class Beta(IService alpha) : IService;
 		public sealed class Gamma(IService beta, IService alpha) : IService;
 
-		[ServiceContainer(generateServiceProviderApi: true)]
+		[ServiceProvider(genericApi: true)]
 		[Singleton<IService>("alpha", source: nameof(_GetAlphaAsync))]
 		[Scoped<IService, Beta>("beta")]
 		[Transient<IService, Gamma>("gamma")]
@@ -257,7 +257,7 @@ public class InterceptorShapeTests
 		public sealed class Gamma(IService beta, IService alpha) : IService;
 		public sealed class Delta(IService gamma, IService beta, IService alpha) : IService;
 
-		[ServiceContainer(generateServiceProviderApi: true)]
+		[ServiceProvider(genericApi: true)]
 		[Singleton<IService>("alpha", source: nameof(_GetAlphaAsync))]
 		[Scoped<IService, Beta>("beta")]
 		[Transient<IService, Gamma>("gamma")]

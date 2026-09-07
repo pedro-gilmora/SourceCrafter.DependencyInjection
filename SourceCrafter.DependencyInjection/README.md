@@ -45,10 +45,10 @@ dotnet add package SourceCrafter.DependencyInjection.MsConfiguration
 ## Quick Start
 
 ### Step 1: Create Your Container
-Define a `partial` class with `[ServiceContainer]` and register services:
+Define a `partial` class with `[ServiceProvider]` and register services:
 
 ```csharp
-[ServiceContainer]
+[ServiceProvider]
 [Singleton<IDatabase, Database>]
 [Scoped<IAuthService, AuthService>]
 [Scoped<EmployeeController>]
@@ -77,7 +77,7 @@ var scope = container.CreateScope();  // for scoped services
 ```csharp
 namespace SourceCrafter.DependencyInjection.Tests
 {
-    [ServiceContainer]
+    [ServiceProvider]
     [JsonSetting<AppSettings>("AppSettings")]
     [Scoped("count", source: nameof(CountAsync))]
     [Scoped("reqId", source: nameof(ResolveRequestIdTask))]
@@ -252,7 +252,7 @@ the generic, MEDI-shaped surface (`GetService<T>()`, `GetRequiredService<T>()`, 
 overloads and their async counterparts) with a constructor argument:
 
 ```csharp
-[ServiceContainer(generateServiceProviderApi: true)]
+[ServiceProvider(genericApi: true)]
 public partial class AppContainer { }
 ```
 
@@ -370,7 +370,7 @@ Frequent situations:
 
 **"Resolver not generated for type X"** — check that `X` is registered with
 `[Singleton<X>]`, `[Scoped<X>]` or `[Transient<X>]`, and that the container class carries
-`[ServiceContainer]` and is `partial`.
+`[ServiceProvider]` and is `partial`.
 
 **`SCDI16`** — `Task<T>` and `ValueTask<T>` are **invariant**: `Task<Impl>` does not convert
 to `Task<IService>`, even though `Impl` implements `IService`. Declare the factory as

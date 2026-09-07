@@ -15,17 +15,17 @@ public sealed class One : ICached;
 public sealed class Two : ICached;
 public sealed class Three : ICached;
 
-[ServiceContainer(generateServiceProviderApi: true)]
+[ServiceProvider(genericApi: true)]
 [Singleton<ICached, One>("one")]
 [Singleton<ICached, Two>("two")]
 public partial class AllSingletonContainer;
 
-[ServiceContainer(generateServiceProviderApi: true)]
+[ServiceProvider(genericApi: true)]
 [Singleton<ICached, One>("one")]
 [Scoped<ICached, Two>("two")]
 public partial class ScopedContainer;
 
-[ServiceContainer(generateServiceProviderApi: true)]
+[ServiceProvider(genericApi: true)]
 [Singleton<ICached, One>("one")]
 [Transient<ICached, Two>("two")]
 public partial class TransientContainer;
@@ -92,7 +92,7 @@ public class InterceptorCacheTests
 		public sealed class Alpha : IService;
 		public sealed class Beta : IService;
 
-		[ServiceContainer(generateServiceProviderApi: true)]
+		[ServiceProvider(genericApi: true)]
 		[Singleton<IService, Alpha>("a")]
 		[Singleton<IService, Beta>("b")]
 		public partial class Container;
@@ -165,7 +165,7 @@ public class InterceptorCacheTests
 		public sealed class Alpha : IService;
 		public sealed class Beta : IService;
 
-		[ServiceContainer(generateServiceProviderApi: true)]
+		[ServiceProvider(genericApi: true)]
 		[Singleton<IService>("a", source: nameof(_GetAlphaAsync))]
 		[Scoped<IService, Beta>("b")]
 		public partial class Container
@@ -224,7 +224,7 @@ public class InterceptorCacheTests
 			public sealed class Beta : IService;
 			public sealed class Gamma : IService;
 
-			[ServiceContainer(generateServiceProviderApi: true)]
+			[ServiceProvider(genericApi: true)]
 			[Singleton<IService, Alpha>("svc")]
 			[Singleton<IService, Beta>("svc")]
 			[Singleton<IService, Gamma>("svc")]

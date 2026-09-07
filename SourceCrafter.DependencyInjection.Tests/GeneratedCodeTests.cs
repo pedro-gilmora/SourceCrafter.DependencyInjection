@@ -27,7 +27,7 @@ public class GeneratedCodeTests
             public System.Threading.Tasks.ValueTask DisposeAsync() => default;
         }
 
-        [ServiceContainer]
+        [ServiceProvider]
         [Singleton<ISvc, Svc>]
         [Scoped<Session>]
         public partial class Container { }
@@ -57,7 +57,7 @@ public class GeneratedCodeTests
         public sealed class Wrapper(Clock clock) { }
         public sealed class Session(Config config, Wrapper wrapper) { }
 
-        [ServiceContainer]
+        [ServiceProvider]
         [Singleton<Config>]
         [Singleton<Clock>]
         [Transient<Wrapper>]
@@ -231,7 +231,7 @@ public class GeneratedCodeTests
             public sealed class Middle(Inner a, Inner b) { }
             public sealed class Outer(Middle a, Middle b) { }
 
-            [ServiceContainer]
+            [ServiceProvider]
             [Transient<Inner>]
             [Transient<Middle>]
             [Transient<Outer>]
@@ -272,7 +272,7 @@ public class GeneratedCodeTests
 
             public sealed class Svc;
 
-            [ServiceContainer]
+            [ServiceProvider]
             [Singleton<Svc>(source: nameof(Create))]
             public partial class Container
             {
@@ -303,7 +303,7 @@ public class GeneratedCodeTests
                 public System.Threading.Tasks.ValueTask DisposeAsync() => default;
             }
 
-            [ServiceContainer]
+            [ServiceProvider]
             [Scoped<Svc>]
             public partial class Container
             {
@@ -326,7 +326,7 @@ public class GeneratedCodeTests
 
         namespace Probe;
 
-        [ServiceContainer(generateServiceProviderApi: true)]
+        [ServiceProvider(genericApi: true)]
         [Singleton("count", source: nameof(LoadAsync))]
         [Singleton("other", source: nameof(LoadWithoutTokenAsync))]
         public partial class Container
@@ -394,7 +394,7 @@ public class GeneratedCodeTests
             public Db Db { get; } = db;
         }
 
-        [ServiceContainer]
+        [ServiceProvider]
         [Singleton(source: nameof(GetCfgAsync))]
         [Singleton(source: nameof(GetDbAsync))]
         [Singleton<Svc>]
@@ -443,7 +443,7 @@ public class GeneratedCodeTests
             public Cfg Cfg { get; } = cfg;
         }
 
-        [ServiceContainer]
+        [ServiceProvider]
         [Singleton(source: nameof(GetCfgAsync))]
         [Singleton(source: nameof(GetDbAsync))]
         [Singleton<Svc>]
@@ -482,7 +482,7 @@ public class GeneratedCodeTests
         public sealed class A1 : IA { }
         public sealed class A2 : IA { }
 
-        [ServiceContainer(generateServiceProviderApi: true)]
+        [ServiceProvider(genericApi: true)]
         [Transient<IA, A1>]
         [Singleton<IA, A2>]
         public partial class Container { }
@@ -586,7 +586,7 @@ public class GeneratedCodeTests
                 public System.Threading.Tasks.ValueTask DisposeAsync() => default;
             }
 
-            [ServiceContainer]
+            [ServiceProvider]
             [Singleton<A>]
             [Scoped<B>]
             public partial class Container { }

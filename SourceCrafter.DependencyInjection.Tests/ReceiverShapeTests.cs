@@ -16,7 +16,7 @@ public interface IPerRequest { }
 
 public sealed class PerRequest : IPerRequest { }
 
-[ServiceContainer(generateServiceProviderApi: true)]
+[ServiceProvider(genericApi: true)]
 [Singleton<IGreeter, Greeter>]
 [Scoped<IPerRequest, PerRequest>]
 public partial class ReceiverContainer

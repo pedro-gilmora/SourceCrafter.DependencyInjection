@@ -26,7 +26,7 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
     internal const string
         BaseAttributesNS = "SourceCrafter.DependencyInjection.Attributes",
         GlobalBaseAttributeNS = $"global::{BaseAttributesNS}",
-        ServiceContainerFullTypeName = $"{BaseAttributesNS}.ServiceContainerAttribute",
+        ServiceProviderFullTypeName = $"{BaseAttributesNS}.ServiceProviderAttribute",
         CancelTokenFQMetaName = "global::System.Threading.CancellationToken",
         EnumFQMetaName = "global::System.Enum",
         KeyParamName = "key",
@@ -38,11 +38,11 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
         ScopedAttr = $"{GlobalBaseAttributeNS}.ScopedAttribute",
         TransientAttr = $"{GlobalBaseAttributeNS}.TransientAttribute",
         DependencyAttr = $"{GlobalBaseAttributeNS}.DependencyAttribute",
-        ServiceContainerAttr = $"global::{ServiceContainerFullTypeName}",
+        ServiceProviderAttr = $"global::{ServiceProviderFullTypeName}",
         DefaultEnvName = @"""DOTNET_ENVIRONMENT""";
 
 
-    private const string serviceContainerFullTypeName = "SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute";
+    private const string serviceProviderFullTypeName = "SourceCrafter.DependencyInjection.Attributes.ServiceProviderAttribute";
     internal readonly static string generatedCodeAttribute = ParseToolAndVersion();
     internal readonly static Guid generatorGuid = new("31C54896-DE65-4FDC-8EBA-5A169A6E3CBB");
 
@@ -75,7 +75,7 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                 .WithTrackingName("AssemblyExternalProvidersRegistrations");
 
         var servicesContainers = context.SyntaxProvider
-                .ForAttributeWithMetadataName(serviceContainerFullTypeName,
+                .ForAttributeWithMetadataName(ServiceProviderFullTypeName,
                     static (node, a) => true,
                     static (gasc, c) => TryParseContainer(gasc, c))
                 .Where(e => e is not null)
@@ -555,7 +555,7 @@ internal static class Extensions
         if (AsyncKind is 0 && methodName.EndsWith("Async")) AsyncKind = AsyncKind.Task;
 
         return new(
-            callContainerType.AllInterfaces.Any(i => i.GetAttributes().Any(IsGeneratedServiceContainer)),
+            callContainerType.AllInterfaces.Any(i => i.GetAttributes().Any(IsGeneratedServiceProvider)),
             callContainerType.NameOnly,
             callContainerType.FullGlobalQualifiedName,
             methodName,
@@ -623,8 +623,8 @@ internal static class Extensions
         return false;
     }
 
-    static bool IsGeneratedServiceContainer(AttributeData attrData) =>
-        attrData.AttributeClass?.FullGlobalQualifiedName.EndsWith(serviceContainerFullTypeName) ?? false;
+    static bool IsGeneratedServiceProvider(AttributeData attrData) =>
+        attrData.AttributeClass?.FullGlobalQualifiedName.EndsWith(ServiceProviderFullTypeName) ?? false;
 
     private static string ParseToolAndVersion()
     {

@@ -21,7 +21,7 @@ internal partial class ServiceProviders
         string modifiers,
         bool isInterfaceProvider,
         bool implementsServiceProvider,
-        bool generateServiceProviderApi,
+        bool genericApi,
         bool hasUserEnvironmentName,
         string className,
         string typeName,
@@ -56,7 +56,7 @@ internal partial class ServiceProviders
         /// superficie que interceptar: o implementa <c>IServiceProvider</c> (y por tanto
         /// hereda los metodos de extension) o genera la API generica propia.
         /// </summary>
-        internal bool EmitsInterceptors => implementsServiceProvider || generateServiceProviderApi;
+        internal bool EmitsInterceptors => implementsServiceProvider || genericApi;
 
         string GetFileName(Dictionary<string, byte> uniqueName)
         {
@@ -342,7 +342,7 @@ internal partial class ServiceProviders
 ");
 			}
 
-            var emitGenericApi = generateServiceProviderApi && genericResolvers.Count > 0;
+            var emitGenericApi = genericApi && genericResolvers.Count > 0;
 
             if (implementsServiceProvider || emitGenericApi)
             {
@@ -647,7 +647,7 @@ public static class ").Append(typeName).Append(@"Extensions
         {
             return other is not null
                     && (ReferenceEquals(other, this)
-                        || other.EqualsTo(this, containerDisposability, isInterfaceProvider, implementsServiceProvider, generateServiceProviderApi, hasUserEnvironmentName, nameSpace, typeName, modifiers, envName, dependencyMemberBuilder));
+                        || other.EqualsTo(this, containerDisposability, isInterfaceProvider, implementsServiceProvider, genericApi, hasUserEnvironmentName, nameSpace, typeName, modifiers, envName, dependencyMemberBuilder));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -656,7 +656,7 @@ public static class ").Append(typeName).Append(@"Extensions
             Disposability _containerDisposability,
             bool _isInterfaceProvider,
             bool _implementsServiceProvider,
-            bool _generateServiceProviderApi,
+            bool _genericApi,
             bool _hasUserEnvironmentName,
             string? _nameSpace,
             string _typeName,
@@ -667,7 +667,7 @@ public static class ").Append(typeName).Append(@"Extensions
             return _containerDisposability == containerDisposability
                 && _isInterfaceProvider == isInterfaceProvider
                 && _implementsServiceProvider == implementsServiceProvider
-                && _generateServiceProviderApi == generateServiceProviderApi
+                && _genericApi == genericApi
                 && _hasUserEnvironmentName == hasUserEnvironmentName
                 && _nameSpace == nameSpace
                 && _typeName == typeName
@@ -685,7 +685,7 @@ public static class ").Append(typeName).Append(@"Extensions
             hashCode.Add(containerDisposability);
             hashCode.Add(isInterfaceProvider);
             hashCode.Add(implementsServiceProvider);
-            hashCode.Add(generateServiceProviderApi);
+            hashCode.Add(genericApi);
             hashCode.Add(hasUserEnvironmentName);
             hashCode.Add(nameSpace);
             hashCode.Add(typeName);

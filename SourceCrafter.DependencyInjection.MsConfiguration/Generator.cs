@@ -44,7 +44,7 @@ public sealed class Partials : IIncrementalGenerator
         var compilation = context.CompilationProvider.Select((c, t) => new CompilationMeta(IsMsConfigInstalled(c), new Dictionary<string, ContainerConfigPartialEmmiter>(StringComparer.OrdinalIgnoreCase)));
 
         var servicesContainers = context.SyntaxProvider
-            .ForAttributeWithMetadataName("SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute",
+            .ForAttributeWithMetadataName("SourceCrafter.DependencyInjection.Attributes.ServiceProviderAttribute",
                 (node, a) => true,
                 (t, c) =>
                 {

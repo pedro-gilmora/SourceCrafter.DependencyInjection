@@ -10,7 +10,7 @@ namespace SourceCrafter.DependencyInjection.Tests.Unobserved;
 
 public interface IFlaky { }
 
-[ServiceContainer(generateServiceProviderApi: true)]
+[ServiceProvider(genericApi: true)]
 [Singleton<IFlaky>("first", source: nameof(_GetFirstAsync))]
 [Scoped<IFlaky>("second", source: nameof(_GetSecondAsync))]
 public partial class TwoFailuresContainer
@@ -58,7 +58,7 @@ public class UnobservedTaskTests
 		public interface IService;
 		public sealed class Alpha : IService;
 
-		[ServiceContainer(generateServiceProviderApi: true)]
+		[ServiceProvider(genericApi: true)]
 		[Singleton<IService>("a", source: nameof(_GetA))]
 		[Scoped<IService>("b", source: nameof(_GetB))]
 		public partial class Container

@@ -18,7 +18,7 @@ public interface IHandler { IAuth Auth { get; } }
 public sealed class HandlerA(IAuth auth, Audit audit) : IHandler { public IAuth Auth => auth; public Audit Audit => audit; }
 public sealed class HandlerB(IAuth auth) : IHandler { public IAuth Auth => auth; }
 
-[ServiceContainer(generateServiceProviderApi: true)]
+[ServiceProvider(genericApi: true)]
 [Transient<IAuth>(source: nameof(_GetAuthAsync))]
 [Transient<Audit>]
 [Transient<IHandler, HandlerA>("a")]
@@ -56,7 +56,7 @@ public class InlinedTransientTests
 		public sealed class HandlerA(IAuth auth, Audit audit) : IHandler;
 		public sealed class HandlerB(IAuth auth) : IHandler;
 
-		[ServiceContainer(generateServiceProviderApi: true)]
+		[ServiceProvider(genericApi: true)]
 		[Transient<IAuth>(source: nameof(_GetAuthAsync))]
 		[Transient<Audit>]
 		[Transient<IHandler, HandlerA>("a")]
@@ -124,7 +124,7 @@ public class InlinedTransientTests
 			public interface IHandler;
 			public sealed class HandlerA(IAuth auth, Audit audit) : IHandler;
 
-			[ServiceContainer(generateServiceProviderApi: true)]
+			[ServiceProvider(genericApi: true)]
 			[Transient<IAuth, Auth>]
 			[Transient<Audit>]
 			[Transient<IHandler, HandlerA>("a")]

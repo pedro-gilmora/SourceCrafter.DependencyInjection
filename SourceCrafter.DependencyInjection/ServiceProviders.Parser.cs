@@ -46,7 +46,7 @@ internal partial class ServiceProviders
         bool
             hasScopedDependencies = false,
             implementsServiceProvider = providerType.AllInterfaces.Any(i => i.FullGlobalQualifiedName == "global::System.IServiceProvider"),
-            generateServiceProviderApi = false;
+            genericApi = false;
 
         // Si el usuario ya declara estos miembros en su parcial, el generador no los emite.
         var hasUserEnvironmentName =
@@ -122,7 +122,7 @@ internal partial class ServiceProviders
             modifiers,
             isInterfaceProvider,
             implementsServiceProvider,
-            generateServiceProviderApi,
+            genericApi,
             hasUserEnvironmentName,
             className,
             typeName,
@@ -148,9 +148,9 @@ internal partial class ServiceProviders
         return emitter;
 
         /// <summary>
-        /// Lee los parametros de <c>[ServiceContainer]</c> emparejando por nombre de
+        /// Lee los parametros de <c>[ServiceProvider]</c> emparejando por nombre de
         /// parametro y no por posicion: con argumentos con nombre el orden no es fiable
-        /// (antes, <c>[ServiceContainer(generateServiceProviderApi: true)]</c> acababa
+        /// (antes, <c>[ServiceProvider(genericApi: true)]</c> acababa
         /// tomando el booleano como nombre de la variable de entorno).
         /// </summary>
         void ReadContainerOptions(AttributeData attr, CancellationToken cancelToken)
@@ -165,7 +165,7 @@ internal partial class ServiceProviders
                     envName = $@"""{v}""";
 
                 if (attr.ConstructorArguments is [_, { Value: bool flag }, ..])
-                    generateServiceProviderApi = flag;
+                    genericApi = flag;
 
                 return;
             }
@@ -197,9 +197,9 @@ internal partial class ServiceProviders
 
                         break;
 
-                    case "generateServiceProviderApi":
+                    case "genericApi":
 
-                        generateServiceProviderApi = model.GetConstantValue(arg.Expression, cancelToken) is { HasValue: true, Value: true };
+                        genericApi = model.GetConstantValue(arg.Expression, cancelToken) is { HasValue: true, Value: true };
 
                         break;
                 }
@@ -722,7 +722,7 @@ internal partial class ServiceProviders
                 var isContainerAttr = false;
 
                 if (attr is not { AttributeClass: { } _attrClass, ApplicationSyntaxReference: { } attrSyntaxRef }
-                    || (isContainerAttr = _attrClass.FullGlobalQualifiedName is ServiceContainerAttr)
+                    || (isContainerAttr = _attrClass.FullGlobalQualifiedName is ServiceProviderAttr)
                     || attrSyntaxRef.GetSyntax(cancelToken) is not AttributeSyntax { } _attrSyntax
                     || !TryGetAttributeParamsDefinition(model.GetSymbolInfo(_attrSyntax, cancellationToken: cancelToken), out ImmutableArray<IParameterSymbol> attrParams)
                     || !TryGetLifetime(_attrSyntax, ref _attrClass, ref isExternal, out lifetime))

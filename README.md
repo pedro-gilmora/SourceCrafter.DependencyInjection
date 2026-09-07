@@ -5,7 +5,7 @@ the Roslyn generator emits plain, readable C# resolvers — no reflection, no ex
 trees, no runtime container.
 
 ```csharp
-[ServiceContainer]
+[ServiceProvider]
 [Singleton<IClock, SystemClock>]
 [Scoped<DbSession>]
 [Transient<Handler>]
