@@ -1067,7 +1067,12 @@ internal partial class ServiceProviders
             {
                 var sanitizedTypeName = Sanitize(type!).Replace(" ", "").Capitalize();
 
-                ref var idOut = ref CollectionsMarshal.GetValueRefOrAddDefault(methodNamesMap, (lifetime, exportTypeFullName, name), out var exists)!;
+                // La memoizacion tiene que usar la *misma* identidad que distingue a un
+                // resolver de otro, es decir el subKey (lifetime, tipo de implementacion,
+                // clave). Con el tipo expuesto, tres registros del mismo interfaz y la
+                // misma clave con el mismo lifetime compartian entrada y los tres miembros
+                // salian con el mismo nombre (CS0102/CS0111/CS0229).
+                ref var idOut = ref CollectionsMarshal.GetValueRefOrAddDefault(methodNamesMap, (lifetime, typeFullName, name), out var exists)!;
 
                 if (exists)
                 {
