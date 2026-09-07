@@ -103,7 +103,7 @@ internal partial class ServiceProviders
                 genericResolvers.Add(resolver!); ;
         }
 
-        if (dependencyValueBuilders.Count == 0) return null!;
+        if (dependencyValueBuilders.Count == 0 && diagnostics.Count == 0) return null!;
 
         // El generador ya no emite constructor para los candados (se crean de forma
         // perezosa), asi que solo hay conflicto real si algun resolver usa el token de vida.

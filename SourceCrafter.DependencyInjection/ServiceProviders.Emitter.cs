@@ -45,6 +45,13 @@ internal partial class ServiceProviders
         internal readonly string ClassName = className;
 
         /// <summary>
+        /// Un contenedor cuyas registraciones fallaron todas no tiene nada que emitir, pero
+        /// si tiene que <b>informar</b>. Se conserva el emisor para no perder sus diagnosticos
+        /// y se omite el archivo.
+        /// </summary>
+        internal bool HasServices => dependencyValueBuilders.Count > 0;
+
+        /// <summary>
         /// Un contenedor solo puede reclamar llamadas interceptables si expone una
         /// superficie que interceptar: o implementa <c>IServiceProvider</c> (y por tanto
         /// hereda los metodos de extension) o genera la API generica propia.

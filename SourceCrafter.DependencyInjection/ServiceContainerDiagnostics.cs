@@ -201,7 +201,7 @@ internal static class ServiceContainerDiagnostics
     {
         DiagnosticDescriptor rule = new(
             id: "SCDI10",
-            title: "Return type doesn't match service {4} type",
+            title: "Factory return type doesn't match the service type",
             messageFormat: "{0} {1} as return type for method {2}, should match {3} as service base {4}.",
             category: "SourceCrafter.DependencyInjection.Design",
             defaultSeverity: DiagnosticSeverity.Error,

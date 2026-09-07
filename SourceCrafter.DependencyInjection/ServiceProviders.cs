@@ -138,8 +138,13 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
 
                         foreach (var (emitter, emitterInterceptors) in pending)
                         {
-                            emitter.Emit(countedNames, emitterInterceptors, ref requiresTaskExtensions, ref interceptorsCount, out var file, out var code);
-                            files.Add((file + ".g", code));
+                            // Un emisor sin servicios solo esta aqui para transportar sus
+                            // diagnosticos: emitir su archivo produciria un contenedor vacio.
+                            if (emitter.HasServices)
+                            {
+                                emitter.Emit(countedNames, emitterInterceptors, ref requiresTaskExtensions, ref interceptorsCount, out var file, out var code);
+                                files.Add((file + ".g", code));
+                            }
 
                             foreach (var item in emitter.Diagnostics)
                             {
