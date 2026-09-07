@@ -361,6 +361,19 @@ internal partial class ServiceProviders
                 code.Append(@"
     #endregion");
             }
+
+            // Los numeros de interceptor se reparten antes de cerrar la clase porque el
+            // campo de cache de un array que depende del ambito tiene que declararse aqui
+            // dentro, mientras que el metodo que lo usa se emite despues.
+            if (EmitsInterceptors)
+            {
+                foreach (var item in interceptors.Values)
+                {
+                    item.AssignIndex(ref interceptorsCount);
+                    item.AppendScopedCacheField(code);
+                }
+            }
+
             code.Append(@"
 }
 ");
@@ -373,7 +386,7 @@ public static class ").Append(typeName).Append(@"Extensions
 
                 foreach (var item in interceptors.Values)
                 {
-                    item.Append(code, ClassName, ref interceptorsCount);
+                    item.Append(code, ClassName);
                 }
 
                 code.Append('}');

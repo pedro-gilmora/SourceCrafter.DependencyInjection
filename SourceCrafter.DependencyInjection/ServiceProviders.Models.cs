@@ -194,6 +194,82 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
     /// </summary>
     internal readonly InterceptableLocation BuiltFrom = builtFrom;
 
+    /// <summary>
+    /// Numero que distingue a este interceptor de los demas. Se asigna antes de emitir el
+    /// contenedor porque el campo de cache de los elementos scoped se declara ahi dentro,
+    /// mientras que el metodo interceptor se emite despues, en la clase de extensiones.
+    /// </summary>
+    internal int Index;
+
+    /// <summary>
+    /// Lifetime del array que devuelve el interceptor, o <c>null</c> si no se puede cachear.
+    ///
+    /// <para>Es el <b>minimo</b> de los lifetimes de sus elementos. Basta un elemento
+    /// transitorio para que no haya cache posible: un transitorio promete una instancia nueva
+    /// por llamada, asi que guardar el array convertiria ese elemento en un singleton de
+    /// hecho. No es una cuestion de rendimiento sino de semantica.</para>
+    ///
+    /// <para>Si todos son singleton el array es el mismo para todo el proceso y el campo es
+    /// estatico. Si hay alguno scoped el array solo vale dentro de su ambito, asi que el
+    /// campo es de instancia y cada <c>CreateScope()</c> estrena el suyo.</para>
+    /// </summary>
+    internal Lifetime? CacheLifetime
+    {
+        get
+        {
+            // Sin array no hay nada que ahorrar: el valor unico ya lo cachea su miembro.
+            if (!multiple) return null;
+
+            var result = Lifetime.Singleton;
+
+            foreach (var element in AppendInterceptorValue)
+            {
+                if (element.Key.lifetime is Lifetime.Transient) return null;
+
+                if (element.Key.lifetime is Lifetime.Scoped) result = Lifetime.Scoped;
+            }
+
+            return result;
+        }
+    }
+
+    internal string CacheFieldName => "__interceptorCache" + Index;
+
+    /// <summary>
+    /// Expresion con la que se lee y escribe la cache. Los elementos scoped viven en la
+    /// instancia que recibe el interceptor; los singleton, en un estatico de la clase de
+    /// extensiones.
+    /// </summary>
+    string CacheAccess => CacheLifetime is Lifetime.Scoped ? "provider." + CacheFieldName : CacheFieldName;
+
+    /// <summary>
+    /// Reserva el numero de este interceptor. Se salta los que no tienen sitio de llamada
+    /// para que la numeracion sea la misma que la de la emision.
+    /// </summary>
+    internal void AssignIndex(ref int i)
+    {
+        if (Locations.Count == 0) return;
+
+        Index = ++i;
+    }
+
+    /// <summary>
+    /// Declara dentro del contenedor el campo de cache de un interceptor cuyo array depende
+    /// del ambito. Los singleton no pasan por aqui: su campo se declara en la clase de
+    /// extensiones junto al metodo.
+    /// </summary>
+    internal void AppendScopedCacheField(StringBuilder code)
+    {
+        if (Locations.Count == 0 || CacheLifetime is not Lifetime.Scoped) return;
+
+        // 'internal' y no 'private': quien lo lee es el metodo interceptor, que vive en la
+        // clase de extensiones del mismo ensamblado.
+        code.Append(@"
+
+    internal ").Append(exportTypeFullName).Append("[]? ").Append(CacheFieldName).Append(@";
+");
+    }
+
     public override bool Equals(object? obj)
     {
         return (obj as Interceptor)?.Key.Equals(Key) ?? false;
@@ -203,9 +279,16 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
         return Key.GetHashCode();
     }
 
-    internal void Append(StringBuilder code, string providerTypeName, ref int i)
+    internal void Append(StringBuilder code, string providerTypeName)
     {
         if (Locations.Count == 0) return;
+
+        if (CacheLifetime is Lifetime.Singleton)
+        {
+            code.Append(@"
+    private static ").Append(exportTypeFullName).Append("[]? ").Append(CacheFieldName).Append(@";
+");
+        }
 
         foreach (var item in Locations)
         {
@@ -213,10 +296,10 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
     [global::System.Runtime.CompilerServices.InterceptsLocation(").Append(item.Version).Append(@", """).Append(item.Data).Append('"').Append(@")] //").Append(item.GetDisplayLocation());
         }
 
-        AppendInterceptor(code, providerTypeName, ref i);
+        AppendInterceptor(code, providerTypeName);
     }
 
-    void AppendInterceptor(StringBuilder code, string providerTypeName, ref int i)
+    void AppendInterceptor(StringBuilder code, string providerTypeName)
     {
         code.Append(@"
     public static ");
@@ -243,13 +326,15 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
                 break;
         }
 
-        code.Append(" InterceptorCall").Append(++i).Append(@"(this ").Append(providerTypeName);
+        code.Append(" InterceptorCall").Append(Index).Append(@"(this ").Append(providerTypeName);
 
         //if (isScopedCall) code.Append(".Scoped");
 
         code.Append(" provider");
 
         if (IsKeyed) code.Append(", string _");
+
+        var cached = CacheLifetime is not null;
 
         if (useAsync)
         {
@@ -258,6 +343,15 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
             // luego se esperan una a una.
             code.Append(@")
     {");
+
+            // La cache guarda el array ya resuelto, no la tarea: una tarea fallida se
+            // quedaria cacheada y todo el proceso heredaria el fallo. Si dos llamadas
+            // concurrentes se cruzan, cada una construye un array cuyos elementos son los
+            // mismos objetos cacheados, asi que la carrera solo desperdicia una asignacion.
+            if (cached)
+                code.Append(@"
+        if (").Append(CacheAccess).Append(@" is { } __cached) return __cached;
+");
 
             var index = 0;
 
@@ -294,7 +388,11 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
 
             code.Append(@"
 
-        return [");
+        return ");
+
+            if (cached) code.Append(CacheAccess).Append(" = ");
+
+            code.Append('[');
 
             index = 0;
 
@@ -365,6 +463,11 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
 
         if (multiple)
         {
+            // Sin candado a proposito: todos los elementos son cacheados, asi que dos
+            // arrays construidos a la vez contienen exactamente los mismos objetos. Lo
+            // unico que cuesta una carrera es la asignacion que se iba a ahorrar.
+            if (cached) code.Append(CacheAccess).Append(" ??= ");
+
             code.Append(@"[
         ");
 
