@@ -168,11 +168,17 @@ internal class ResolverBuilder(string toStr)
 /// Dependencias asincronas que este elemento resuelve por el camino. Si otro elemento del
 /// mismo array esta aqui dentro <b>y</b> es cacheado, esperar a este ya lo deja completo.
 /// </param>
+/// <param name="IsValueTask">
+/// Cierto si el local <c>__tN</c> sera un <c>ValueTask&lt;T&gt;</c>. Importa porque
+/// <c>ValueTask</c> no expone <c>Exception</c> y <c>AsTask()</c> sobre una ya consumida
+/// lanza, asi que su excepcion no se puede observar sin consumirla.
+/// </param>
 internal readonly record struct InterceptorElement(
     bool IsAsync,
     Action<StringBuilder, bool> Append,
     DependencyKey Key,
-    IReadOnlyCollection<DependencyKey> ResolvedDeps);
+    IReadOnlyCollection<DependencyKey> ResolvedDeps,
+    bool IsValueTask);
 
 internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool multiple, AsyncKind asyncKind, string exportTypeFullName, bool isKeyed, InterceptableLocation builtFrom, InterceptorElement firstDependency)
 {
@@ -376,19 +382,41 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
             // una tarea distinta en cada llamada.
             var resolvedBy = ResolveCoverage();
 
+            // Si dos tareas fallan, el primer await lanza y las demas quedan huerfanas: su
+            // excepcion nunca se observa y termina en TaskScheduler.UnobservedTaskException.
+            // Observarlas en el camino de salida cuesta cero (medido en la Fase 17: el
+            // try/catch es indistinguible de no tenerlo), pero solo se puede hacer sobre
+            // Task<T>. ValueTask<T> no expone Exception, y AsTask() sobre una ya consumida
+            // lanza InvalidOperationException, asi que ahi se deja como estaba.
+            var observable = AppendInterceptorValue
+                .Where(e => e.IsAsync)
+                .ToList();
+
+            var observes = observable.Count > 1 && observable.TrueForAll(e => !e.IsValueTask);
+
+            if (observes)
+                code.Append(@"
+
+        try
+        {");
+
+            // Sangria extra para el cuerpo que queda dentro del try. NormalizeLayout convierte
+            // cada 4 espacios en un tabulador, asi que se cuenta en espacios.
+            var pad = observes ? "    " : "";
+
             var awaited = new Dictionary<int, int>();
 
             foreach (var coveringIndex in resolvedBy.Values.Distinct().OrderBy(i => i))
             {
                 code.Append(@"
-        var __r").Append(awaited.Count).Append(" = await __t").Append(coveringIndex).Append(';');
+        ").Append(pad).Append("var __r").Append(awaited.Count).Append(" = await __t").Append(coveringIndex).Append(';');
 
                 awaited.Add(coveringIndex, awaited.Count);
             }
 
             code.Append(@"
 
-        return ");
+        ").Append(pad).Append("return ");
 
             if (cached) code.Append(CacheAccess).Append(" = ");
 
@@ -401,7 +429,7 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
                 if (index > 0) code.Append(',');
 
                 code.Append(@"
-            ");
+            ").Append(pad);
 
                 if (!element.IsAsync) element.Append(code, true);
                 else if (resolvedBy.TryGetValue(index, out var coveringIndex))
@@ -413,7 +441,33 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
                 index++;
             }
 
-            code.Append(@"];
+            code.Append("];");
+
+            if (observes)
+            {
+                code.Append(@"
+        }
+        catch
+        {");
+
+                index = 0;
+
+                foreach (var element in AppendInterceptorValue)
+                {
+                    if (element.IsAsync)
+                        code.Append(@"
+            _ = __t").Append(index).Append(".Exception;");
+
+                    index++;
+                }
+
+                code.Append(@"
+
+            throw;
+        }");
+            }
+
+            code.Append(@"
     }
 ");
 

@@ -606,7 +606,8 @@ public static class ").Append(typeName).Append(@"Extensions
                 resolver.AsyncKind > 0,
                 AppendDependency,
                 resolver.Key,
-                [.. resolver.AsyncLocalResolvers.Keys]);
+                [.. resolver.AsyncLocalResolvers.Keys],
+                resolver.AsyncKind is AsyncKind.ValueTask);
 
             var interceptor = CollectionsMarshal.GetValueRefOrAddDefault(interceptors, key, out var exists) ??=
                 new(key,
