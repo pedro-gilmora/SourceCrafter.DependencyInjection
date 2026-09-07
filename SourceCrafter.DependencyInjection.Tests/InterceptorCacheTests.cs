@@ -206,7 +206,7 @@ public class InterceptorCacheTests
 
 		var code = result.Source("Container");
 
-		code.Should().Contain("var __t0 = provider.GetAlphaAsyncCached;");
+		code.Should().Contain("var __t0 = provider.AlphaAsyncCached;");
 		code.Should().NotContain("var __t1 =");
 		code.Should().Contain("provider.B");
 	}

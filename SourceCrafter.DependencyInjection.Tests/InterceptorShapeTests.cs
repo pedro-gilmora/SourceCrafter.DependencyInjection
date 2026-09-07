@@ -227,7 +227,7 @@ public class InterceptorShapeTests
 
 		var body = InterceptorBodyOf(SingleInterfaceContainer);
 
-		body.Should().Contain("var __t0 = provider.GetAlphaAsyncCached;");
+		body.Should().Contain("var __t0 = provider.AlphaAsyncCached;");
 		body.Should().Contain("var __t1 = provider.GetBetaAsync();");
 		body.Should().Contain("var __t2 = provider.GetGammaAsync();");
 

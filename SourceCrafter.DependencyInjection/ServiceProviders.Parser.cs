@@ -1135,6 +1135,10 @@ internal partial class ServiceProviders
             /// </summary>
             (string, string) GetResolverName()
             {
+                // Misma regla que <c>Renderer.IsMethodShaped</c>: solo los resolvers
+                // asincronos que componen dependencias salen como metodo.
+                var isMethodShaped = AsyncKind is not 0 && (hasAsyncDependencies || needsCancelToken);
+
                 var hasExplicitName = nameOrFormat is not null;
 
                 var memberName = hasExplicitName
@@ -1152,14 +1156,27 @@ internal partial class ServiceProviders
                 if (factory is not null && isCached && !memberName.EndsWith("Cached") && !memberName.EndsWith("Cache"))
                     memberName += "Cached";
 
+                // Una propiedad no debe llamarse 'GetX': el prefijo anuncia una operacion.
+                // El nombre suele venir del metodo-fabrica del autor ('_GetAlphaAsync'), asi
+                // que se recorta cuando lo derivamos nosotros; si el autor escribio el nombre,
+                // se respeta tal cual.
+                if (!hasExplicitName && !isMethodShaped && HasGetPrefix(memberName))
+                    memberName = memberName.Substring(3);
+
                 var fieldName = "_" + memberName.Camelize();
 
-                if (!isExternal && factory is null && AsyncKind is not 0 && !isSimpleTransient) memberName = "Get" + memberName;
+                // El prefijo solo se anade a lo que de verdad se emite como metodo.
+                if (!isExternal && factory is null && isMethodShaped) memberName = "Get" + memberName;
 
                 if (!(memberName.Contains("Async") || memberName.Contains("Task")) && AsyncKind is not 0)
                     (memberName, fieldName) = (memberName + "Async", fieldName + "Task");
 
                 return (fieldName, memberName);
+
+                static bool HasGetPrefix(string value) =>
+                    value.Length > 3
+                    && value[0] is 'G' && value[1] is 'e' && value[2] is 't'
+                    && (char.IsUpper(value[3]) || char.IsDigit(value[3]));
             }
 
             string SanitizedTypeName()

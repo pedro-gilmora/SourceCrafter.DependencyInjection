@@ -50,7 +50,10 @@ public class ExportedTransientTests
         var exported = result.Source("Exported");
 
         exported.Should().Contain("public global::Probe.Leaf Leaf");
-        exported.Should().Contain("GetFarAsync");
+
+        // La declaracion, no el nombre suelto: el `_GetFarAsync` del autor tambien contiene
+        // "FarAsync" y haria pasar la asercion sin que exista el miembro.
+        exported.Should().Contain("Task<global::Probe.Far> FarAsync");
     }
 
     /// <summary>
@@ -66,7 +69,7 @@ public class ExportedTransientTests
 
         byDefault.Should().Contain("public global::Probe.Node Node");
         byDefault.Should().NotContain("public global::Probe.Leaf Leaf");
-        byDefault.Should().NotContain("GetFarAsync");
+        byDefault.Should().NotContain("Task<global::Probe.Far> FarAsync");
     }
 
     /// <summary>

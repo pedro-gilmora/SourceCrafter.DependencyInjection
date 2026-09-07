@@ -80,7 +80,7 @@ public class InterceptorRuntimeTests
 
 		// Si .Result leyera una tarea distinta de la que resolvio al elemento que lo cubre,
 		// estas identidades no coincidirian.
-		var alpha = await container.GetAlphaAsyncCached;
+		var alpha = await container.AlphaAsyncCached;
 
 		services[0].Should().BeSameAs(alpha);
 		services[1].Should().BeSameAs(await container.GetBetaAsync());

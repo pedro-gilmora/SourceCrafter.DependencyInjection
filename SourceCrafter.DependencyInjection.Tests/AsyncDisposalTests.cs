@@ -58,7 +58,7 @@ public class AsyncDisposalTests
 	{
 		var container = new HealthyContainer();
 
-		var resource = await container.GetAsyncCached;
+		var resource = await container.AsyncCached;
 
 		await container.DisposeAsync();
 
@@ -70,7 +70,7 @@ public class AsyncDisposalTests
 	{
 		var container = new FaultedContainer();
 
-		try { await container.GetAsyncCached; } catch (InvalidOperationException) { }
+		try { await container.AsyncCached; } catch (InvalidOperationException) { }
 
 		// Antes 'TryDisposeAsync' desenvolvia la tarea con GetResult()/await y relanzaba. En
 		// un 'await using' eso sustituye la excepcion real del bloque por esta.

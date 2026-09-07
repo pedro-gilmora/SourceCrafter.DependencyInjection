@@ -60,8 +60,8 @@ inside an existing one. The measurement agrees: `sequential + observe` is 1.26 �
 1.13 ± 0.55 for plain sequential, at identical allocation.
 
 ```csharp
-var __t0 = provider.GetFirstAsyncCached;
-var __t1 = provider.GetSecondAsyncCached;
+var __t0 = provider.FirstAsyncCached;
+var __t1 = provider.SecondAsyncCached;
 
 try
 {
@@ -89,7 +89,7 @@ tasks are started first; then only the elements that no other element already re
 awaited, and the rest read `.Result`:
 
 ```csharp
-var __t0 = provider.GetAlphaAsyncCached;
+var __t0 = provider.AlphaAsyncCached;
 var __t1 = provider.GetBetaAsync();
 var __t2 = provider.GetGammaAsync();
 var __r0 = await __t2;
@@ -195,10 +195,33 @@ Two details worth knowing:
   above or below the `[Transient<T>]` attributes.
 - The exported member follows the existing shape rules, so a sync transient becomes a property
   (`public Leaf Leaf => new Leaf();`) and an async factory becomes a property returning the
-  task (`public Task<Far> GetFarAsync => _GetFarAsync();`). That mirrors what cached services
-  already do — `GetAlphaAsyncCached` is a property today — but it means a property allocates on
-  every read, which the debugger will do on every step. Making transients method-shaped is an
+  task (`public Task<Far> FarAsync => _GetFarAsync();`). A property still allocates on every
+  read, which the debugger will do on every step; making transients method-shaped remains an
   open design question, not something this option decided.
+
+### Member naming
+
+The name of a resolver backed by a factory is derived from the author's method, so
+`_GetAlphaAsync` used to produce a **property** called `GetAlphaAsyncCached`. A `Get` prefix
+announces an operation, so it belongs on the members that really are methods.
+
+Two rules, both in `GetResolverName`:
+
+- A member that is not method-shaped never keeps a `^Get[A-Z0-9]` prefix; the first three
+  characters are dropped. The pattern requires the fourth character to be upper case or a
+  digit, so a factory named `_Gettysburg` keeps its name — "Get" there is a word, not a
+  prefix. The backing field is derived after the trim, so `_alphaAsyncCached` and
+  `AlphaAsyncCached` stay in step.
+- An explicit `nameFormat` wins over the factory name. It used to be overwritten
+  unconditionally, so the option was silently discarded for any registration carrying
+  `source:`.
+
+The trim is skipped when the author supplied `nameFormat`: a name they wrote is taken
+literally.
+
+Names derived from a factory bypass `methodsRegistry`, which is what de-duplicates names
+derived from the type. That was already true before the trim and remains a latent source of
+`CS0102` for unlucky combinations.
 
 ### Benchmarks
 
