@@ -294,4 +294,68 @@ internal static class ServiceContainerDiagnostics
 
         return Diagnostic.Create(rule, location, containerClassName);
     }
+
+    /// <summary>
+    /// Una fabrica asincrona debe declarar exactamente el tipo expuesto por el servicio.
+    /// <para>
+    /// No es una limitacion del generador sino de la plataforma: <c>Task&lt;T&gt;</c> y
+    /// <c>ValueTask&lt;T&gt;</c> son <b>invariantes</b>, asi que un <c>Task&lt;Impl&gt;</c> no
+    /// se convierte a <c>Task&lt;IService&gt;</c> aunque <c>Impl</c> implemente
+    /// <c>IService</c>. Sin este diagnostico la incompatibilidad no se detecta al analizar y
+    /// reaparece como un CS0029 dentro de codigo generado, que es donde peor se lee.
+    /// </para>
+    /// <para>
+    /// Salvarlo desde la generacion exigiria esperar y reenvolver el resultado, es decir una
+    /// maquina de estados o una asignacion extra por resolucion. Cambiar el tipo declarado de
+    /// la fabrica no cuesta nada y deja el codigo emitido como un paso directo.
+    /// </para>
+    /// </summary>
+    internal static Diagnostic AsyncFactoryMustDeclareServiceType(
+        Location location,
+        string factoryName,
+        string asyncTypeName,
+        string factoryTypeArgument,
+        string serviceTypeName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI16",
+            title: "Async factory must declare the service type as its task argument",
+            messageFormat: "Async factory '{0}' returns '{1}<{2}>' but the service is exposed as '{3}'. Declare it as '{1}<{3}>'.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            description: "Task<T> and ValueTask<T> are invariant, so Task<Implementation> is not convertible to Task<IService>. Declaring the exposed type on the factory keeps the generated resolver a direct pass-through instead of an extra await-and-rewrap."
+        );
+
+        return Diagnostic.Create(rule, location, factoryName, asyncTypeName, factoryTypeArgument, serviceTypeName);
+    }
+
+    /// <summary>
+    /// Dos parametros del mismo tipo de servicio sin forma de distinguirlos.
+    /// <para>
+    /// Se permite <b>uno</b> sin clave; a partir del segundo hay que desambiguar, bien
+    /// nombrando el parametro igual que una clave registrada, bien anotandolo con el atributo
+    /// de lifetime y clave que corresponda. Antes este caso no se diagnosticaba: los dos
+    /// parametros recibian en silencio el mismo servicio, o se emitia una referencia a un
+    /// local nunca declarado y salia un CS0103 dentro del codigo generado.
+    /// </para>
+    /// </summary>
+    internal static Diagnostic AmbiguousUnkeyedParameters(
+        Location location,
+        string parameterName,
+        string serviceTypeName,
+        string firstParameterName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI17",
+            title: "Ambiguous parameters of the same service type",
+            messageFormat: "Parameter '{0}' and '{2}' both resolve '{1}' with no key. Name '{0}' after a registered key, or annotate it with the matching lifetime attribute and key.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            description: "Only one parameter of a given service type may go unkeyed. Any further parameter of the same type must be disambiguated, otherwise the generator cannot tell which registration each one wants."
+        );
+
+        return Diagnostic.Create(rule, location, parameterName, serviceTypeName, firstParameterName);
+    }
 }

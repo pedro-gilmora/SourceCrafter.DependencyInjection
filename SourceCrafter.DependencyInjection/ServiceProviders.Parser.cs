@@ -370,6 +370,11 @@ internal partial class ServiceProviders
 
             Dictionary<int, HashSet<AsyncLocalResolver>> asyncParams = [];
 
+            // Un solo parametro por tipo de servicio puede quedarse sin clave. El segundo ya no
+            // tiene forma de distinguirse, asi que se registra aqui cual se llevo el comodin
+            // para poder senalar la pareja en el diagnostico.
+            Dictionary<string, string> unkeyedParamByType = [];
+
             foreach (var prm in prms)
             {
                 var paramIndex = paramPos++;
@@ -457,6 +462,29 @@ internal partial class ServiceProviders
                     {
                         if (hasNoCachedDeps && !foundService!.TransientWithoutCachedDeps)
                             hasNoCachedDeps = false;
+
+                        // El servicio se eligio por el comodin sin clave, no porque el nombre
+                        // del parametro casara con una. Eso solo es ambiguo si hay **varios**
+                        // registros compitiendo por ese tipo: con un unico candidato, dos
+                        // parametros pueden compartirlo sin que nada quede sin decidir.
+                        // Cuando si compiten, hasta ahora ambos recibian en silencio el mismo
+                        // servicio (o se emitia un local sin declarar, CS0103).
+                        if (foundServices.Count > 1 && foundService!.Key.key is "" && paramName is not "")
+                        {
+                            if (unkeyedParamByType.TryGetValue(paramFullTypeName, out var firstParamName))
+                            {
+                                diagnostics.Add(ServiceContainerDiagnostics.AmbiguousUnkeyedParameters(
+                                    prm.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancelToken).GetLocation()
+                                        ?? attrSyntax.GetLocation(),
+                                    paramName,
+                                    paramType.ToDisplayString(),
+                                    firstParamName));
+                            }
+                            else
+                            {
+                                unkeyedParamByType[paramFullTypeName] = paramName;
+                            }
+                        }
 
                         CreateParamResolverBuilder(foundService!);
                     }
@@ -883,6 +911,7 @@ internal partial class ServiceProviders
                         {
                             diagnostics.Add(ServiceContainerDiagnostics.FactoryReturnMismatch(factory!, interfaceType, factoryReturnType, attrSyntax));
                         }
+
                     }
 
                     if (count < diagnostics.Count)
@@ -900,6 +929,28 @@ internal partial class ServiceProviders
 
                 exportType ??= interfaceType ?? type!;
                 exportTypeFullName = interfaceFullTypeName ?? typeFullName;
+
+                // Task<T> y ValueTask<T> son invariantes: aunque la implementacion satisfaga la
+                // interfaz, Task<Impl> no se convierte a Task<IService>. Las comprobaciones de
+                // arriba aceptan el caso porque razonan sobre la relacion de herencia, que si se
+                // cumple; el fallo reaparece despues como CS0029 dentro del codigo generado, que
+                // es donde peor se lee. Se exige aqui que la fabrica asincrona declare ya el tipo
+                // expuesto, en vez de esperar y reenvolver en la emision (lo que costaria una
+                // maquina de estados o una asignacion extra por resolucion).
+                if (initialAsyncType is not AsyncKind.None
+                    && factoryReturnType is not null
+                    && exportType is not null
+                    && !SymbolEqualityComparer.Default.Equals(exportType, factoryReturnType))
+                {
+                    diagnostics.Add(ServiceContainerDiagnostics.AsyncFactoryMustDeclareServiceType(
+                        attrSyntax.GetLocation(),
+                        factory?.Name ?? factoryName ?? "?",
+                        initialAsyncType is AsyncKind.ValueTask ? "ValueTask" : "Task",
+                        factoryReturnType.ToDisplayString(),
+                        exportType.ToDisplayString()));
+
+                    return false;
+                }
 
                 if (!(isValid = exportType is not null && type is not null && attrClass is not null && _attrSyntax is not null)) return ReturnNotFound();
 
