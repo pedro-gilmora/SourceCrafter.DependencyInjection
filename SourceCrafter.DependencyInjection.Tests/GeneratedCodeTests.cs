@@ -130,6 +130,18 @@ public class GeneratedCodeTests
         slowPath[lockIndex..].Should().NotContain("Wrapper");
     }
 
+    [Fact]
+    public void TheScopeTypeIsSealed()
+    {
+        var code = GeneratorHarness.Run(SingletonAndScopedContainer).Source("Container");
+
+        // No es cosmetico. Con 'Scoped' abierta el JIT no puede devirtualizar Dispose/Root/
+        // CreateScope y recurre a devirtualizacion especulativa guiada por perfil, que acierta
+        // de forma intermitente: medido en ScopeShapeBenchmark, 7,94 ns con desviacion tipica
+        // de 1,898 ns (distribucion multimodal) frente a 3,49 ns y 0,053 ns al sellarla.
+        code.Should().Contain("public sealed class Scoped");
+    }
+
     static string Between(string text, string start, string end)
     {
         var from = text.IndexOf(start, System.StringComparison.Ordinal);

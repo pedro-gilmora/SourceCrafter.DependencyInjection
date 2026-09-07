@@ -188,6 +188,14 @@ internal partial class ServiceProviders
 
 			if (scopedMembers.Count > 0)
 			{
+				// 'Scoped' se sella. No es cosmetico: mientras la clase quedaba abierta, el JIT
+				// no podia devirtualizar Dispose/Root/CreateScope sobre ella y recurria a
+				// devirtualizacion especulativa guiada por perfil, que unas veces acierta y
+				// otras no. Medido en ScopeShapeBenchmark, un ciclo completo de ambito baja de
+				// 7,94 ns a 3,49 ns (2,3x) y la desviacion tipica de 1,898 ns a 0,053 ns: la
+				// distribucion dejaba de ser unimodal justamente por ese fallo intermitente.
+				// Sellar no quita ninguna capacidad: nada puede heredar de un tipo anidado
+				// que el generador emite entero.
 				code.Append(@"
 	private ").Append(typeName).Append(@" _root = default!;
 
@@ -195,7 +203,7 @@ internal partial class ServiceProviders
 
 	public virtual Scoped CreateScope() => new() { _root = this };
 
-	public class Scoped : ").Append(typeName).Append(@"
+	public sealed class Scoped : ").Append(typeName).Append(@"
 	{
 		public override ").Append(typeName).Append(@" Root => _root;
 
