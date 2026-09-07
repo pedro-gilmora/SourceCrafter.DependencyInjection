@@ -628,6 +628,18 @@ Several things in that output are deliberate and worth calling out:
   still start tasks inside the guarded region, so they do not satisfy the hoisting condition.
   Mixing the two schemes is safe precisely because the synchronous side hoists: whoever holds
   `this` is not waiting on anything else, so no cycle can close.
+- **Those locks are created through a shared `__EnsureLock` helper.** It uses
+  `Interlocked.CompareExchange` rather than `??=`, which expands to read-check-write and is
+  not atomic: two threads could end up with different locks and therefore no mutual exclusion
+  at all. The helper lives in a single generated file per compilation (`Locks.g.cs`) and each
+  container reaches it through `using static`. Emitting it inside every container duplicated an
+  identical body — the lock type is decided per *compilation*, not per container — and put
+  twelve lines of plumbing at the head of every generated file. It is deliberately **not**
+  generic: generics only specialize per type for value types, so with reference types the
+  shared canonical body cannot emit `newobj` and `new T()` becomes
+  `Activator.CreateInstance<T>()` (measured 18–20 ms against 13–14 ms over two million
+  creations), and it would buy nothing anyway, since `object` and `Lock` never coexist in one
+  compilation.
 - **The cached fast path reads the field into a local; the `lock` lives in a separate
   `[MethodImpl(NoInlining)]` method.** With the `lock` inside the getter, the getter carries a
   protected region and the JIT stops inlining it — 0.83 ns against 0.56 ns once split. The

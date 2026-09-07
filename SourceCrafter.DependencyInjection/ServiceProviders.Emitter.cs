@@ -70,6 +70,7 @@ internal partial class ServiceProviders
             Dictionary<string, byte> uniqueNames,
             Dictionary<FirstLevelDependencyKey, Interceptor> interceptors,
             ref bool addTasksExtensions,
+            ref string? ensureLockType,
             ref int interceptorsCount,
             out string fileName,
             out string codeStr)
@@ -110,6 +111,10 @@ internal partial class ServiceProviders
 
 ");
             }
+
+            // Tiene que ir aqui, con el resto de directivas: 'using static' no se admite una
+            // vez abierta la declaracion de espacio de nombres.
+            DeclareEnsureLockHelper(code, ctx, ref ensureLockType);
 
             if (nameSpace is { } ns)
             {
@@ -186,8 +191,6 @@ internal partial class ServiceProviders
 			}
 
 			AppendConstructor(code, ctx, usesLifetimeToken);
-
-			AppendEnsureLockHelper(code, ctx);
 
 			AppendSingletonLock(code, ctx);
 
@@ -480,58 +483,29 @@ public static class ").Append(typeName).Append(@"Extensions
         }
 
         /// <summary>
-        /// Crea un candado de instancia la primera vez que se necesita.
+        /// Declara que este contenedor necesita el ayudante compartido <c>__EnsureLock</c> y
+        /// emite el <c>using static</c> que lo trae al ambito. El cuerpo ya no se emite aqui:
+        /// vive en un unico archivo por compilacion, porque era identico en cada contenedor y
+        /// ensuciaba la cabecera de todos sus archivos generados.
         /// <para>
-        /// Se usa <c>Interlocked.CompareExchange</c> y no <c>??=</c>: este ultimo se expande
-        /// a leer-comprobar-escribir, que no es atomico, y dos hilos pueden acabar con
-        /// candados distintos y por tanto sin exclusion alguna.
+        /// Se propaga el <b>tipo</b> del candado, no una bandera: el archivo compartido lo
+        /// necesita para declararse, y <see cref="SupportsDedicatedLockType"/> lo decide por
+        /// compilacion, asi que todos los contenedores coinciden. <c>null</c> significa que
+        /// ningun contenedor lo necesita y el archivo no se emite.
         /// </para>
         /// <para>
-        /// El camino rapido de cada resolver (<c>if (_x is not null) return _x;</c>) no llega
-        /// aqui, asi que el coste en caliente es cero; a cambio, crear un ambito deja de
-        /// pagar un candado por cada servicio scoped declarado.
-        /// </para>
-        /// <para>
-        /// Se emite una copia por contenedor y con el tipo de candado <b>concreto</b>, en vez
-        /// de una unica copia generica en el archivo compartido. Generico no valdria la pena:
-        /// <see cref="SupportsDedicatedLockType"/> decide el tipo por <i>compilacion</i>, asi
-        /// que <c>object</c> y <c>Lock</c> nunca conviven y el parametro de tipo tendria
-        /// siempre un unico argumento real.
-        /// </para>
-        /// <para>
-        /// Y costaria. Un generico no produce una copia por tipo salvo con tipos de valor: con
-        /// tipos de referencia el runtime comparte un unico cuerpo canonico, que al no conocer
-        /// el tipo concreto no puede emitir <c>newobj</c>. En el IL, <c>new T()</c> bajo
-        /// <c>where T : class, new()</c> se traduce a <c>call Activator.CreateInstance&lt;T&gt;()</c>
-        /// mientras que la version concreta emite <c>newobj Lock..ctor</c>. Medido sobre dos
-        /// millones de creaciones, 18-20 ms frente a 13-14 ms. Es camino frio -una vez por campo-
-        /// asi que apenas se nota, pero es peor a cambio de nada.
-        /// </para>
-        /// <para>
-        /// Centralizarlo <i>sin</i> generico si seria viable, pero solo ahorra estas pocas lineas
-        /// por contenedor <b>adicional</b>: con uno solo, que es el caso normal, el ahorro es cero
-        /// y a cambio hay que arrastrar la fontaneria del archivo compartido.
+        /// Se trae con <c>using static</c> en vez de cualificar cada llamada: el ayudante
+        /// aparece dentro de un <c>lock(...)</c> por cada resolver asincrono cacheado, y
+        /// cualificarlos costaria mas texto del que ahorra centralizar el cuerpo.
         /// </para>
         /// </summary>
-        static void AppendEnsureLockHelper(StringBuilder code, ContainerRenderContext ctx)
+        static void DeclareEnsureLockHelper(StringBuilder code, ContainerRenderContext ctx, ref string? ensureLockType)
         {
             if (ctx.InstanceLockFields.Count == 0) return;
 
-            var lockType = ctx.InstanceLockTypeName;
+            ensureLockType ??= ctx.InstanceLockTypeName;
 
-            code.Append(@"
-    private static ").Append(lockType).Append(' ').Append(ResolverRenderer.EnsureLockMethodName)
-                .Append("(ref ").Append(lockType).Append(@"? location)
-    {
-        var current = global::System.Threading.Volatile.Read(ref location);
-
-        if (current is not null) return current;
-
-        var created = new ").Append(lockType).Append(@"();
-
-        return global::System.Threading.Interlocked.CompareExchange(ref location, created, null) ?? created;
-    }
-");
+            code.Append("using static global::SourceCrafter.DependencyInjection.Extensions.Locks;\n\n");
         }
 
         /// <summary>
