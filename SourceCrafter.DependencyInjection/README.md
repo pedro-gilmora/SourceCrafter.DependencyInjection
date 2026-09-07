@@ -183,6 +183,14 @@ public class AppSettings
 | `[JsonSetting<T>(section)]` | Config | Static | Maps a setting section loaded from `appsettings.json` |
 | `[Scoped(name, source: Method)]` | Per instance | Instance | Named factory-produced services |
 
+#### `[ServiceProvider]` options
+
+| Option | Default | Effect |
+|--------|---------|--------|
+| `envName` | `"DOTNET_ENVIRONMENT"` | Environment variable backing `EnvironmentName` |
+| `genericApi` | `false` | Emit the generic, MEDI-shaped surface (`GetRequiredService<T>()` and friends) |
+| `exportTransients` | `false` | Give dependency-less transients a named member, so other assemblies can resolve them |
+
 ### Key Behaviors
 
 **Factory Method Caching**: Any `Task<T>` or `ValueTask<T>` used as a factory is cached even in transient scenarios to prevent redundant async work.
@@ -264,6 +272,24 @@ The plural, un-keyed overload (`GetRequiredServices<T>()` and its async form) is
 even when *every* registration of that type carries a key, and it returns all of them. A
 call site that asks for "every service of this type" is not asking about keys, and the
 interception already collects the keyed resolvers for it.
+
+### Exporting dependency-less transients
+
+A transient with no dependencies is built straight at the call site (`new Leaf()`), so by
+default it gets no named member on the container. That is the fastest shape, but it makes the
+service unreachable from *another assembly*: interception is per-compilation, so a consumer's
+call sites are never rewritten and the generic API falls back to a stub that throws.
+
+Opt in when your container is part of a library's public surface:
+
+```csharp
+[ServiceProvider(exportTransients: true)]
+[Transient<Leaf>]
+public partial class AppContainer { }
+```
+
+Consumers can then use `container.Leaf`. Inlining is unaffected: inside the declaring
+compilation the call site still builds the instance in place.
 
 ### IServiceProvider-like Interception
 

@@ -161,6 +161,45 @@ The generator creates:
    - Automatic tracking of disposable dependencies
    - Proper disposal order in `DisposeAsync()` / `Dispose()`
 
+### Why dependency-less transients are invisible by default
+
+A transient whose factory takes no parameters is a *simple transient*: the parser short-circuits
+in `TryRegisterService` and never registers a member builder, so the container exposes nothing
+for it. The interceptor emits `new Leaf()` straight at the call site, which is strictly faster
+than routing through a member.
+
+The cost is a real hole rather than a cosmetic one. Interception is scoped to the compilation
+that runs the generator: `[InterceptsLocation]` refers to syntax trees of *that* compilation, so
+a consumer in another assembly is never rewritten. Verified with two projects — a library
+declaring `[Singleton<Node>] [Transient<Leaf>]`, and a consumer referencing only the library:
+
+| call from the consumer | result |
+|---|---|
+| `c.Node` | resolves |
+| `c.Leaf` | **CS1061** — the member does not exist |
+| `c.GetRequiredService<Leaf>()` | compiles, then throws **`NotImplementedException`** at run time |
+
+Every other registration has a named member as its safety net; the simple transient was the
+only one without, and its failure mode was the worst of the three.
+
+`exportTransients: true` registers the member builder in that early exit. It does **not** touch
+inlining: `TransientWithoutCachedDeps` still holds, so call sites inside the declaring
+compilation keep building the instance in place, and the member exists purely for outside
+consumers.
+
+Two details worth knowing:
+
+- The option is read in a pre-pass over the type's attributes, before any service is
+  registered. It used to be read lazily from inside the same loop that registers services,
+  which would have made the result depend on whether the author wrote `[ServiceProvider]`
+  above or below the `[Transient<T>]` attributes.
+- The exported member follows the existing shape rules, so a sync transient becomes a property
+  (`public Leaf Leaf => new Leaf();`) and an async factory becomes a property returning the
+  task (`public Task<Far> GetFarAsync => _GetFarAsync();`). That mirrors what cached services
+  already do — `GetAlphaAsyncCached` is a property today — but it means a property allocates on
+  every read, which the debugger will do on every step. Making transients method-shaped is an
+  open design question, not something this option decided.
+
 ### Benchmarks
 
 Measured against every actively maintained compile-time DI container, following the

@@ -46,7 +46,8 @@ internal partial class ServiceProviders
         bool
             hasScopedDependencies = false,
             implementsServiceProvider = providerType.AllInterfaces.Any(i => i.FullGlobalQualifiedName == "global::System.IServiceProvider"),
-            genericApi = false;
+            genericApi = false,
+            exportTransients = false;
 
         // Si el usuario ya declara estos miembros en su parcial, el generador no los emite.
         var hasUserEnvironmentName =
@@ -96,6 +97,19 @@ internal partial class ServiceProviders
         };
 
         string envName = DefaultEnvName;
+
+        // Las opciones del contenedor se leen antes de registrar nada: `exportTransients`
+        // decide si un transient sin dependencias genera miembro, y el orden en que el
+        // usuario escriba los atributos no debe alterar el resultado. `envName` y
+        // `genericApi` solo se consumen despues del bucle, pero se leen aqui por coherencia.
+        foreach (var attr in attributes)
+        {
+            if (attr.AttributeClass?.FullGlobalQualifiedName is ServiceProviderAttr)
+            {
+                ReadContainerOptions(attr, cancelToken);
+                break;
+            }
+        }
 
         foreach (var attr in attributes)
         {
@@ -167,6 +181,9 @@ internal partial class ServiceProviders
                 if (attr.ConstructorArguments is [_, { Value: bool flag }, ..])
                     genericApi = flag;
 
+                if (attr.ConstructorArguments is [_, _, { Value: bool exportFlag }, ..])
+                    exportTransients = exportFlag;
+
                 return;
             }
 
@@ -200,6 +217,12 @@ internal partial class ServiceProviders
                     case "genericApi":
 
                         genericApi = model.GetConstantValue(arg.Expression, cancelToken) is { HasValue: true, Value: true };
+
+                        break;
+
+                    case "exportTransients":
+
+                        exportTransients = model.GetConstantValue(arg.Expression, cancelToken) is { HasValue: true, Value: true };
 
                         break;
                 }
@@ -359,6 +382,15 @@ internal partial class ServiceProviders
             if (isSimpleTransient)
             {
                 (backingFieldName, methodName) = GetResolverName();
+
+                // Un transient sin dependencias se inlinea en el call site y sale por aqui
+                // sin generar miembro. El problema es que entonces resulta *irresoluble*
+                // desde otro ensamblado: la interceptacion es por compilacion, y sin miembro
+                // con nombre la API generica cae en el stub que lanza. `exportTransients` lo
+                // expone sin tocar el inlinado, que se sigue aplicando dentro de la propia
+                // compilacion.
+                if (exportTransients && !isExternal) RegisterExposedMember();
+
                 //TryRegisterInterceptorMethod();
                 CommitRenderState();
                 return true;
@@ -662,14 +694,12 @@ internal partial class ServiceProviders
             }
 
 
-            if (!isExternal && (isCached || !isSimpleTransient))
-                dependencyMemberBuilders
-                    .TryAdd((lifetime, typeFullName, name),
-                        new(lifetime, exportTypeFullName, name, AsyncKind, disposability, nameOrFormat) 
-                        {
-                            RequiresCancelToken = needsCancelToken,
-                            BuildAndExpose = render.AppendMethod 
-                        });
+            // `isSimpleTransient` tambien puede activarse arriba, cuando todos los parametros
+            // se resolvieron a valores por defecto y no queda nada que componer. Vale el
+            // mismo razonamiento que en la salida temprana: se inlinea, y solo se expone si
+            // el autor lo pidio con `exportTransients`.
+            if (!isExternal && (isCached || !isSimpleTransient || exportTransients))
+                RegisterExposedMember();
 
             resolver.TransientWithoutCachedDeps = hasNoCachedDeps;
             resolver.AsyncKind = AsyncKind;
@@ -679,6 +709,18 @@ internal partial class ServiceProviders
             CommitRenderState();
 
             return true;
+
+            // Expone el resolver como miembro con nombre del contenedor. Se lee el estado en
+            // el momento de la llamada, no al declararla: las dos salidas lo invocan en
+            // puntos distintos y con valores distintos de disposability y AsyncKind.
+            void RegisterExposedMember() =>
+                dependencyMemberBuilders
+                    .TryAdd((lifetime, typeFullName, name),
+                        new(lifetime, exportTypeFullName, name, AsyncKind, disposability, nameOrFormat)
+                        {
+                            RequiresCancelToken = needsCancelToken,
+                            BuildAndExpose = render.AppendMethod
+                        });
 
             // Congela el estado del parser en un renderizador inmutable, ya proyectado a
             // cadenas, banderas y enumeraciones. Se invoca en cada salida exitosa,
@@ -719,16 +761,14 @@ internal partial class ServiceProviders
 
             bool IsValidServiceAttribute(AttributeData? attr, CancellationToken cancelToken)
             {
-                var isContainerAttr = false;
-
                 if (attr is not { AttributeClass: { } _attrClass, ApplicationSyntaxReference: { } attrSyntaxRef }
-                    || (isContainerAttr = _attrClass.FullGlobalQualifiedName is ServiceProviderAttr)
+                    // El atributo del contenedor no registra servicio; sus opciones ya se
+                    // leyeron en la pasada previa, antes de este bucle.
+                    || _attrClass.FullGlobalQualifiedName is ServiceProviderAttr
                     || attrSyntaxRef.GetSyntax(cancelToken) is not AttributeSyntax { } _attrSyntax
                     || !TryGetAttributeParamsDefinition(model.GetSymbolInfo(_attrSyntax, cancellationToken: cancelToken), out ImmutableArray<IParameterSymbol> attrParams)
                     || !TryGetLifetime(_attrSyntax, ref _attrClass, ref isExternal, out lifetime))
                 {
-                    if (isContainerAttr) ReadContainerOptions(attr!, cancelToken);
-
                     return false;
                 }
 
