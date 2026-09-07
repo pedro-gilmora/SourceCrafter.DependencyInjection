@@ -583,8 +583,12 @@ public static class ").Append(typeName).Append(@"Extensions
         {
             var key = (serviceCall.ReturnType, serviceCall.Key);
 
+            // Lo que decide si el elemento produce una tarea es el *resolvedor*, no el sitio
+            // de llamada. Con el AsyncKind del sitio, un registro sincrono dentro de un
+            // GetRequiredServicesAsync<T>() se marcaba como tarea y se emitia 'await' sobre
+            // un valor corriente (CS1061).
             var element = new InterceptorElement(
-                serviceCall.AsyncKind > 0,
+                resolver.AsyncKind > 0,
                 AppendDependency,
                 resolver.Key,
                 [.. resolver.AsyncLocalResolvers.Keys]);

@@ -711,7 +711,16 @@ internal sealed class ResolverRenderer
 
             internal void AppendValue(StringBuilder code, bool asyncContext = false, bool interceptorContext = false, string? newIndentedLine = null)
             {
-                if (!interceptorContext && !isCached && isFactory)
+                // Un resolver con forma de metodo no cabe en una expresion: su construccion
+                // necesita el prologo de locales '__vN' y sus 'await'. Inlinearlo emitia el
+                // 'new' suelto, con '__vN' sin declarar (CS0103), y ademas quien lo consumia
+                // trataba el objeto recien construido como si fuese la tarea (CS1061).
+                // Se llama al miembro, que si devuelve Task<T>.
+                if (IsMethodShaped)
+                {
+                    AppendCachedCaller(code, interceptorContext, newIndentedLine);
+                }
+                else if (!interceptorContext && !isCached && isFactory)
                 {
                     //if (asyncContext && AsyncKind is not 0) code.Append("await ");
 
