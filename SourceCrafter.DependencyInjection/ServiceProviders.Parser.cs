@@ -1135,11 +1135,19 @@ internal partial class ServiceProviders
             /// </summary>
             (string, string) GetResolverName()
             {
-                var memberName = nameOrFormat is not null
-                    ? string.Format(nameOrFormat, name.Pascalize()!).RemoveDuplicates()
+                var hasExplicitName = nameOrFormat is not null;
+
+                var memberName = hasExplicitName
+                    ? string.Format(nameOrFormat!, name.Pascalize()!).RemoveDuplicates()
                     : SanitizedTypeName();
 
-                memberName = (isExternal ? memberName : factory?.Name ?? memberName).TrimStart('_');
+                // Un nombre pedido explicitamente manda sobre el de la fabrica. Antes el
+                // nombre del metodo-fabrica lo pisaba siempre, asi que 'nameFormat' se
+                // descartaba en silencio en cuanto el registro traia 'source:'.
+                if (!hasExplicitName && !isExternal && factory is not null)
+                    memberName = factory.Name;
+
+                memberName = memberName.TrimStart('_');
 
                 if (factory is not null && isCached && !memberName.EndsWith("Cached") && !memberName.EndsWith("Cache"))
                     memberName += "Cached";
