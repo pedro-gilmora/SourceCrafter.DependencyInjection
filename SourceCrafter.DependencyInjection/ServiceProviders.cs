@@ -424,7 +424,7 @@ internal static class Extensions
             {
                 Parent: InvocationExpressionSyntax invocation,
                 Name: GenericNameSyntax { TypeArgumentList.Arguments: [{ } typeArgSyntax], Identifier.ValueText: { } methodName } method,
-                Expression: IdentifierNameSyntax { } refVar
+                Expression: { } receiver
             } memberAccess
         ) 
             
@@ -433,21 +433,56 @@ internal static class Extensions
         var model = gsc.SemanticModel;
 
         if (model.GetInterceptableLocation(invocation, cancellationToken) is not { } interceptor
-            || model.GetTypeInfo(typeArgSyntax, cancellationToken).Type is not ITypeSymbol { } depTypeResult
-            || model.GetSymbolInfo(refVar, cancellationToken).Symbol switch
+            || model.GetTypeInfo(typeArgSyntax, cancellationToken).Type is not ITypeSymbol { } depTypeResult)
+
+            return null!;
+
+        // El interceptor se emite como metodo de extension, asi que su 'this' admite cualquier
+        // expresion. Lo que decide si el sitio es interceptable es el **tipo** del receptor, no
+        // su forma sintactica: exigir un identificador simple dejaba fuera
+        // 'new Container().GetX()', 'Factory().GetX()' o 'this.field.GetX()', que caian en el
+        // stub que lanza en ejecucion.
+        ITypeSymbol type;
+        ISymbol? declaringRef = null;
+        bool isCtor;
+
+        if (receiver is IdentifierNameSyntax refVar
+            && model.GetSymbolInfo(refVar, cancellationToken).Symbol switch
             {
                 ILocalSymbol local => (local, local.Type),
                 IParameterSymbol parameter => (parameter, parameter.Type),
                 IFieldSymbol field => (field, field.Type),
                 IPropertySymbol property => (property, property.Type),
                 _ => (default(ISymbol)!, default(ITypeSymbol)!)
-            } is not ({ } _ref, var type)) 
-            
-            return null!;
+            } is ({ } _ref, { } declaredType))
+        {
+            // Un identificador declarado con 'var' sobre CreateScope(), o tipado como
+            // IServiceScope, no revela por si solo de que contenedor viene: hay que mirar su
+            // inicializador.
+            (declaringRef, type) = (_ref, declaredType);
+        }
+        else if (ReceiverType(model, receiver, cancellationToken) is { } receiverType)
+        {
+            type = receiverType;
+        }
+        else return null!;
 
         bool scopedInference = type.AsNonNullable().ToDisplayString().Equals("Microsoft.Extensions.DependencyInjection.IServiceScope");
 
-        (bool isCtor, type) = GetContainerSource(model, _ref, type, cancellationToken);
+        if (declaringRef is not null)
+        {
+            (isCtor, type) = GetContainerSource(model, declaringRef, type, cancellationToken);
+        }
+        else
+        {
+            // Una expresion se explica sola: si es una construccion, el receptor es la raiz
+            // recien creada y no puede venir de un ambito.
+            var bare = receiver;
+
+            while (bare is ParenthesizedExpressionSyntax { Expression: { } inner }) bare = inner;
+
+            isCtor = bare is ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax;
+        }
 
         var callContainerType = (type.Name is "Scoped" && type.ContainingType is not null
             ? type.ContainingType
@@ -492,6 +527,26 @@ internal static class Extensions
         };
     }
 
+    /// <summary>
+    /// Tipo del receptor de una llamada interceptable.
+    ///
+    /// <para>Durante el escaneo, los miembros que este mismo generador va a emitir todavia no
+    /// existen: <c>new Container().CreateScope()</c> no tiene tipo resoluble. El contenedor de
+    /// origen si lo tiene, asi que se retrocede al receptor de esa invocacion. Es la misma
+    /// razon por la que <see cref="GetContainerSource"/> mira el inicializador de una variable
+    /// en vez de su tipo declarado.</para>
+    /// </summary>
+    private static ITypeSymbol? ReceiverType(SemanticModel model, ExpressionSyntax expression, CancellationToken token)
+    {
+        while (expression is ParenthesizedExpressionSyntax { Expression: { } inner }) expression = inner;
+
+        if (model.GetTypeInfo(expression, token).Type is { TypeKind: not TypeKind.Error } resolved) return resolved;
+
+        return expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Expression: { } source } }
+            ? ReceiverType(model, source, token)
+            : null;
+    }
+
     private static (bool isCtor, ITypeSymbol finalType) GetContainerSource(SemanticModel model, ISymbol _ref, ITypeSymbol type, CancellationToken token)
     {
         foreach (var declaration in _ref.DeclaringSyntaxReferences.Reverse())
@@ -501,15 +556,11 @@ internal static class Extensions
                 case ObjectCreationExpressionSyntax or ImplicitObjectCreationExpressionSyntax:
                     return (true, type);
 
-                case InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax source } }:
-                    return (false, model.GetSymbolInfo(source, token).Symbol switch
-                    {
-                        ILocalSymbol local => local.Type,
-                        IParameterSymbol parameter => parameter.Type,
-                        IFieldSymbol field => field.Type,
-                        IPropertySymbol property => property.Type,
-                        _ => type,
-                    });
+                case InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Expression: { } source } }:
+                    // El receptor de la invocacion que produjo la variable puede ser a su vez
+                    // cualquier expresion ('new Container().CreateScope()'), no solo un
+                    // identificador.
+                    return (false, ReceiverType(model, source, token) ?? type);
             }
         }
         return (false, type);
