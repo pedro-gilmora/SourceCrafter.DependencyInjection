@@ -466,6 +466,22 @@ hand-written variants of the same already-built service (`ResolverShapeBenchmark
 The slow path is only ever entered on the first resolution, so it costs nothing per call
 afterwards.
 
+The **async** fast path used to be exempt from that rule, and it was a bug rather than an
+optimisation. It read the field twice — `if(_f is { IsCompletedSuccessfully: true }) return _f;`
+— while the disposer sets `_f = null`. A thread disposing between the two reads made a member
+declared `Task<T>` hand back `null`, and its `ValueTask<T>?` variant throw from the `.Value`.
+Roslyn's nullable analysis never flagged it because pattern matching a field narrows its flow
+state on the assumption that nothing else writes it. The race is cheap to hit: a reader thread
+against a disposer thread observed roughly 4·10⁶ nulls in three seconds, in Debug *and* in
+Release, on the real generated container. All three cached shapes — property, `ValueTask`
+property and method — now read into `__v` first, and `AsyncFastPathTests` covers both the
+emitted text and the race.
+
+One hazard the local does not remove: a `ValueTask<T>?` backing field is a multi-field struct,
+so writing it is not atomic and a concurrent reader can in principle observe a torn copy. The
+local narrows this to the copy itself instead of spreading it across the null check and the
+unwrap, but closing it entirely would mean publishing a reference instead of the struct.
+
 #### What Pure.DI does differently, and what was worth taking
 
 The disassembly above also answers "what makes Pure.DI fast at singletons" better than any

@@ -404,10 +404,18 @@ internal sealed class ResolverRenderer
 							//
 							// La asignacion es '=' y no '??=' precisamente para sobrescribir la
 							// tarea fallida; por eso tampoco hace falta anular el campo antes.
+							// El campo se lee una sola vez, a un local, por el mismo motivo que en
+							// el camino sincrono: el liberador hace '<campo> = null', asi que entre
+							// dos lecturas separadas la segunda puede ver null y este miembro, que
+							// no es nulable, devolveria null (o lanzaria en el '.Value' de un
+							// ValueTask cacheado). El analisis de nulabilidad no lo ve porque
+							// asume que nadie mas escribe el campo.
 							code.Append(@"
 		get
 		{
-			if(").Append(backingFieldName).Append(@" is { IsCompletedSuccessfully: true }) return ").Append(backingFieldName);
+			var __v = ").Append(backingFieldName).Append(@";
+
+			if(__v is { IsCompletedSuccessfully: true }) return __v");
 
 							if (unwraps) code.Append(".Value");
 
@@ -469,8 +477,11 @@ internal sealed class ResolverRenderer
 
 						if (isCached)
 						{
+							// Una sola lectura del campo, como en el resto de caminos rapidos.
 							code.Append(@"
-		if(").Append(backingFieldName).Append(@" is { IsCompletedSuccessfully: true }) return ").Append(backingFieldName);
+		var __v = ").Append(backingFieldName).Append(@";
+
+		if(__v is { IsCompletedSuccessfully: true }) return __v");
 
 							if (AsyncKind is AsyncKind.ValueTask) code.Append(".Value");
 
