@@ -404,22 +404,21 @@ internal sealed class ResolverRenderer
 							//
 							// La asignacion es '=' y no '??=' precisamente para sobrescribir la
 							// tarea fallida; por eso tampoco hace falta anular el campo antes.
-							// El campo se lee una sola vez, a un local, por el mismo motivo que en
-							// el camino sincrono: el liberador hace '<campo> = null', asi que entre
-							// dos lecturas separadas la segunda puede ver null y este miembro, que
-							// no es nulable, devolveria null (o lanzaria en el '.Value' de un
+							// El campo se lee una sola vez, por el mismo motivo que en el camino
+							// sincrono: el liberador hace '<campo> = null', asi que entre dos
+							// lecturas separadas la segunda puede ver null y este miembro, que no
+							// es nulable, devolveria null (o lanzaria en el '.Value' de un
 							// ValueTask cacheado). El analisis de nulabilidad no lo ve porque
 							// asume que nadie mas escribe el campo.
+							//
+							// La designacion del patron ('is { ... } __v') basta: el IL carga el
+							// campo una sola vez y ademas deja el valor ya desenvuelto, asi que un
+							// campo 'ValueTask<T>?' no necesita '.Value' -- una llamada a
+							// 'get_Value()' que puede lanzar.
 							code.Append(@"
 		get
 		{
-			var __v = ").Append(backingFieldName).Append(@";
-
-			if(__v is { IsCompletedSuccessfully: true }) return __v");
-
-							if (unwraps) code.Append(".Value");
-
-							code.Append(@";
+			if(").Append(backingFieldName).Append(@" is { IsCompletedSuccessfully: true } __v) return __v;
 
 			lock(").Append(LockExpression).Append(@")
 			{
@@ -477,15 +476,11 @@ internal sealed class ResolverRenderer
 
 						if (isCached)
 						{
-							// Una sola lectura del campo, como en el resto de caminos rapidos.
+							// Una sola lectura del campo, como en el resto de caminos rapidos. La
+							// designacion desenvuelve el 'ValueTask<T>?', asi que no hace falta
+							// '.Value'.
 							code.Append(@"
-		var __v = ").Append(backingFieldName).Append(@";
-
-		if(__v is { IsCompletedSuccessfully: true }) return __v");
-
-							if (AsyncKind is AsyncKind.ValueTask) code.Append(".Value");
-
-							code.Append(';');
+		if(").Append(backingFieldName).Append(@" is { IsCompletedSuccessfully: true } __v) return __v;");
 						}
 
 						{

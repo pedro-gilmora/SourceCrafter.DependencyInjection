@@ -36,6 +36,10 @@ public partial class RacedContainer
 /// declarado no nulable devuelva <c>null</c> — y, en la variante <c>ValueTask</c>, que el
 /// <c>.Value</c> lance <see cref="InvalidOperationException"/>. El analisis de nulabilidad
 /// de Roslyn no lo detecta porque da por hecho que nadie mas escribe el campo.</para>
+///
+/// <para>La forma actual usa la designacion del patron, <c>is { ... } __v</c>: el IL carga
+/// el campo una sola vez y ademas deja el valor ya desenvuelto, asi que la variante
+/// <c>ValueTask</c> no necesita <c>.Value</c>.</para>
 /// </summary>
 public class AsyncFastPathTests
 {
@@ -65,30 +69,30 @@ public class AsyncFastPathTests
 	{
 		var code = GeneratorHarness.Run(AsyncCachedContainer).Source("Container");
 
-		code.Should().Contain("var __v = _depAsyncCached;");
-		code.Should().Contain("if(__v is { IsCompletedSuccessfully: true }) return __v;");
-		code.Should().NotContain("if(_depAsyncCached is { IsCompletedSuccessfully: true })");
+		code.Should().Contain("if(_depAsyncCached is { IsCompletedSuccessfully: true } __v) return __v;");
+		code.Should().NotContain("if(__v is { IsCompletedSuccessfully: true }) return _depAsyncCached");
 	}
 
 	/// <summary>
 	/// El campo de un <c>ValueTask</c> cacheado es <c>ValueTask&lt;T&gt;?</c>. Con dos
 	/// lecturas se llegaba a comprobar el <c>HasValue</c> de una y desenvolver el
-	/// <c>Value</c> de otra.
+	/// <c>Value</c> de otra. La designacion entrega el valor ya desenvuelto, asi que el
+	/// <c>.Value</c> — una llamada que puede lanzar — desaparece del camino rapido.
 	/// </summary>
 	[Fact]
-	public void TheValueTaskVariantUnwrapsTheLocalAndNotTheField()
+	public void TheValueTaskVariantNeedsNoValueCallInTheFastPath()
 	{
 		var code = GeneratorHarness.Run(AsyncCachedContainer).Source("Container");
 
-		code.Should().Contain("var __v = _plainAsyncCached;");
-		code.Should().Contain("if(__v is { IsCompletedSuccessfully: true }) return __v.Value;");
+		code.Should().Contain("if(_plainAsyncCached is { IsCompletedSuccessfully: true } __v) return __v;");
 		code.Should().NotContain("return _plainAsyncCached.Value;");
+		code.Should().NotContain("return __v.Value;");
 	}
 
 	/// <summary>
 	/// Los resolvers asincronos que componen dependencias salen como metodo y tienen su
-	/// propio camino rapido, con el mismo defecto. El local <c>__v</c> no choca con los
-	/// <c>__v0</c>, <c>__v1</c>... de las dependencias izadas.
+	/// propio camino rapido, con el mismo defecto. La designacion <c>__v</c> no choca con
+	/// los <c>__v0</c>, <c>__v1</c>... de las dependencias izadas.
 	/// </summary>
 	[Fact]
 	public void TheMethodShapedAsyncFastPathAlsoReadsTheBackingFieldOnlyOnce()
@@ -96,8 +100,7 @@ public class AsyncFastPathTests
 		var result = GeneratorHarness.Run(AsyncCachedContainer);
 		var code = result.Source("Container");
 
-		code.Should().Contain("var __v = _composedTask;");
-		code.Should().Contain("if(__v is { IsCompletedSuccessfully: true }) return __v;");
+		code.Should().Contain("if(_composedTask is { IsCompletedSuccessfully: true } __v) return __v;");
 		code.Should().Contain("var __v0 = DepAsyncCached;");
 
 		result.Errors.Should().BeEmpty();
