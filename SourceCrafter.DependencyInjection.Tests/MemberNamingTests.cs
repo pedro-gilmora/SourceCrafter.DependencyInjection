@@ -139,4 +139,134 @@ public class MemberNamingTests
         result.Errors.Should().BeEmpty();
         result.Source("Wordy").Should().Contain("GettysburgCachedAsync");
     }
+
+    /// <summary>
+    /// El nombre derivado de una fabrica no pasaba por el registro de nombres, asi que podia
+    /// pisar a uno derivado del tipo. Quitar el prefijo <c>Get</c> agrando esa exposicion:
+    /// una fabrica <c>_GetFar</c> pasa a llamarse <c>Far</c>, que es justo el nombre que le
+    /// toca a un <c>[Transient&lt;Far&gt;]</c>. El contenedor no compilaba (CS0102).
+    /// </summary>
+    [Fact]
+    public void AFactoryDerivedNameDoesNotCollideWithATypeDerivedOne()
+    {
+        var result = GeneratorHarness.Run("""
+            using SourceCrafter.DependencyInjection.Attributes;
+
+            namespace Probe;
+
+            public sealed class Far { }
+            public sealed class Near { }
+
+            [ServiceProvider(exportTransients: true)]
+            [Transient<Far>]
+            [Transient<Near>(source: nameof(_GetFar))]
+            public partial class Colliding
+            {
+                private static Near _GetFar() => new Near();
+            }
+            """);
+
+        result.Errors.Should().BeEmpty();
+
+        var code = result.Source("Colliding");
+
+        code.Should().Contain("global::Probe.Far Far");
+        code.Should().Contain("global::Probe.Near Far1");
+    }
+
+    /// <summary>
+    /// La escalera prueba primero el nombre del tipo, pero en cuanto hay clave el desempate lo
+    /// hace la clave y no el lifetime: si no, dos registros del mismo tipo saldrian como
+    /// <c>Db</c> y <c>SingletonDb</c>, sin rastro de cual es cual.
+    /// </summary>
+    [Fact]
+    public void TheKeyDisambiguatesRegistrationsOfTheSameType()
+    {
+        var result = GeneratorHarness.Run("""
+            using SourceCrafter.DependencyInjection.Attributes;
+
+            namespace Probe;
+
+            public interface IDb { }
+            public sealed class Db : IDb { }
+
+            [ServiceProvider]
+            [Singleton<IDb, Db>("read")]
+            [Singleton<IDb, Db>("write")]
+            [Singleton<IDb, Db>("admin")]
+            public partial class Keyed { }
+            """);
+
+        result.Errors.Should().BeEmpty();
+
+        var code = result.Source("Keyed");
+
+        // El primero no necesita distincion; los dos siguientes se la ganan.
+        code.Should().Contain("global::Probe.IDb Db\r\n");
+        code.Should().Contain("global::Probe.IDb DbWrite");
+        code.Should().Contain("global::Probe.IDb DbAdmin");
+        code.Should().NotContain("SingletonDb");
+    }
+
+    /// <summary>
+    /// <c>nameFormat</c> admite marcadores con nombre ademas del <c>{0}</c> historico, que
+    /// sigue siendo la clave.
+    /// </summary>
+    [Fact]
+    public void NameFormatAcceptsLifetimeKeyAndTypePlaceholders()
+    {
+        var result = GeneratorHarness.Run("""
+            using SourceCrafter.DependencyInjection.Attributes;
+
+            namespace Probe;
+
+            public sealed class Thing { }
+            public sealed class Other { }
+
+            [ServiceProvider]
+            [Scoped<Thing>("main", nameFormat: "{lifetime}{key}{tipo}")]
+            [Scoped<Other>("aux", nameFormat: "The{type}For{key}")]
+            public partial class Formatted { }
+            """);
+
+        result.Errors.Should().BeEmpty();
+
+        var code = result.Source("Formatted");
+
+        code.Should().Contain("global::Probe.Thing ScopedMainThing");
+        code.Should().Contain("global::Probe.Other TheOtherForAux");
+
+        // El campo sigue al miembro.
+        code.Should().Contain("_scopedMainThing");
+        code.Should().Contain("_theOtherForAux");
+    }
+
+    /// <summary>
+    /// Un nombre pedido dos veces tiene que seguir produciendo un contenedor que compile. El
+    /// ultimo peldano de la escalera es un contador en base 1.
+    /// </summary>
+    [Fact]
+    public void ARepeatedExplicitNameFallsBackToACounter()
+    {
+        var result = GeneratorHarness.Run("""
+            using SourceCrafter.DependencyInjection.Attributes;
+
+            namespace Probe;
+
+            public sealed class A { }
+            public sealed class B { }
+
+            [ServiceProvider]
+            [Scoped<A>(nameFormat: "Same")]
+            [Scoped<B>(nameFormat: "Same")]
+            public partial class Repeated { }
+            """);
+
+        result.Errors.Should().BeEmpty();
+
+        var code = result.Source("Repeated");
+
+        code.Should().Contain("global::Probe.A Same\r\n");
+        code.Should().Contain("global::Probe.B Same1");
+    }
 }

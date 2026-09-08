@@ -242,8 +242,10 @@ public class InterceptorCacheTests
 
 		var code = result.Source("Container");
 
-		code.Should().Contain("provider.Svc,");
-		code.Should().Contain("provider.SvcBeta,");
-		code.Should().Contain("provider.SvcGamma]");
+		// La escalera de nombres prueba primero el tipo de implementacion, que aqui ya
+		// distingue a los tres, asi que la clave no llega a hacer falta.
+		code.Should().Contain("provider.Alpha,");
+		code.Should().Contain("provider.Beta,");
+		code.Should().Contain("provider.Gamma]");
 	}
 }

@@ -84,8 +84,8 @@ public class InlinedTransientTests
 
 		var code = result.Source("Container");
 
-		code.Should().Contain("var __t0 = provider.GetAAsync();");
-		code.Should().Contain("var __t1 = provider.GetBAsync();");
+		code.Should().Contain("var __t0 = provider.GetHandlerAAsync();");
+		code.Should().Contain("var __t1 = provider.GetHandlerBAsync();");
 
 		// El interceptor delega; el 'new' solo puede aparecer dentro del miembro, que si
 		// declara los locales que necesita.

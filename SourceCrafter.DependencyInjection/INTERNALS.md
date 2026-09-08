@@ -219,9 +219,56 @@ Two rules, both in `GetResolverName`:
 The trim is skipped when the author supplied `nameFormat`: a name they wrote is taken
 literally.
 
-Names derived from a factory bypass `methodsRegistry`, which is what de-duplicates names
-derived from the type. That was already true before the trim and remains a latent source of
-`CS0102` for unlucky combinations.
+#### The ladder, and why nothing bypasses it
+
+`methodsRegistry` is what keeps two members from claiming the same name. It used to be fed
+from one place only — the type-derived branch — and it reserved the name *before* the
+decorations (`Cached`, `Async`, the `Get` prefix) were applied. So a name derived from a
+factory or requested through `nameFormat` never entered it at all, and even a reserved name
+was emitted in a shape nobody had reserved.
+
+The `Get` trim widened that hole into a reproducible one: a factory named `_GetFar` now
+resolves to `Far`, which is exactly the name a `[Transient<Far>]` claims, and the container
+failed to compile with `CS0102: already contains a definition for 'Far'`.
+
+Reservation now happens on the **final** name, on every route, and covers the backing field
+too — a method `GetX` and a property `X` both derive `_x`, so checking only the member would
+let a field collision through. Distinctions are added only when they are needed, cheapest
+first:
+
+| | Candidates, in order |
+|---|---|
+| No key | `{type}`, `{lifetime}{type}` |
+| With key | `{type}`, `{type}{key}`, `{lifetime}{key}`, `{lifetime}{key}{type}` |
+| Anything still taken | `…{n}`, counting from 1 |
+
+`{lifetime}{type}` is deliberately absent from the keyed ladder. With it, two registrations of
+the same type separated only by a key came out as `Db` and `SingletonDb`: the key vanished
+from both names and declaration order decided which was which. Without it they are `Db` and
+`DbWrite`.
+
+Trying the type before the key is a behaviour change for keyed registrations, and it reads
+better wherever the implementation types already differ: three `[Singleton<IService, X>("svc")]`
+registrations used to be `Svc`, `SvcBeta`, `SvcGamma`, and are now `Alpha`, `Beta`, `Gamma`.
+
+A name the author asked for is never renamed away — but it is numbered rather than duplicated,
+so asking for the same `nameFormat` twice yields `Same` and `Same1` instead of a container that
+does not compile. A diagnostic would be friendlier than a silent counter here, and is the
+obvious follow-up.
+
+#### `nameFormat` placeholders
+
+Besides the historical `{0}`, which is the key, the format understands `{lifetime}`, `{key}`
+and `{type}` (`{tipo}` is accepted as well):
+
+```csharp
+[Scoped<Thing>("main", nameFormat: "{lifetime}{key}{type}")]  // ScopedMainThing
+[Scoped<Other>("aux",  nameFormat: "The{type}For{key}")]      // TheOtherForAux
+```
+
+Named placeholders are substituted before `string.Format` runs, and `string.Format` is only
+invoked when `{0}` is actually present — it throws on a stray brace, and there is no longer any
+reason to run that risk.
 
 ### Benchmarks
 

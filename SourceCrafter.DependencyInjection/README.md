@@ -191,6 +191,32 @@ public class AppSettings
 | `genericApi` | `false` | Emit the generic, MEDI-shaped surface (`GetRequiredService<T>()` and friends) |
 | `exportTransients` | `false` | Give dependency-less transients a named member, so other assemblies can resolve them |
 
+#### How generated members are named
+
+Every registration becomes a member on the container. The generator takes the shortest name
+that is still free and only adds a distinction when it has to:
+
+| | Tried in order |
+|---|---|
+| No key | `{type}`, `{lifetime}{type}` |
+| With key | `{type}`, `{type}{key}`, `{lifetime}{key}`, `{lifetime}{key}{type}` |
+| Still taken | the same name with `1`, `2`, … appended |
+
+So three registrations of `IService` keyed `"svc"` but implemented by `Alpha`, `Beta` and
+`Gamma` become `Alpha`, `Beta` and `Gamma`, while two registrations of the same `Db` keyed
+`"read"` and `"write"` become `Db` and `DbWrite`.
+
+`source:` takes the name from your factory method, minus the leading underscore and minus a
+`Get` prefix when the member is a property rather than a method.
+
+To choose the name yourself, use `nameFormat`. It accepts `{lifetime}`, `{key}` and `{type}`,
+plus the older `{0}`, which is the key:
+
+```csharp
+[Scoped<Thing>("main", nameFormat: "{lifetime}{key}{type}")]  // ScopedMainThing
+[Scoped<Other>("aux",  nameFormat: "The{type}For{key}")]      // TheOtherForAux
+```
+
 ### Key Behaviors
 
 **Factory Method Caching**: Any `Task<T>` or `ValueTask<T>` used as a factory is cached even in transient scenarios to prevent redundant async work.

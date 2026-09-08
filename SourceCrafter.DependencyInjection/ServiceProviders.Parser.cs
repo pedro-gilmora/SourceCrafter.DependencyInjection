@@ -72,7 +72,7 @@ internal partial class ServiceProviders
         var defaultSubKeyComparer = EqualityComparer<DependencyKey>.Default;
 
         DependencyDictionary dependencyValueBuilders = [];
-        Dictionary<DependencyKey, string> methodNamesMap = new(defaultSubKeyComparer);
+        Dictionary<DependencyKey, (string Field, string Member)> methodNamesMap = new(defaultSubKeyComparer);
         HashSet<string> methodsRegistry = [];
         Dictionary<DependencyKey, MemberBuilder> dependencyMemberBuilders = [];
         HashSet<ResolverBuilder> genericResolvers = new(new GenericResolverBuilderComparer());
@@ -1131,47 +1131,159 @@ internal partial class ServiceProviders
             }
 
             /// <summary>
-            /// Resolves caching backing field member and resolver member names
+            /// Resuelve el nombre del miembro que expone el resolver y el de su campo de
+            /// respaldo, garantizando que ninguno choque con otro ya emitido.
             /// </summary>
+            /// <remarks>
+            /// Las distinciones (<c>{lifetime}</c>, <c>{key}</c>) se anaden <b>solo cuando
+            /// hacen falta</b>: se prueba el nombre mas corto y se baja por la escalera hasta
+            /// encontrar uno libre. La reserva se hace sobre el nombre <b>final</b>, ya
+            /// decorado; hacerla sobre el nombre base dejaba fuera del registro tanto los
+            /// nombres derivados de una fabrica como los pedidos con <c>nameFormat</c>, y
+            /// tampoco cubria los sufijos <c>Cached</c> / <c>Async</c>.
+            /// </remarks>
             (string, string) GetResolverName()
             {
+                // La identidad de un resolver es el subKey (lifetime, tipo de implementacion,
+                // clave). Memoizar por el tipo *expuesto* hacia que tres registros del mismo
+                // interfaz compartieran entrada y salieran con el mismo nombre
+                // (CS0102/CS0111/CS0229). Memoizar aqui, y no dentro de la escalera, tambien
+                // evita que una segunda llamada para el mismo resolver choque consigo misma y
+                // se lleve un sufijo numerico.
+                var identity = (lifetime, typeFullName, name);
+
+                if (methodNamesMap.TryGetValue(identity, out var memoized)) return memoized;
+
                 // Misma regla que <c>Renderer.IsMethodShaped</c>: solo los resolvers
                 // asincronos que componen dependencias salen como metodo.
                 var isMethodShaped = AsyncKind is not 0 && (hasAsyncDependencies || needsCancelToken);
 
-                var hasExplicitName = nameOrFormat is not null;
+                var key = name.Pascalize() ?? "";
+                var typeName = SanitizedTypeName();
+                var lifetimeName = lifetime.ToString();
 
-                var memberName = hasExplicitName
-                    ? string.Format(nameOrFormat!, name.Pascalize()!).RemoveDuplicates()
-                    : SanitizedTypeName();
+                var result = Resolve();
 
-                // Un nombre pedido explicitamente manda sobre el de la fabrica. Antes el
-                // nombre del metodo-fabrica lo pisaba siempre, asi que 'nameFormat' se
-                // descartaba en silencio en cuanto el registro traia 'source:'.
-                if (!hasExplicitName && !isExternal && factory is not null)
-                    memberName = factory.Name;
+                methodNamesMap[identity] = result;
 
-                memberName = memberName.TrimStart('_');
+                return result;
 
-                if (factory is not null && isCached && !memberName.EndsWith("Cached") && !memberName.EndsWith("Cache"))
-                    memberName += "Cached";
+                (string, string) Resolve()
+                {
+                    // 1. Nombre pedido por el autor: manda tal cual, no se le recorta nada.
+                    //    Antes el nombre del metodo-fabrica lo pisaba siempre, asi que
+                    //    'nameFormat' se descartaba en silencio si el registro traia 'source:'.
+                    if (nameOrFormat is not null)
+                        return ReserveOrNumber(FormatRequestedName(nameOrFormat), trimGetPrefix: false);
 
-                // Una propiedad no debe llamarse 'GetX': el prefijo anuncia una operacion.
-                // El nombre suele venir del metodo-fabrica del autor ('_GetAlphaAsync'), asi
-                // que se recorta cuando lo derivamos nosotros; si el autor escribio el nombre,
-                // se respeta tal cual.
-                if (!hasExplicitName && !isMethodShaped && HasGetPrefix(memberName))
-                    memberName = memberName.Substring(3);
+                    // 2. Nombre del metodo-fabrica del autor.
+                    if (!isExternal && factory is not null)
+                        return ReserveOrNumber(factory.Name, trimGetPrefix: true);
 
-                var fieldName = "_" + memberName.Camelize();
+                    // 3. Escalera derivada del tipo.
+                    foreach (var candidate in Candidates())
+                        if (TryReserve(candidate, trimGetPrefix: true, out var reserved)) return reserved;
 
-                // El prefijo solo se anade a lo que de verdad se emite como metodo.
-                if (!isExternal && factory is null && isMethodShaped) memberName = "Get" + memberName;
+                    return ReserveOrNumber(lifetimeName + key + typeName, trimGetPrefix: true);
+                }
 
-                if (!(memberName.Contains("Async") || memberName.Contains("Task")) && AsyncKind is not 0)
-                    (memberName, fieldName) = (memberName + "Async", fieldName + "Task");
+                /// <summary>El nombre mas corto primero; cada peldano anade una distincion.</summary>
+                IEnumerable<string> Candidates()
+                {
+                    yield return typeName;
 
-                return (fieldName, memberName);
+                    // Sin clave, el lifetime es lo unico que queda para desempatar.
+                    if (key is "")
+                    {
+                        yield return lifetimeName + typeName;
+
+                        yield break;
+                    }
+
+                    // Con clave, el desempate lo hace la clave y no el lifetime. Meter aqui
+                    // '{lifetime}{tipo}' la dejaria fuera del nombre: dos registros del mismo
+                    // tipo distinguidos solo por la clave saldrian como 'Db' y 'SingletonDb',
+                    // sin rastro de cual es cual y a merced del orden de declaracion.
+                    yield return typeName + key;
+                    yield return lifetimeName + key;
+                    yield return lifetimeName + key + typeName;
+                }
+
+                /// <summary>
+                /// Admite <c>{lifetime}</c>, <c>{key}</c> y <c>{tipo}</c> (o <c>{type}</c>)
+                /// ademas del <c>{0}</c> historico, que sigue siendo la clave.
+                /// </summary>
+                string FormatRequestedName(string format)
+                {
+                    var text = format
+                        .Replace("{lifetime}", lifetimeName)
+                        .Replace("{key}", key)
+                        .Replace("{tipo}", typeName)
+                        .Replace("{type}", typeName);
+
+                    // 'string.Format' lanza si el texto trae una llave suelta, y ya no queda
+                    // ningun marcador con nombre que justifique correr ese riesgo.
+                    if (text.IndexOf("{0}", StringComparison.Ordinal) >= 0)
+                        text = string.Format(text, key);
+
+                    return text.RemoveDuplicates();
+                }
+
+                /// <summary>
+                /// Ultimo recurso de la escalera: <c>...{CountBase1}</c>. Existe para que el
+                /// contenedor siempre compile, incluso cuando el autor pide dos veces el
+                /// mismo nombre con <c>nameFormat</c>.
+                /// </summary>
+                (string, string) ReserveOrNumber(string baseName, bool trimGetPrefix)
+                {
+                    if (TryReserve(baseName, trimGetPrefix, out var reserved)) return reserved;
+
+                    for (var count = 1; ; count++)
+                        if (TryReserve(baseName + count, trimGetPrefix, out reserved)) return reserved;
+                }
+
+                bool TryReserve(string baseName, bool trimGetPrefix, out (string, string) reserved)
+                {
+                    var (fieldName, memberName) = reserved = Decorate(baseName, trimGetPrefix);
+
+                    // Se comprueban los dos nombres. El campo se deriva del miembro, pero no
+                    // biyectivamente: un metodo 'GetX' y una propiedad 'X' comparten el campo
+                    // '_x', asi que mirar solo el miembro deja pasar un CS0102 del campo.
+                    if (methodsRegistry.Contains(memberName) || methodsRegistry.Contains(fieldName))
+                        return false;
+
+                    methodsRegistry.Add(memberName);
+                    methodsRegistry.Add(fieldName);
+
+                    return true;
+                }
+
+                (string, string) Decorate(string baseName, bool trimGetPrefix)
+                {
+                    var memberName = baseName.TrimStart('_');
+
+                    if (factory is not null && isCached && !memberName.EndsWith("Cached") && !memberName.EndsWith("Cache"))
+                        memberName += "Cached";
+
+                    // Una propiedad no debe llamarse 'GetX': el prefijo anuncia una operacion.
+                    // El nombre suele venir del metodo-fabrica del autor ('_GetAlphaAsync'),
+                    // asi que se recorta cuando lo derivamos nosotros; si el autor escribio el
+                    // nombre, se respeta tal cual.
+                    if (trimGetPrefix && !isMethodShaped && HasGetPrefix(memberName))
+                        memberName = memberName.Substring(3);
+
+                    // El campo se deriva *antes* del prefijo, para que campo y miembro no se
+                    // separen ('_alphaAsyncCached' / 'AlphaAsyncCached').
+                    var fieldName = "_" + memberName.Camelize();
+
+                    // El prefijo solo se anade a lo que de verdad se emite como metodo.
+                    if (!isExternal && factory is null && isMethodShaped) memberName = "Get" + memberName;
+
+                    if (!(memberName.Contains("Async") || memberName.Contains("Task")) && AsyncKind is not 0)
+                        (memberName, fieldName) = (memberName + "Async", fieldName + "Task");
+
+                    return (fieldName, memberName);
+                }
 
                 static bool HasGetPrefix(string value) =>
                     value.Length > 3
@@ -1181,34 +1293,7 @@ internal partial class ServiceProviders
 
             string SanitizedTypeName()
             {
-                var sanitizedTypeName = Sanitize(type!).Replace(" ", "").Capitalize();
-
-                // La memoizacion tiene que usar la *misma* identidad que distingue a un
-                // resolver de otro, es decir el subKey (lifetime, tipo de implementacion,
-                // clave). Con el tipo expuesto, tres registros del mismo interfaz y la
-                // misma clave con el mismo lifetime compartian entrada y los tres miembros
-                // salian con el mismo nombre (CS0102/CS0111/CS0229).
-                ref var idOut = ref CollectionsMarshal.GetValueRefOrAddDefault(methodNamesMap, (lifetime, typeFullName, name), out var exists)!;
-
-                if (exists)
-                {
-                    return idOut;
-                }
-
-                var key = name.Pascalize();
-
-                if (key is "")
-                {
-                    if (!methodsRegistry.Add(idOut = sanitizedTypeName)) methodsRegistry.Add(idOut = $"{lifetime}{sanitizedTypeName}");
-                }
-                else if (!(methodsRegistry.Add(idOut = key!)
-                    || methodsRegistry.Add(idOut = $"{key}{sanitizedTypeName}")
-                    || methodsRegistry.Add(idOut = $"{lifetime}{key}")))
-                {
-                    methodsRegistry.Add(idOut = $"{lifetime}{key}{sanitizedTypeName}");
-                }
-
-                return idOut;
+                return Sanitize(type!).Replace(" ", "").Capitalize();
 
                 static string Sanitize(ITypeSymbol type)
                 {
