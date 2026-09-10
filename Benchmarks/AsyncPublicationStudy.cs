@@ -9,26 +9,35 @@ namespace Benchmarks;
 // ---------------------------------------------------------------------------
 // Estudio: como ALMACENAR un resolver asincrono cacheado.
 //
-// El campo que se emite hoy es 'ValueTask<T>?', o sea 'Nullable<ValueTask<T>>':
+// El campo que se emitia era 'ValueTask<T>?', o sea 'Nullable<ValueTask<T>>':
 // un struct de cinco campos (hasValue, _obj, _result, _token,
-// _continueOnCapturedContext). El CLR solo garantiza atomicidad hasta el tamano
-// de puntero, asi que el '_campo = null' del liberador son varios stores y un
-// lector concurrente puede ver una mezcla. Esta medido: 6 valores desgarrados en
-// 216.400 lecturas, sin una sola excepcion que lo delate.
+// _continueOnCapturedContext). Tenia DOS defectos independientes:
 //
-// Las alternativas publican con UN SOLO store de puntero, que si es atomico y
-// ademas es un 'release' segun el modelo de memoria de .NET.
+//   1. Publicacion no atomica. El CLR solo garantiza atomicidad hasta el tamano
+//      de puntero, asi que el '_campo = null' del liberador son varios stores y
+//      un lector concurrente puede ver una mezcla. Medido: 6 valores desgarrados
+//      en 216.400 lecturas, sin una sola excepcion que lo delate.
+//
+//   2. Consumo multiple ilegal. Un ValueTask respaldado por IValueTaskSource
+//      (Socket, PipeReader, cualquier fuente agrupada) se consume UNA sola vez:
+//      al reciclarse la fuente el token queda invalidado y el segundo llamante
+//      recibe InvalidOperationException. Reproducido. Solo parecia funcionar
+//      porque 'async ValueTask<T>' usa un Task<T> por dentro, que es un detalle
+//      de implementacion, no una garantia.
+//
+// Resuelto emitiendo 'Task<T>' como campo: se publica con un unico store (que
+// ademas es 'release'), admite cualquier numero de consumidores, y ocupa 72 B
+// por instancia frente a 96 B. Envolverlo en ValueTask<T> al salir no asigna.
 //
 // Nota sobre el nombre: aqui NO se llama a ValueTask<T>.AsTask(), que es otra
 // cosa (convierte un ValueTask ya existente y asigna si no venia de un Task).
 // 'TaskFieldHolder' devuelve el Task<T> que YA tiene guardado en el campo: cero
 // conversion y cero asignacion en la lectura. Por eso se mide aparte.
 //
-// La cuarta variante es la que importa: una vez que la tarea completo con exito,
-// lo unico que hace falta guardar es el RESULTADO. Un 'T?' es una referencia:
-// publicacion atomica, cero asignacion, y el ValueTask se reconstruye al vuelo
-// desde el valor (el constructor de ValueTask<T> sobre un T es un struct, no
-// asigna).
+// La cuarta variante, 'T?', es la mas rapida de todas, pero NO sirve como forma
+// unica: para un servicio de tipo valor 'T?' es 'Nullable<T>' y vuelve a
+// desgarrarse. Queda documentada como optimizacion posible para tipos de
+// referencia, encima de la forma Task<T> que si es universal.
 // ---------------------------------------------------------------------------
 
 /// <summary>

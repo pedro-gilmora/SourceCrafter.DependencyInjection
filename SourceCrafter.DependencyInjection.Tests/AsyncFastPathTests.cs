@@ -74,19 +74,22 @@ public class AsyncFastPathTests
 	}
 
 	/// <summary>
-	/// El campo de un <c>ValueTask</c> cacheado es <c>ValueTask&lt;T&gt;?</c>. Con dos
-	/// lecturas se llegaba a comprobar el <c>HasValue</c> de una y desenvolver el
-	/// <c>Value</c> de otra. La designacion entrega el valor ya desenvuelto, asi que el
-	/// <c>.Value</c> — una llamada que puede lanzar — desaparece del camino rapido.
+	/// El campo de un resolver asincrono cacheado es <c>Task&lt;T&gt;</c> (ver
+	/// <c>BackingFieldTypeName</c>): atomico al publicar y multi-consumo. Un miembro
+	/// <c>ValueTask&lt;T&gt;</c> lo envuelve al salir, lo que no asigna (medido: 0 B).
+	/// Lo que no debe aparecer nunca es <c>.Value</c>, una llamada que puede lanzar, ni
+	/// una conversion <c>.AsTask()</c> en el camino de lectura, que asigna 72 B.
 	/// </summary>
 	[Fact]
 	public void TheValueTaskVariantNeedsNoValueCallInTheFastPath()
 	{
 		var code = GeneratorHarness.Run(AsyncCachedContainer).Source("Container");
 
-		code.Should().Contain("if(_plainAsyncCached is { IsCompletedSuccessfully: true } __v) return __v;");
+		code.Should().Contain(
+			"if(_plainAsyncCached is { IsCompletedSuccessfully: true } __v) return new global::System.Threading.Tasks.ValueTask<global::Probe.Plain>(__v);");
 		code.Should().NotContain("return _plainAsyncCached.Value;");
 		code.Should().NotContain("return __v.Value;");
+		code.Should().NotContain("return __v.AsTask();");
 	}
 
 	/// <summary>

@@ -172,16 +172,69 @@ public class AsyncFactoryCompositionTests
 	}
 
 	/// <summary>
-	/// <c>ValueTask&lt;T&gt;.AsTask()</c> asigna 72 B por llamada (medido en
-	/// <c>Benchmarks/AsyncPublicationStudy.cs</c>). Nunca debe aparecer en un camino
-	/// que se recorra por resolucion.
+	/// El campo de respaldo es <c>Task&lt;T&gt;</c>, asi que un miembro
+	/// <c>ValueTask&lt;T&gt;</c> lo envuelve al salir: el constructor
+	/// <c>ValueTask&lt;T&gt;(Task&lt;T&gt;)</c> <b>no asigna</b> (medido: 0 B).
+	///
+	/// <para>La conversion contraria, <c>ValueTask&lt;T&gt;.AsTask()</c>, si asigna 72 B
+	/// por llamada. Se paga una sola vez, al <b>publicar</b>, y nunca en el camino de
+	/// lectura, que es el que se recorre en cada resolucion.</para>
 	/// </summary>
 	[Fact]
-	public void TheValueTaskFastPathDoesNotAllocateThroughAsTask()
+	public void TheValueTaskFastPathWrapsInsteadOfConverting()
 	{
 		var code = GeneratorHarness.Run(ValueTaskFactoryWithAsyncDep).Source("Container");
 
-		code.Should().NotContain(".AsTask()");
-		code.Should().Contain("async global::System.Threading.Tasks.ValueTask<global::Probe.Made> ResolveCoreAsync()");
+		// El campo, atomico y multi-consumo.
+		code.Should().Contain("private global::System.Threading.Tasks.Task<global::Probe.Made>? _getMadeAsyncCached;");
+
+		// Lectura: envuelve, no convierte.
+		code.Should().Contain(
+			"if(_getMadeAsyncCached is { IsCompletedSuccessfully: true } __v) return new global::System.Threading.Tasks.ValueTask<global::Probe.Made>(__v);");
+
+		// La funcion local acompana al campo, no al miembro.
+		code.Should().Contain("async global::System.Threading.Tasks.Task<global::Probe.Made> ResolveCoreAsync()");
+
+		// El unico '.AsTask()' admisible esta en la publicacion, dentro del candado.
+		code.Should().NotContain("return __v.AsTask()");
+	}
+
+	/// <summary>
+	/// El campo de un resolver asincrono cacheado <b>nunca</b> puede ser
+	/// <c>ValueTask&lt;T&gt;?</c>, por dos motivos independientes:
+	///
+	/// <para><b>Publicacion desgarrada.</b> <c>Nullable&lt;ValueTask&lt;T&gt;&gt;</c> son
+	/// cinco campos y el CLR solo garantiza atomicidad hasta el tamano de puntero, asi que
+	/// el <c>campo = null</c> del liberador son varios stores. Medido: 6 valores
+	/// desgarrados en 216.400 lecturas, sin una sola excepcion que lo delate.</para>
+	///
+	/// <para><b>Consumo multiple.</b> Un <c>ValueTask</c> respaldado por
+	/// <c>IValueTaskSource</c> se consume una sola vez; al reciclarse la fuente el segundo
+	/// llamante recibe <c>InvalidOperationException</c>. Cachear uno y repartirlo es uso
+	/// ilegal de la API.</para>
+	///
+	/// <para>Un <c>Task&lt;T&gt;</c> resuelve ambos: se publica con un unico store y admite
+	/// cualquier numero de consumidores. Ocupa ademas 72 B frente a 96 B.</para>
+	/// </summary>
+	[Fact]
+	public void NoAsyncCachedResolverEverBacksItselfWithANullableValueTask()
+	{
+		var code = GeneratorHarness.Run(ValueTaskFactoryWithAsyncDep).Source("Container");
+
+		code.Should().NotContain("ValueTask<global::Probe.Made>? _");
+		code.Should().NotContain("ValueTask<global::Probe.Dep>? _");
+	}
+
+	/// <summary>
+	/// El liberador lee el campo a un local y lo anula. Con un campo de referencia ambas
+	/// operaciones son un unico store, asi que un lector concurrente ve el valor antiguo o
+	/// <c>null</c>, nunca una mezcla.
+	/// </summary>
+	[Fact]
+	public void TheAsyncDisposerPublishesNullAtomically()
+	{
+		var code = GeneratorHarness.Run(AsyncResolvedSyncDisposable).Source("Container");
+
+		code.Should().Contain("private global::System.Threading.Tasks.Task<global::Probe.Repo>? _getRepoAsyncCached;");
 	}
 }

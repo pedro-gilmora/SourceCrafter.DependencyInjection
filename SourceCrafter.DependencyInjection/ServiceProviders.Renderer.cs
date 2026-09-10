@@ -115,6 +115,41 @@ internal sealed class ResolverRenderer
     internal string SlowPathMethodName => "__Create" + backingFieldName;
 
     /// <summary>
+    /// Tipo del campo que respalda a un resolver <b>asincrono cacheado</b>. Siempre
+    /// <c>Task&lt;T&gt;</c>, nunca <c>ValueTask&lt;T&gt;?</c>, por dos motivos de
+    /// correccion y uno de tamano:
+    ///
+    /// <para>1. <b>Publicacion atomica.</b> <c>ValueTask&lt;T&gt;?</c> es un
+    /// <c>Nullable&lt;ValueTask&lt;T&gt;&gt;</c>: cinco campos. El CLR solo garantiza
+    /// atomicidad hasta el tamano de puntero, asi que el <c>campo = null</c> del liberador
+    /// son varios stores y un lector concurrente puede ver una mezcla. Medido: 6 valores
+    /// desgarrados en 216.400 lecturas, sin una sola excepcion que lo delate. Una
+    /// referencia se publica con un unico store, que ademas es 'release'.</para>
+    ///
+    /// <para>2. <b>Consumo multiple.</b> Un <c>ValueTask</c> respaldado por
+    /// <c>IValueTaskSource</c> (Socket, PipeReader, cualquier fuente agrupada) se consume
+    /// <b>una sola vez</b>: al reciclarse la fuente el token queda invalidado y el segundo
+    /// llamante recibe <c>InvalidOperationException</c>. Cachear un <c>ValueTask</c> y
+    /// entregarlo a varios llamantes es uso ilegal de la API; hoy solo parecia funcionar
+    /// porque <c>async ValueTask&lt;T&gt;</c> usa un <c>Task&lt;T&gt;</c> por dentro, que es
+    /// un detalle de implementacion. Un <c>Task&lt;T&gt;</c> si es multi-consumo.</para>
+    ///
+    /// <para>3. Ocupa menos: 72 B por instancia frente a 96 B.</para>
+    ///
+    /// <para>Envolver el <c>Task&lt;T&gt;</c> guardado en un <c>ValueTask&lt;T&gt;</c> al
+    /// salir <b>no asigna</b> (medido: 0 B), asi que un miembro que devuelva
+    /// <c>ValueTask&lt;T&gt;</c> no paga nada por este campo.</para>
+    /// </summary>
+    internal string BackingFieldTypeName
+        => "global::System.Threading.Tasks.Task<" + exportTypeFullName + ">";
+
+    /// <summary>
+    /// El miembro devuelve <c>ValueTask&lt;T&gt;</c> pero el campo es <c>Task&lt;T&gt;</c>,
+    /// asi que hay que envolver al salir. El constructor no asigna.
+    /// </summary>
+    internal bool WrapsFieldInValueTask => AsyncKind is AsyncKind.ValueTask;
+
+    /// <summary>
     /// Los resolvers <b>sincronos</b> cacheados comparten un unico candado por lifetime
     /// (<c>this</c> para scoped, un estatico del contenedor para singleton) y resuelven sus
     /// dependencias cacheadas <b>antes</b> de tomarlo. Al no retener nunca un candado mientras
@@ -276,7 +311,7 @@ internal sealed class ResolverRenderer
 	private ");
 					if (isSharedAcrossInstances) code.Append("static ");
 
-					code.Append(GetTypeName(typeFullName)).Append("? ").Append(backingFieldName).Append(';');
+					code.Append(AsyncKind > 0 ? BackingFieldTypeName : GetTypeName(typeFullName)).Append("? ").Append(backingFieldName).Append(';');
 
 					// El candado tiene el mismo alcance que el campo que protege.
 					//
@@ -415,21 +450,31 @@ internal sealed class ResolverRenderer
 							// campo una sola vez y ademas deja el valor ya desenvuelto, asi que un
 							// campo 'ValueTask<T>?' no necesita '.Value' -- una llamada a
 							// 'get_Value()' que puede lanzar.
+							// El campo es 'Task<T>' (ver BackingFieldTypeName). Si el miembro
+							// devuelve 'ValueTask<T>' hay que envolver al salir, lo que no asigna.
+							var wrapOpen = unwraps
+								? "new global::System.Threading.Tasks.ValueTask<" + exportTypeFullName + ">("
+								: null;
+							var wrapClose = unwraps ? ")" : null;
+
+							// La fabrica puede devolver 'ValueTask<T>' y el campo es 'Task<T>':
+							// ahi si hay que convertir, y eso asigna. Ocurre una sola vez por
+							// resolver, no una por resolucion.
+							var factoryToTask = initialAsyncType is AsyncKind.ValueTask ? ".AsTask()" : null;
+
 							code.Append(@"
 		get
 		{
-			if(").Append(backingFieldName).Append(@" is { IsCompletedSuccessfully: true } __v) return __v;
+			if(").Append(backingFieldName).Append(@" is { IsCompletedSuccessfully: true } __v) return ")
+								.Append(wrapOpen).Append("__v").Append(wrapClose).Append(@";
 
 			lock(").Append(LockExpression).Append(@")
 			{
 				if(").Append(backingFieldName).Append(@" is { } __cached
-					&& (!__cached.IsCompleted || __cached.IsCompletedSuccessfully)) return __cached;
+					&& (!__cached.IsCompleted || __cached.IsCompletedSuccessfully)) return ")
+								.Append(wrapOpen).Append("__cached").Append(wrapClose).Append(@";
 
-				return ");
-
-							// El campo de una ValueTask cacheada es 'ValueTask<T>?'. '??=' se
-							// evaluaba al tipo subyacente; una asignacion normal no.
-							if (unwraps) code.Append('(');
+				return ").Append(wrapOpen);
 
 							code.Append(backingFieldName).Append(" = ");
 
@@ -442,7 +487,7 @@ internal sealed class ResolverRenderer
 								AppendInstance(code, false);
 							}
 
-							if (unwraps) code.Append(").Value");
+							code.Append(factoryToTask).Append(wrapClose);
 
 							code.Append(@";
 			}
@@ -474,13 +519,21 @@ internal sealed class ResolverRenderer
 					{
 						var indent = isCached ? "\t" : null;
 
+						// El campo es 'Task<T>' (ver BackingFieldTypeName); el miembro puede
+						// devolver 'ValueTask<T>'. Envolver no asigna.
+						var wrapsOut = isCached && AsyncKind is AsyncKind.ValueTask;
+						var wrapOpen = wrapsOut
+							? "new global::System.Threading.Tasks.ValueTask<" + exportTypeFullName + ">("
+							: null;
+						var wrapClose = wrapsOut ? ")" : null;
+
 						if (isCached)
 						{
-							// Una sola lectura del campo, como en el resto de caminos rapidos. La
-							// designacion desenvuelve el 'ValueTask<T>?', asi que no hace falta
-							// '.Value'.
+							// Una sola lectura del campo. La designacion carga el campo una vez
+							// y deja la tarea ya desenvuelta del nulable.
 							code.Append(@"
-		if(").Append(backingFieldName).Append(@" is { IsCompletedSuccessfully: true } __v) return __v;");
+		if(").Append(backingFieldName).Append(@" is { IsCompletedSuccessfully: true } __v) return ")
+								.Append(wrapOpen).Append("__v").Append(wrapClose).Append(';');
 						}
 
 						{
@@ -506,7 +559,8 @@ internal sealed class ResolverRenderer
 		lock(").Append(LockExpression).Append(@")
 		{
 			if(").Append(backingFieldName).Append(@" is { } __cached
-				&& (!__cached.IsCompleted || __cached.IsCompletedSuccessfully)) return __cached;
+				&& (!__cached.IsCompleted || __cached.IsCompletedSuccessfully)) return ")
+									.Append(wrapOpen).Append("__cached").Append(wrapClose).Append(@";
 ");
 							}
 							//ct = global::System.Threading.CancellationTokenSource.CreateLinkedTokenSource(ct, __scopedCancellationTokenSrc.Token).Token;
@@ -531,11 +585,6 @@ internal sealed class ResolverRenderer
                             // contiene una tarea que termino mal, y en ambos casos hay que
                             // escribirlo. Un '??=' devolveria la tarea fallida y la dejaria
                             // cacheada para siempre.
-                            //
-                            // El campo de una ValueTask cacheada es 'ValueTask<T>?'. '??=' se
-                            // evaluaba al tipo subyacente; una asignacion normal no, asi que hay
-                            // que envolverla y desempaquetarla con '.Value'.
-                            var unwrapsNullableValueTask = isCached && AsyncKind is AsyncKind.ValueTask;
 
                             // La fabrica devuelve ella misma una tarea. Distinto de 'AsyncKind',
                             // que describe al resolver: un resolver puede ser asincrono solo
@@ -545,10 +594,16 @@ internal sealed class ResolverRenderer
 
                             if (isCached)
                             {
-                                if (unwrapsNullableValueTask) code.Append('(');
+                                code.Append(wrapOpen);
 
                                 code.Append(backingFieldName).Append(" = ");
                             }
+
+							// Cuando el resolver es cacheado, el destino de esta expresion es el
+							// CAMPO, que siempre es 'Task<T>'. Cuando no lo es, el destino es la
+							// forma del propio miembro. No son lo mismo: un miembro
+							// 'ValueTask<T>' cacheado guarda un 'Task<T>' y envuelve al salir.
+							var targetIsValueTask = !isCached && AsyncKind is AsyncKind.ValueTask;
 
 							if (hasAsyncLocalResolvers)
 							{
@@ -566,7 +621,7 @@ internal sealed class ResolverRenderer
 								// Cuando la fabrica es ella misma asincrona su llamada YA produce
 								// una tarea, asi que envolverla daria 'Task<Task<T>>' y el
 								// contenedor no compilaria. Solo hay que envolver el resultado de
-								// una fabrica sincrona, y en la forma del propio resolver.
+								// una fabrica sincrona, y en la forma del destino.
 								code.Append(@"
 			").Append(indent);
 
@@ -574,7 +629,7 @@ internal sealed class ResolverRenderer
 								{
 									code.Append(@"? ");
 								}
-								else if (AsyncKind is AsyncKind.ValueTask)
+								else if (targetIsValueTask)
 								{
 									code.Append("? new global::System.Threading.Tasks.ValueTask<").Append(exportTypeFullName).Append(@">(
 				").Append(indent);
@@ -599,23 +654,33 @@ internal sealed class ResolverRenderer
 						");
 							}
 
-							// La fabrica y el resolver pueden no coincidir de forma: una fabrica
-							// 'ValueTask' bajo un resolver 'Task' porque alguna dependencia lo es.
-							// Convertir un 'Task' a 'ValueTask' es gratis; al reves asigna, pero
-							// no hay alternativa cuando el campo es 'Task<T>'.
-							if (hasAsyncLocalResolvers && factoryIsAsync && initialAsyncType != AsyncKind)
+							// La forma de la fabrica y la del destino pueden no coincidir: una
+							// fabrica 'ValueTask' bajo un miembro 'Task', o cualquier fabrica bajo
+							// un campo, que siempre es 'Task<T>'. Envolver un 'Task' en un
+							// 'ValueTask' es gratis; al reves asigna 72 B, pero ocurre una vez por
+							// resolver, no una por resolucion.
+							if (factoryIsAsync)
 							{
-								if (AsyncKind is AsyncKind.ValueTask)
-									code.Insert(factoryCallStart, "new global::System.Threading.Tasks.ValueTask<" + exportTypeFullName + ">(").Append(')');
-								else
+								var factoryIsValueTask = initialAsyncType is AsyncKind.ValueTask;
+
+								if (factoryIsValueTask && !targetIsValueTask)
+								{
 									code.Append(".AsTask()");
+								}
+								else if (!factoryIsValueTask && targetIsValueTask)
+								{
+									code.Insert(factoryCallStart, "new global::System.Threading.Tasks.ValueTask<" + exportTypeFullName + ">(").Append(')');
+								}
+							}
+							else if (isCached && !hasAsyncLocalResolvers)
+							{
+								// Sin ternario que lo envuelva y con destino 'Task<T>'.
+								code.Insert(factoryCallStart, "global::System.Threading.Tasks.Task.FromResult<" + exportTypeFullName + ">(").Append(')');
 							}
 
 							if (isCached && !hasAsyncLocalResolvers)
 							{
-								if (unwrapsNullableValueTask) code.Append(").Value");
-
-								code.Append(';');
+								code.Append(wrapClose).Append(';');
 								goto exitLock;
 							}
 							else if (!factoryIsAsync)
@@ -624,19 +689,15 @@ internal sealed class ResolverRenderer
 							}
 
 							code.Append(@"
-			").Append(indent).Append(": ResolveCoreAsync()");
+			").Append(indent).Append(": ResolveCoreAsync()").Append(wrapClose);
 
-							if (unwrapsNullableValueTask) code.Append(").Value");
-
-							// La funcion local acompana a la forma del resolver. Si es
-							// 'ValueTask', declararla 'Task' obligaria a convertir las dos ramas
-							// del ternario con '.AsTask()', que asigna 72 B por llamada; asi las
-							// dos ramas ya son del tipo del campo y no se convierte nada.
+							// La funcion local acompana al DESTINO, no al miembro: si el resolver
+							// es cacheado tiene que devolver lo que se guarda en el campo.
 							code.Append(@";
 
 		").Append(indent)
 								.Append("async global::System.Threading.Tasks.")
-								.Append(AsyncKind is AsyncKind.ValueTask ? "ValueTask<" : "Task<")
+								.Append(targetIsValueTask ? "ValueTask<" : "Task<")
 								.Append(exportTypeFullName).Append(@"> ResolveCoreAsync()
 		").Append(indent).Append('{');
 
