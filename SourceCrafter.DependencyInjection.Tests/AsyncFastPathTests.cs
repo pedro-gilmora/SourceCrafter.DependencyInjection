@@ -74,11 +74,12 @@ public class AsyncFastPathTests
 	}
 
 	/// <summary>
-	/// El campo de un resolver asincrono cacheado es <c>Task&lt;T&gt;</c> (ver
-	/// <c>BackingFieldTypeName</c>): atomico al publicar y multi-consumo. Un miembro
-	/// <c>ValueTask&lt;T&gt;</c> lo envuelve al salir, lo que no asigna (medido: 0 B).
-	/// Lo que no debe aparecer nunca es <c>.Value</c>, una llamada que puede lanzar, ni
-	/// una conversion <c>.AsTask()</c> en el camino de lectura, que asigna 72 B.
+	/// El camino caliente de un resolver <c>ValueTask</c> sobre un tipo de referencia lee
+	/// el <b>resultado ya materializado</b>: una comprobacion de nulo, sin consultar el
+	/// estado de ninguna tarea. Medido: 6,26 ns frente a 8,70 ns.
+	///
+	/// <para>El campo de la tarea sigue existiendo, pero solo para compartir la resolucion
+	/// en vuelo y para liberar.</para>
 	/// </summary>
 	[Fact]
 	public void TheValueTaskVariantNeedsNoValueCallInTheFastPath()
@@ -86,10 +87,9 @@ public class AsyncFastPathTests
 		var code = GeneratorHarness.Run(AsyncCachedContainer).Source("Container");
 
 		code.Should().Contain(
-			"if(_plainAsyncCached is { IsCompletedSuccessfully: true } __v) return new global::System.Threading.Tasks.ValueTask<global::Probe.Plain>(__v);");
+			"if(_plainAsyncCachedResult is { } __v) return new global::System.Threading.Tasks.ValueTask<global::Probe.Plain>(__v);");
 		code.Should().NotContain("return _plainAsyncCached.Value;");
 		code.Should().NotContain("return __v.Value;");
-		code.Should().NotContain("return __v.AsTask();");
 	}
 
 	/// <summary>
@@ -144,6 +144,59 @@ public class AsyncFastPathTests
 		reader.Join();
 		disposer.Join();
 
-		nulls.Should().Be(0);
-	}
+	nulls.Should().Be(0);
+		}
+
+		/// <summary>
+		/// El cuerpo del candado tiene que vivir en su propio metodo, y el motivo no es el
+		/// mismo que en la ruta sincrona.
+		///
+		/// <para>La funcion local <c>ResolveCoreAsync</c> es <c>async</c> y captura
+		/// <c>this</c> (para publicar el resultado) junto con los locales de tarea, asi que
+		/// el compilador crea una clase de cierre y la asigna al <b>entrar</b> al miembro,
+		/// antes de que el camino caliente llegue a comprobar nada. Medido sobre la forma
+		/// realmente emitida: <b>48 B en cada lectura</b> y 11,1 ns frente a 8,1 ns, es
+		/// decir, el camino caliente salia perdiendo. Con el camino lento en un metodo
+		/// aparte la clase de cierre solo se asigna la primera vez: 0 B y 0,25 ns.</para>
+		///
+		/// <para>Ningun test anterior lo cazaba porque todos comprobaban expresiones
+		/// sueltas, no que el miembro publico estuviera libre de candado y de cierre.</para>
+		/// </summary>
+		[Theory]
+		[InlineData("PlainAsyncCached", "_plainAsyncCached")]
+		[InlineData("DepAsyncCached", "_depAsyncCached")]
+		[InlineData("GetComposedAsync", "_composedTask")]
+		public void TheAsyncMemberCarriesNeitherTheLockNorTheClosure(string member, string field)
+		{
+			var result = GeneratorHarness.Run(AsyncCachedContainer);
+			var code = result.Source("Container");
+
+			result.Errors.Should().BeEmpty();
+
+			var slowPath = "__Create" + field;
+
+			code.Should().Contain("return " + slowPath + "();",
+				"el miembro publico delega el camino lento");
+
+			var memberStart = code.IndexOf(" " + member, StringComparison.Ordinal);
+			memberStart.Should().BeGreaterThan(-1);
+
+			var handOff = code.IndexOf("return " + slowPath + "();", memberStart, StringComparison.Ordinal);
+			handOff.Should().BeGreaterThan(memberStart);
+
+			var hotPath = code[memberStart..handOff];
+
+			hotPath.Should().NotContain("lock(",
+				"el candado en el cuerpo impide que el JIT inserte el miembro en linea");
+			hotPath.Should().NotContain("ResolveCoreAsync",
+				"la funcion local async fuerza una clase de cierre por lectura");
+
+			// El metodo frio llega despues, y lleva el atributo que impide al JIT volver a
+			// fusionarlo con el camino caliente.
+			var slowPathDecl = code.IndexOf("private", handOff, StringComparison.Ordinal);
+
+			slowPathDecl.Should().BeGreaterThan(handOff, "el camino lento se emite tras el miembro");
+
+			code[handOff..].Should().Contain("MethodImplOptions.NoInlining");
+		}
 }

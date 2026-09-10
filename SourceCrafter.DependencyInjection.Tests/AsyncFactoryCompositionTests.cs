@@ -172,31 +172,30 @@ public class AsyncFactoryCompositionTests
 	}
 
 	/// <summary>
-	/// El campo de respaldo es <c>Task&lt;T&gt;</c>, asi que un miembro
-	/// <c>ValueTask&lt;T&gt;</c> lo envuelve al salir: el constructor
-	/// <c>ValueTask&lt;T&gt;(Task&lt;T&gt;)</c> <b>no asigna</b> (medido: 0 B).
-	///
-	/// <para>La conversion contraria, <c>ValueTask&lt;T&gt;.AsTask()</c>, si asigna 72 B
-	/// por llamada. Se paga una sola vez, al <b>publicar</b>, y nunca en el camino de
-	/// lectura, que es el que se recorre en cada resolucion.</para>
+	/// Con el campo de resultado, la publicacion pasa siempre por la funcion local
+	/// <c>async Task&lt;T&gt;</c>, cuya maquina de estados produce directamente lo que se
+	/// guarda en el campo. Asi no queda <b>ninguna</b> conversion entre formas de tarea, ni
+	/// siquiera en el camino de publicacion.
 	/// </summary>
 	[Fact]
 	public void TheValueTaskFastPathWrapsInsteadOfConverting()
 	{
 		var code = GeneratorHarness.Run(ValueTaskFactoryWithAsyncDep).Source("Container");
 
-		// El campo, atomico y multi-consumo.
+		// Los dos campos: la tarea comparte la resolucion en vuelo, el resultado acelera.
 		code.Should().Contain("private global::System.Threading.Tasks.Task<global::Probe.Made>? _getMadeAsyncCached;");
+		code.Should().Contain("private global::Probe.Made? _getMadeAsyncCachedResult;");
 
-		// Lectura: envuelve, no convierte.
+		// Camino caliente: comprobacion de nulo y envoltura, que no asigna.
 		code.Should().Contain(
-			"if(_getMadeAsyncCached is { IsCompletedSuccessfully: true } __v) return new global::System.Threading.Tasks.ValueTask<global::Probe.Made>(__v);");
+			"if(_getMadeAsyncCachedResult is { } __v) return new global::System.Threading.Tasks.ValueTask<global::Probe.Made>(__v);");
 
-		// La funcion local acompana al campo, no al miembro.
+		// La funcion local acompana al campo, no al miembro, y publica el resultado.
 		code.Should().Contain("async global::System.Threading.Tasks.Task<global::Probe.Made> ResolveCoreAsync()");
+		code.Should().Contain("return _getMadeAsyncCachedResult = __r;");
 
-		// El unico '.AsTask()' admisible esta en la publicacion, dentro del candado.
-		code.Should().NotContain("return __v.AsTask()");
+		// Sin conversiones: la maquina de estados ya produce la forma del campo.
+		code.Should().NotContain("_GetMadeAsync(__v0.Result)");
 	}
 
 	/// <summary>
@@ -226,15 +225,68 @@ public class AsyncFactoryCompositionTests
 	}
 
 	/// <summary>
-	/// El liberador lee el campo a un local y lo anula. Con un campo de referencia ambas
-	/// operaciones son un unico store, asi que un lector concurrente ve el valor antiguo o
-	/// <c>null</c>, nunca una mezcla.
+	/// El liberador debe anular <b>los dos</b> campos. Si el acelerador de lectura
+	/// sobreviviera, el camino caliente seguiria entregando la instancia ya desechada sin
+	/// llegar nunca al candado.
 	/// </summary>
-	[Fact]
-	public void TheAsyncDisposerPublishesNullAtomically()
-	{
-		var code = GeneratorHarness.Run(AsyncResolvedSyncDisposable).Source("Container");
+	const string ValueTaskDisposable = """
+		using SourceCrafter.DependencyInjection.Attributes;
+		using System;
+		using System.Threading.Tasks;
 
-		code.Should().Contain("private global::System.Threading.Tasks.Task<global::Probe.Repo>? _getRepoAsyncCached;");
+		namespace Probe;
+
+		public class Dep { }
+		public class Held : IDisposable { public Held(Dep d) { } public void Dispose() { } }
+
+		[ServiceProvider]
+		[Scoped<Dep>(source: nameof(_GetDepAsync))]
+		[Scoped<Held>(source: nameof(_GetHeldAsync))]
+		public partial class Container
+		{
+			private static async ValueTask<Dep> _GetDepAsync() { await Task.Yield(); return new Dep(); }
+			private static async ValueTask<Held> _GetHeldAsync(Dep d) { await Task.Yield(); return new Held(d); }
+		}
+		""";
+
+	[Fact]
+	public void TheDisposerClearsTheResultFieldTogetherWithTheTask()
+	{
+		var code = GeneratorHarness.Run(ValueTaskDisposable).Source("Container");
+
+		code.Should().Contain("_getHeldAsyncCached = null;");
+		code.Should().Contain("_getHeldAsyncCachedResult = null;");
+	}
+
+	/// <summary>
+	/// Un servicio de <b>tipo valor</b> no puede usar el acelerador: <c>T?</c> seria un
+	/// <c>Nullable&lt;T&gt;</c> y volveria a publicarse en varios stores, que es justo el
+	/// desgarro que se elimino. Cae a la forma de un solo campo <c>Task&lt;T&gt;</c>.
+	/// </summary>
+	const string StructService = """
+		using SourceCrafter.DependencyInjection.Attributes;
+		using System.Threading.Tasks;
+
+		namespace Probe;
+
+		public readonly struct Tok { }
+
+		[ServiceProvider]
+		[Scoped<Tok>(source: nameof(_GetTokAsync))]
+		public partial class Container
+		{
+			private static async ValueTask<Tok> _GetTokAsync() { await Task.Yield(); return new Tok(); }
+		}
+		""";
+
+	[Fact]
+	public void AValueTypeServiceFallsBackToTheSingleTaskField()
+	{
+		var result = GeneratorHarness.Run(StructService);
+		var code = result.Source("Container");
+
+		result.Errors.Should().BeEmpty();
+		code.Should().NotContain("_tokAsyncCachedResult");
+		code.Should().Contain("if(_tokAsyncCached is { IsCompletedSuccessfully: true } __v)");
 	}
 }
