@@ -94,6 +94,22 @@ internal partial class ServiceProviders
             // reflejando el valor parseado, no el derivado en tiempo de emisión.
             var effectiveDisposability = (Disposability)Math.Max((byte)scopedDisposability, (byte)containerDisposability);
 
+            // Un desechable *sincrono* resuelto de forma *asincrona* solo se alcanza tras
+            // esperar la tarea que lo envuelve, asi que su liberador es forzosamente
+            // 'async'. Antes esto salia como 'async void' —excepciones no observables que
+            // tumban el proceso— porque el tipo de retorno se decidia mirando solo la
+            // disposability del servicio. Si liberar exige esperar, el contenedor es
+            // IAsyncDisposable aunque el servicio solo implemente IDisposable: no hay forma
+            // de cumplir un 'Dispose()' sincrono sin bloquear ni perder la excepcion.
+            var effectiveScopedDisposability = scopedDisposability;
+
+            if (asyncScopedDisposable > 0 && effectiveScopedDisposability is Disposability.Disposable)
+                effectiveScopedDisposability = Disposability.AsyncDisposable;
+
+            if (asyncScopedDisposable + asyncSingletonDisposable > 0
+                && effectiveDisposability is Disposability.Disposable)
+                effectiveDisposability = Disposability.AsyncDisposable;
+
             // El propio CancellationTokenSource es desechable: un contenedor que lo use
             // tiene que liberarlo aunque ninguno de sus servicios sea desechable, o el
             // registro de cancelacion se queda colgando.
@@ -161,8 +177,8 @@ internal partial class ServiceProviders
 
 			bool isDisposable = effectiveDisposability > Disposability.None,
 				usesLifetimeToken = ctx.UsesLifetimeToken,
-				hasScopedDisposers = scopedDisposers.Count > 0 && scopedDisposability > Disposability.None,
-				scopedDisposeIsAsync = scopedDisposability > Disposability.Disposable,
+				hasScopedDisposers = scopedDisposers.Count > 0 && effectiveScopedDisposability > Disposability.None,
+				scopedDisposeIsAsync = effectiveScopedDisposability > Disposability.Disposable,
 				containerDisposeIsAsync = effectiveDisposability > Disposability.Disposable;
 
 			string scopedDisposeMethodName = scopedDisposeIsAsync ? "ScopedDisposeAsync" : "ScopedDispose",

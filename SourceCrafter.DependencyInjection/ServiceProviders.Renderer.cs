@@ -537,6 +537,12 @@ internal sealed class ResolverRenderer
                             // que envolverla y desempaquetarla con '.Value'.
                             var unwrapsNullableValueTask = isCached && AsyncKind is AsyncKind.ValueTask;
 
+                            // La fabrica devuelve ella misma una tarea. Distinto de 'AsyncKind',
+                            // que describe al resolver: un resolver puede ser asincrono solo
+                            // porque sus dependencias lo son, con una fabrica perfectamente
+                            // sincrona.
+                            var factoryIsAsync = isFactory && initialAsyncType is not 0;
+
                             if (isCached)
                             {
                                 if (unwrapsNullableValueTask) code.Append('(');
@@ -544,70 +550,115 @@ internal sealed class ResolverRenderer
                                 code.Append(backingFieldName).Append(" = ");
                             }
 
-                            if (hasAsyncLocalResolvers)
-                            {
-                                var useAnd = false;
+							if (hasAsyncLocalResolvers)
+							{
+								var useAnd = false;
 
-                                foreach (var param in asyncLocalResolvers.Values)
-                                {
-                                    if (param.ParamIndex == -1) continue;
-                                    if (useAnd.Exchange(true)) code.Append(@"
+								foreach (var param in asyncLocalResolvers.Values)
+								{
+									if (param.ParamIndex == -1) continue;
+									if (useAnd.Exchange(true)) code.Append(@"
 				").Append(indent).Append("&& ");
 
-                                    code.Append("__v").Append(param.ParamIndex).Append(".IsCompletedSuccessfully");
-                                }
+									code.Append("__v").Append(param.ParamIndex).Append(".IsCompletedSuccessfully");
+								}
 
-                                code.Append(@"
-		    ").Append(indent).Append("? global::System.Threading.Tasks.Task.FromResult<").Append(exportTypeFullName).Append(@">(
+								// Cuando la fabrica es ella misma asincrona su llamada YA produce
+								// una tarea, asi que envolverla daria 'Task<Task<T>>' y el
+								// contenedor no compilaria. Solo hay que envolver el resultado de
+								// una fabrica sincrona, y en la forma del propio resolver.
+								code.Append(@"
+			").Append(indent);
+
+								if (factoryIsAsync)
+								{
+									code.Append(@"? ");
+								}
+								else if (AsyncKind is AsyncKind.ValueTask)
+								{
+									code.Append("? new global::System.Threading.Tasks.ValueTask<").Append(exportTypeFullName).Append(@">(
 				").Append(indent);
-                            }
+								}
+								else
+								{
+									code.Append("? global::System.Threading.Tasks.Task.FromResult<").Append(exportTypeFullName).Append(@">(
+				").Append(indent);
+								}
+							}
 
-                            if (isFactory)
-                            {
-                                AppendFactoryCaller(code, false, false, @"
+							var factoryCallStart = code.Length;
+
+							if (isFactory)
+							{
+								AppendFactoryCaller(code, false, false, @"
 						");
-                            }
-                            else
-                            {
-                                AppendInstance(code, false, false, @"
+							}
+							else
+							{
+								AppendInstance(code, false, false, @"
 						");
-                            }
+							}
 
-                            if (isCached && !hasAsyncLocalResolvers)
-                            {
-                                if (unwrapsNullableValueTask) code.Append(").Value");
+							// La fabrica y el resolver pueden no coincidir de forma: una fabrica
+							// 'ValueTask' bajo un resolver 'Task' porque alguna dependencia lo es.
+							// Convertir un 'Task' a 'ValueTask' es gratis; al reves asigna, pero
+							// no hay alternativa cuando el campo es 'Task<T>'.
+							if (hasAsyncLocalResolvers && factoryIsAsync && initialAsyncType != AsyncKind)
+							{
+								if (AsyncKind is AsyncKind.ValueTask)
+									code.Insert(factoryCallStart, "new global::System.Threading.Tasks.ValueTask<" + exportTypeFullName + ">(").Append(')');
+								else
+									code.Append(".AsTask()");
+							}
 
-                                code.Append(';');
-                                goto exitLock;
-                            }
-                            else
-                            {
-                                code.Append(')');
-                            }
+							if (isCached && !hasAsyncLocalResolvers)
+							{
+								if (unwrapsNullableValueTask) code.Append(").Value");
 
-                            code.Append(@"
-            ").Append(indent).Append(": ResolveCoreAsync()");
+								code.Append(';');
+								goto exitLock;
+							}
+							else if (!factoryIsAsync)
+							{
+								code.Append(')');
+							}
 
-                            if (unwrapsNullableValueTask) code.Append(").Value");
+							code.Append(@"
+			").Append(indent).Append(": ResolveCoreAsync()");
 
-                            code.Append(@";
+							if (unwrapsNullableValueTask) code.Append(").Value");
 
-		").Append(indent).Append("async global::System.Threading.Tasks.Task<").Append(exportTypeFullName).Append(@"> ResolveCoreAsync()
+							// La funcion local acompana a la forma del resolver. Si es
+							// 'ValueTask', declararla 'Task' obligaria a convertir las dos ramas
+							// del ternario con '.AsTask()', que asigna 72 B por llamada; asi las
+							// dos ramas ya son del tipo del campo y no se convierte nada.
+							code.Append(@";
+
+		").Append(indent)
+								.Append("async global::System.Threading.Tasks.")
+								.Append(AsyncKind is AsyncKind.ValueTask ? "ValueTask<" : "Task<")
+								.Append(exportTypeFullName).Append(@"> ResolveCoreAsync()
 		").Append(indent).Append('{');
 
 							code.Append(@"				
 			").Append(indent).Append("return ");
 
-                            if (isFactory)
-                            {
-                                AppendFactoryCaller(code, true, false, @"
+							// 'ResolveCoreAsync' es 'async Task<T>': tiene que devolver T. Si la
+							// fabrica es asincrona hay que esperarla, no devolver su tarea.
+							if (factoryIsAsync) code.Append("await ");
+
+							if (isFactory)
+							{
+								AppendFactoryCaller(code, true, false, @"
 				" + indent);
-                            }
-                            else
-                            {
-                                AppendInstance(code, true, false, @"
+							}
+							else
+							{
+								AppendInstance(code, true, false, @"
 				" + indent);
-                            }
+							}
+
+							if (factoryIsAsync) code.Append(".ConfigureAwait(false)");
 
                             code.Append(@";
 		").Append(indent).Append('}');
