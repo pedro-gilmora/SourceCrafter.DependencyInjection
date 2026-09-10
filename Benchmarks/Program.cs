@@ -20,5 +20,7 @@ BenchmarkSwitcher
         typeof(LockGranularityEmptyScopeBenchmark),
         typeof(HotPathLocalBenchmark),
         typeof(AsyncCompositionCompletedBenchmark),
-        typeof(AsyncCompositionPendingBenchmark)])
+        typeof(AsyncCompositionPendingBenchmark),
+        typeof(AsyncPublicationReadBenchmark),
+        typeof(AsyncPublicationWriteBenchmark)])
     .Run(args, HarnessConfig.Instance);
