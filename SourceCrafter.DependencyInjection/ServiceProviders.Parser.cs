@@ -544,6 +544,23 @@ internal partial class ServiceProviders
 
                         if (foundAsyncType is not 0)
                         {
+                            // Se promociona a 'Task', no a 'foundAsyncType'. Como 'Task' es el
+                            // maximo del enum, el 'childAsyncType > AsyncKind' de mas abajo ya no
+                            // puede volver a bajarlo: un servicio que hereda su asincronia de las
+                            // dependencias acaba SIEMPRE como 'Task<T>', aunque todas ellas sean
+                            // 'ValueTask<T>'.
+                            //
+                            // No es incorrecto -- 'Task<T>' es una forma valida y segura -- pero
+                            // tiene un coste: el acelerador de resultado exige 'ValueTask' (ver
+                            // 'UsesResultFastPath' en el renderer, que con un miembro 'Task<T>'
+                            // asignaria 72 B por lectura al reconstruir la tarea), asi que nunca
+                            // alcanza a los servicios compuestos, que son la mayoria en un grafo
+                            // real. Solo lo aprovechan los que declaran 'source:' con 'ValueTask'.
+                            //
+                            // Propagar 'ValueTask' cuando todas las dependencias lo son cambiaria
+                            // la firma publica del miembro generado, asi que es una decision de
+                            // API, no una optimizacion interna: romperia a quien encadene
+                            // '.ContinueWith(...)' o asigne el resultado a un 'Task'.
                             if (AsyncKind is 0)
                                 AsyncKind = AsyncKind.Task;
 
@@ -674,7 +691,9 @@ internal partial class ServiceProviders
                     .ToDictionary(i => i.DepKey);
             }
 
-            //if (asyncParamCount > 0 && valueTaskCount == asyncParamCount) AsyncKind = AsyncKind.ValueTask;
+            // Aqui vivia el intento de propagar 'ValueTask' cuando todas las dependencias
+            // asincronas lo eran. Ver la nota en la promocion a 'AsyncKind.Task' de mas
+            // arriba: no se reactiva porque cambia la firma publica del miembro generado.
 
             (backingFieldName, methodName) = GetResolverName();
 
