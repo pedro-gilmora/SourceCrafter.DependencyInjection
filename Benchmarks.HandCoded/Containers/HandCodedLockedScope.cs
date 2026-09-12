@@ -47,9 +47,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
     {
         lock (this)
         {
-            var value = _syncPlain;
-            if (value is null) _syncPlain = value = new SyncPlain();
-            return value;
+            return _syncPlain ??= new SyncPlain();
         }
     }
 
@@ -64,9 +62,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
     {
         lock (this)
         {
-            var value = _syncDisp;
-            if (value is null) _syncDisp = value = new SyncDisp();
-            return value;
+            return _syncDisp ??= new SyncDisp();
         }
     }
 
@@ -81,9 +77,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
     {
         lock (this)
         {
-            var value = _syncAsyncDisp;
-            if (value is null) _syncAsyncDisp = value = new SyncAsyncDisp();
-            return value;
+            return _syncAsyncDisp ??= new SyncAsyncDisp();
         }
     }
 

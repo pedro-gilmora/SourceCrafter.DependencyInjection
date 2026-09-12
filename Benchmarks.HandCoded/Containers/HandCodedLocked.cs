@@ -62,9 +62,13 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
     //   entrar al captador, pero el mismo patron dentro de un bucle de espera girarian para siempre.
     //   ECMA-335 no lo garantiza; el runtime, si.
     //
-    // - La SEGUNDA PRUEBA DE NULO dentro del candado no es ceremonia y no se toca. Medido con la
-    //   sonda de --check: quitarla hace que a 8 hilos se construya un 124,4% de mas y que 8.902 de
-    //   20.000 rondas acaben con dos llamadores sosteniendo instancias distintas. Es peor que no
+    // - La SEGUNDA PRUEBA DE NULO dentro del candado no es ceremonia y no se toca. Va escrita como
+    //   '??=' en lugar de un if explicito: compila a lo mismo y deja el cuerpo del candado en una
+    //   linea, pero sobre todo hace que la version rota se distinga por UN caracter ('=' en vez de
+    //   '??='), que es justo lo que conviene tener presente al leerla.
+    //
+    //   Medido con la sonda de --check: con '=' a 8 hilos se construye un 168,8% de mas y 11.630 de
+    //   20.000 rondas acaban con dos llamadores sosteniendo instancias distintas. Es peor que no
     //   tener candado, porque el candado serializa a los hilos y luego los deja pisarse en fila.
 
     // ===== Candado y campos de los singletons =====
@@ -92,9 +96,7 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
     {
         lock (SingletonGate)
         {
-            var value = _syncPlain;
-            if (value is null) _syncPlain = value = new SyncPlain();
-            return value;
+            return _syncPlain ??= new SyncPlain();
         }
     }
 
@@ -109,9 +111,7 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
     {
         lock (SingletonGate)
         {
-            var value = _syncDisp;
-            if (value is null) _syncDisp = value = new SyncDisp();
-            return value;
+            return _syncDisp ??= new SyncDisp();
         }
     }
 
@@ -126,9 +126,7 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
     {
         lock (SingletonGate)
         {
-            var value = _syncAsyncDisp;
-            if (value is null) _syncAsyncDisp = value = new SyncAsyncDisp();
-            return value;
+            return _syncAsyncDisp ??= new SyncAsyncDisp();
         }
     }
 

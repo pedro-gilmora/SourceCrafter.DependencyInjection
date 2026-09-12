@@ -61,19 +61,23 @@ mezcla. La variante sin candado vive entera en `LockFreeContainer`.
 
 ### La segunda prueba de nulo no es ceremonia
 
+En el codigo va escrita como `??=`, que compila exactamente a "lee, si es null construye y asigna".
+Elegir esa forma tiene un motivo concreto: deja el cuerpo del candado en una linea y hace que la
+version rota se distinga por **un solo caracter** (`= new(...)` en lugar de `??= new(...)`).
+
 Es la parte del patron que mas invita a "simplificarse", porque parecen dos pruebas de nulo seguidas
 y da la sensacion de que la de dentro sobra. Medido con la sonda de `--check`, 20.000 rondas:
 
 | Estrategia (8 hilos) | Construye de mas | Identidad rota |
 |---|---:|---:|
-| `lock` con recheck | 0,0% | 0 |
-| `CompareExchange` | 49,5% | 0 |
-| `Exchange` | 67,6% | 6.615 |
-| **`lock` sin recheck** | **124,4%** | **8.902** |
+| `lock` con `??=` | 0,0% | 0 |
+| `CompareExchange` | 80,7% | 0 |
+| `Exchange` | 80,2% | 8.508 |
+| **`lock` con `=`** | **168,8%** | **11.630** |
 
 **Quitarla es peor que no tener candado.** El candado serializa a los hilos y luego los deja pisarse
-en fila: cada uno entra, construye y sobrescribe lo que dejo el anterior. A 8 hilos construye mas del
-doble de lo necesario y en el 45% de las rondas dos llamadores acaban con instancias distintas.
+en fila: cada uno entra, construye y sobrescribe lo que dejo el anterior. A 8 hilos construye casi el
+triple de lo necesario y en el 58% de las rondas dos llamadores acaban con instancias distintas.
 
 ## Singletons estaticos
 

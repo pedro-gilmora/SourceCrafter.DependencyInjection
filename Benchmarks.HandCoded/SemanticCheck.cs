@@ -368,7 +368,7 @@ public static class SemanticCheck
 
         Counted PublishWithLock()
         {
-            var value = Volatile.Read(ref shared);
+            var value = shared;
             if (value is not null)
             {
                 return value;
@@ -376,18 +376,16 @@ public static class SemanticCheck
 
             lock (gate)
             {
-                value = shared;
-                if (value is null) shared = value = new Counted(ctors);
-                return value;
+                return shared ??= new Counted(ctors);
             }
         }
 
-        // La misma estrategia SIN la segunda comprobacion dentro del candado. Se mide porque es la
-        // "simplificacion" que propone cualquiera que mire el patron y vea dos pruebas de nulo
-        // seguidas: parece que la de dentro sobra porque la de fuera ya se hizo.
+        // La misma estrategia SIN la segunda comprobacion dentro del candado, es decir con '=' en
+        // lugar de '??='. Se mide porque un solo caracter separa el patron correcto del que se
+        // rompe, y porque a simple vista las dos lineas se parecen demasiado.
         Counted PublishWithLockNoRecheck()
         {
-            var value = Volatile.Read(ref shared);
+            var value = shared;
             if (value is not null)
             {
                 return value;
