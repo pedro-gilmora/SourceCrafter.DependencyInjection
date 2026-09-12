@@ -58,6 +58,7 @@ public static class SemanticCheck
 
     private static void CheckLockedIdentity()
     {
+        LockedContainer.ResetSingletons();
         using var c = new LockedContainer();
 
         Same("lock | singleton | sync | -", c.SingletonSyncPlain, c.SingletonSyncPlain);
@@ -150,6 +151,7 @@ public static class SemanticCheck
 
     private static void CheckScopeIsolation()
     {
+        LockedContainer.ResetSingletons();
         using var root = new LockedContainer();
         var a = root.CreateScope();
         var b = root.CreateScope();
@@ -166,11 +168,18 @@ public static class SemanticCheck
 
     private static void CheckDisposal()
     {
+        // Los singletons de LockedContainer son estaticos, asi que el estado sobrevive entre casos.
+        // Sin este reset, cada caso heredaria lo que construyo el anterior y el conjunto pasaria o
+        // fallaria segun el ORDEN, que es la peor clase de prueba: la que se rompe al reordenarla.
+        LockedContainer.ResetSingletons();
+
         // Singleton desechable: se desecha al desechar el contenedor.
         var c = new LockedContainer();
         var singleton = c.SingletonSyncDisp;
         c.Dispose();
         True("lock | el singleton desechable se desecha", singleton.Disposed);
+
+        LockedContainer.ResetSingletons();
 
         // Scoped desechable: se desecha al desechar el ambito, y el singleton NO.
         var root = new LockedContainer();
@@ -183,12 +192,50 @@ public static class SemanticCheck
         root.Dispose();
         True("lock | la raiz si desecha su singleton", rootSingleton.Disposed);
 
+        LockedContainer.ResetSingletons();
+
         // Transitorio rastreado: el contenedor es el unico que puede desecharlo.
         var t = new LockedContainer();
         var first = t.TransientSyncDisp();
         var second = t.TransientSyncDisp();
         t.Dispose();
         True("lock | los transitorios rastreados se desechan todos", first.Disposed && second.Disposed);
+
+        CheckStaticSingletonConsequences();
+    }
+
+    /// <summary>
+    /// Fija por escrito lo que implica que los singletons de <see cref="LockedContainer"/> sean
+    /// <c>static</c>. No son comprobaciones de que algo este bien: son el <b>contrato real</b> de
+    /// esa forma, puesto donde se vea y donde salte si alguien lo cambia sin querer.
+    /// <para>
+    /// La segunda es la incomoda: <b>desechar un contenedor deja a los demas del proceso sin su
+    /// singleton</b>. En el caso real no molesta, porque un proceso tiene un contenedor raiz y lo
+    /// dispone al terminar. En cualquier escenario que cree varios a la vez es una bomba, y por eso
+    /// esta medida en vez de comentada.
+    /// </para>
+    /// </summary>
+    private static void CheckStaticSingletonConsequences()
+    {
+        LockedContainer.ResetSingletons();
+
+        var a = new LockedContainer();
+        var b = new LockedContainer();
+        Same("lock | el singleton estatico se comparte entre contenedores", a.SingletonSyncPlain, b.SingletonSyncPlain);
+
+        LockedContainer.ResetSingletons();
+
+        var first = new LockedContainer();
+        var second = new LockedContainer();
+        var shared = first.SingletonSyncDisp;
+        first.Dispose();
+
+        True("lock | desechar un contenedor desecha el singleton de TODOS", shared.Disposed);
+        True("lock | ...y el siguiente en pedirlo recibe uno nuevo, no el desechado",
+            !ReferenceEquals(second.SingletonSyncDisp, shared) && !second.SingletonSyncDisp.Disposed);
+
+        second.Dispose();
+        LockedContainer.ResetSingletons();
     }
 
     // ================== las estrategias incorrectas ==================
@@ -232,7 +279,7 @@ public static class SemanticCheck
         foreach (var threads in (int[])[2, 4, 8])
         {
             foreach (var (name, strategy) in ((string, int)[])
-                     [("lock          ", 0), ("CompareExchange", 1), ("Exchange       ", 2)])
+                     [("lock          ", 0), ("lock sin recheck", 3), ("CompareExchange", 1), ("Exchange       ", 2)])
             {
                 var (ctors, violations) = RaceRounds(threads, Rounds, strategy);
                 var waste = (ctors - Rounds) * 100.0 / Rounds;
@@ -284,6 +331,7 @@ public static class SemanticCheck
                     {
                         1 => PublishWithCas(),
                         2 => PublishWithExchange(),
+                        3 => PublishWithLockNoRecheck(),
                         _ => PublishWithLock()
                     };
 
@@ -329,13 +377,25 @@ public static class SemanticCheck
             lock (gate)
             {
                 value = shared;
-                if (value is null)
-                {
-                    value = new Counted(ctors);
-                    Volatile.Write(ref shared, value);
-                }
-
+                if (value is null) shared = value = new Counted(ctors);
                 return value;
+            }
+        }
+
+        // La misma estrategia SIN la segunda comprobacion dentro del candado. Se mide porque es la
+        // "simplificacion" que propone cualquiera que mire el patron y vea dos pruebas de nulo
+        // seguidas: parece que la de dentro sobra porque la de fuera ya se hizo.
+        Counted PublishWithLockNoRecheck()
+        {
+            var value = Volatile.Read(ref shared);
+            if (value is not null)
+            {
+                return value;
+            }
+
+            lock (gate)
+            {
+                return shared = new Counted(ctors);
             }
         }
 

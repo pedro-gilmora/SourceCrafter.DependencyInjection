@@ -44,17 +44,62 @@ La verificacion semantica corre **siempre** antes de medir y aborta la corrida s
 
 ## Escrituras dentro del candado
 
-Los caminos frios publican con una **asignacion normal**, nunca con `Volatile.Write` ni con
-`Interlocked`. Salir de un `lock` ya es una barrera de liberacion: garantiza que todo lo escrito
-dentro -- el constructor del servicio incluido -- es visible para quien despues adquiera ese mismo
-candado. Un `Volatile.Write` ahi dentro no añade ninguna garantia, solo repite una barrera que el
-monitor ya emite.
+Los contenedores `*Locked*` son los titulares del eje "con candado", asi que **no usan `Volatile`
+ni `Interlocked` en ninguna parte**. Mezclarlos confundiria los dos ejes que la matriz separa: una
+celda que dijera "con candado" y por dentro publicase con un CAS no mediria el candado, mediria una
+mezcla. La variante sin candado vive entera en `LockFreeContainer`.
 
-La asimetria con la lectura es lo que hay que entender: **el `Volatile.Read` del camino caliente si
-es imprescindible**, porque el lector rapido *no toma el candado* y por tanto no hereda su barrera.
+- **Publicar** es una asignacion normal dentro del candado. Salir de un `lock` ya es una barrera de
+  liberacion: todo lo escrito dentro, constructor del servicio incluido, es visible para quien
+  despues adquiera ese mismo candado. Un `Volatile.Write` ahi no añade garantia alguna.
+- **Leer** en el camino caliente es una lectura normal. Esto si tiene letra pequeña: el lector rapido
+  no toma el candado, asi que no hereda su barrera. Lo que lo salva es que el runtime de .NET da
+  semantica de liberacion a *toda* escritura de referencia, no solo a las volatiles, asi que la
+  instancia nunca se publica a medio construir. Lo que se pierde es la barrera de compilador. Aqui
+  da igual porque cada resolucion vuelve a entrar al captador, pero el mismo patron dentro de un
+  bucle de espera giraria para siempre. **ECMA-335 no lo garantiza; el runtime, si.**
 
-Hay una sola excepcion, marcada en el codigo donde ocurre: las escrituras de los caminos asincronos
-suceden **despues del `await`, fuera del candado**, y esas siguen siendo volatiles.
+### La segunda prueba de nulo no es ceremonia
+
+Es la parte del patron que mas invita a "simplificarse", porque parecen dos pruebas de nulo seguidas
+y da la sensacion de que la de dentro sobra. Medido con la sonda de `--check`, 20.000 rondas:
+
+| Estrategia (8 hilos) | Construye de mas | Identidad rota |
+|---|---:|---:|
+| `lock` con recheck | 0,0% | 0 |
+| `CompareExchange` | 49,5% | 0 |
+| `Exchange` | 67,6% | 6.615 |
+| **`lock` sin recheck** | **124,4%** | **8.902** |
+
+**Quitarla es peor que no tener candado.** El candado serializa a los hilos y luego los deja pisarse
+en fila: cada uno entra, construye y sobrescribe lo que dejo el anterior. A 8 hilos construye mas del
+doble de lo necesario y en el 45% de las rondas dos llamadores acaban con instancias distintas.
+
+## Singletons estaticos
+
+Los singletons de `LockedContainer` son campos `static` con candado `static`, que es la forma que
+emite SourceCrafter. Los campos de ambito, por contraste, son de instancia: ahi `static` no seria una
+forma discutible sino un error, porque un scoped compartido entre ambitos deja de ser scoped.
+
+**Medido, `static` no cambia el camino caliente.** El contenedor con candado (campos estaticos) da
+0,595 ns en la celda sync y el lock-free (campos de instancia) 0,552 ns, con `RatioSD` de 0,06 a 0,22:
+indistinguibles. La teoria de que el JIT hornea la direccion del estatico y se ahorra desreferenciar
+`this` no se materializa en una ganancia observable, porque el captador es de instancia igualmente y
+todo se reduce a un `mov` en ambos casos.
+
+**Lo que si cambia es la semantica, y no es gratis.** Un singleton estatico no pertenece a ningun
+contenedor, asi que "desecharlo" no es una operacion bien definida. Aqui se resuelve desechandolo y
+poniendo el campo a `null` bajo el candado, de modo que el siguiente contenedor lo reconstruye. Eso
+mantiene medible el eje de disposability, pero deja tres consecuencias fijadas por escrito en
+`--check`:
+
+- el singleton se comparte entre contenedores distintos;
+- **desechar un contenedor desecha el singleton de todos los demas del proceso**;
+- el siguiente en pedirlo recibe uno nuevo, no el desechado.
+
+Es correcto en el caso real -- un proceso tiene un contenedor raiz y lo dispone al terminar -- y es
+una bomba en cualquier escenario que cree varios a la vez. Esta medido en vez de comentado justamente
+por eso. Es tambien la causa raiz del `sc-disposable-swap` que sigue abierto en el generador.
 
 ## Protocolo de lectura
 

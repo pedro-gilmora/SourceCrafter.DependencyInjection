@@ -15,6 +15,16 @@ namespace Benchmarks.HandCoded;
 /// se destruye una vez por peticion, asi que todo lo que se le cuelgue se paga tantas veces
 /// como peticiones haya.
 /// </para>
+/// <para>
+/// <b>Aqui, como en <see cref="LockedContainer"/>, solo hay <c>lock</c>:</b> ni Volatile ni
+/// Interlocked en ninguna parte, para que la celda "con candado" mida un candado y no una mezcla.
+/// </para>
+/// <para>
+/// <b>Y aqui los campos son de instancia, no <c>static</c>.</b> No es la misma decision que en la
+/// raiz: alli <c>static</c> es una forma discutible con un precio conocido; aqui seria sencillamente
+/// un error, porque un servicio scoped compartido entre ambitos deja de ser scoped. Esa asimetria es
+/// la que separa las dos filas de la matriz.
+/// </para>
 /// </summary>
 public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDisposable
 {
@@ -29,7 +39,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
     public SyncPlain ScopedSyncPlain
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Volatile.Read(ref _syncPlain) ?? SlowSyncPlain();
+        get => _syncPlain ?? SlowSyncPlain();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -46,7 +56,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
     public SyncDisp ScopedSyncDisp
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Volatile.Read(ref _syncDisp) ?? SlowSyncDisp();
+        get => _syncDisp ?? SlowSyncDisp();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -63,7 +73,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
     public SyncAsyncDisp ScopedSyncAsyncDisp
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Volatile.Read(ref _syncAsyncDisp) ?? SlowSyncAsyncDisp();
+        get => _syncAsyncDisp ?? SlowSyncAsyncDisp();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -84,7 +94,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
 
     public ValueTask<VtPlain> GetScopedVtPlainAsync()
     {
-        var value = Volatile.Read(ref _vtPlain);
+        var value = _vtPlain;
         return value is not null ? new ValueTask<VtPlain>(value) : new(SlowVtPlainAsync());
     }
 
@@ -101,7 +111,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
     private async Task<VtPlain> PublishVtPlainAsync()
     {
         var created = await VtPlain.CreateAsync().ConfigureAwait(false);
-        Volatile.Write(ref _vtPlain, created);
+        lock (this) _vtPlain = created;
         return created;
     }
 
@@ -110,7 +120,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
 
     public ValueTask<VtDisp> GetScopedVtDispAsync()
     {
-        var value = Volatile.Read(ref _vtDisp);
+        var value = _vtDisp;
         return value is not null ? new ValueTask<VtDisp>(value) : new(SlowVtDispAsync());
     }
 
@@ -127,7 +137,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
     private async Task<VtDisp> PublishVtDispAsync()
     {
         var created = await VtDisp.CreateAsync().ConfigureAwait(false);
-        Volatile.Write(ref _vtDisp, created);
+        lock (this) _vtDisp = created;
         return created;
     }
 
@@ -136,7 +146,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
 
     public ValueTask<VtAsyncDisp> GetScopedVtAsyncDispAsync()
     {
-        var value = Volatile.Read(ref _vtAsyncDisp);
+        var value = _vtAsyncDisp;
         return value is not null ? new ValueTask<VtAsyncDisp>(value) : new(SlowVtAsyncDispAsync());
     }
 
@@ -153,7 +163,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
     private async Task<VtAsyncDisp> PublishVtAsyncDispAsync()
     {
         var created = await VtAsyncDisp.CreateAsync().ConfigureAwait(false);
-        Volatile.Write(ref _vtAsyncDisp, created);
+        lock (this) _vtAsyncDisp = created;
         return created;
     }
 
@@ -162,7 +172,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
 
     public ValueTask<TaskPlain> GetScopedTaskPlainAsync()
     {
-        var value = Volatile.Read(ref _taskPlain);
+        var value = _taskPlain;
         return value is not null ? new ValueTask<TaskPlain>(value) : new(SlowTaskPlainAsync());
     }
 
@@ -179,7 +189,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
     private async Task<TaskPlain> PublishTaskPlainAsync()
     {
         var created = await TaskPlain.CreateAsync().ConfigureAwait(false);
-        Volatile.Write(ref _taskPlain, created);
+        lock (this) _taskPlain = created;
         return created;
     }
 
@@ -188,7 +198,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
 
     public ValueTask<TaskDisp> GetScopedTaskDispAsync()
     {
-        var value = Volatile.Read(ref _taskDisp);
+        var value = _taskDisp;
         return value is not null ? new ValueTask<TaskDisp>(value) : new(SlowTaskDispAsync());
     }
 
@@ -205,7 +215,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
     private async Task<TaskDisp> PublishTaskDispAsync()
     {
         var created = await TaskDisp.CreateAsync().ConfigureAwait(false);
-        Volatile.Write(ref _taskDisp, created);
+        lock (this) _taskDisp = created;
         return created;
     }
 
@@ -214,7 +224,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
 
     public ValueTask<TaskAsyncDisp> GetScopedTaskAsyncDispAsync()
     {
-        var value = Volatile.Read(ref _taskAsyncDisp);
+        var value = _taskAsyncDisp;
         return value is not null ? new ValueTask<TaskAsyncDisp>(value) : new(SlowTaskAsyncDispAsync());
     }
 
@@ -231,7 +241,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
     private async Task<TaskAsyncDisp> PublishTaskAsyncDispAsync()
     {
         var created = await TaskAsyncDisp.CreateAsync().ConfigureAwait(false);
-        Volatile.Write(ref _taskAsyncDisp, created);
+        lock (this) _taskAsyncDisp = created;
         return created;
     }
 

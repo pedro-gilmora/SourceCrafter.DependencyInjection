@@ -6,7 +6,7 @@ namespace Benchmarks.HandCoded;
 /// Contenedor escrito a mano, estrategia <b>con candado</b>.
 /// <para>
 /// Replica la forma que emite SourceCrafter, que es el punto de partida de todo este banco:
-/// el captador caliente es <c>Volatile.Read</c> + prueba de nulo, y el camino frio vive en un
+/// el captador caliente es una lectura de campo + prueba de nulo, y el camino frio vive en un
 /// metodo aparte marcado <see cref="MethodImplOptions.NoInlining"/>. Si el cuerpo del candado
 /// se quedara en el captador, este dejaria de ser una lectura de campo y el JIT no lo
 /// insertaria en linea en sus llamadores, que es como se pierde el camino rapido sin notarlo.
@@ -19,48 +19,78 @@ namespace Benchmarks.HandCoded;
 /// contencion en el camino caliente, y aqui el camino caliente no toca el candado.
 /// </para>
 /// <para>
-/// <b>Divergencia deliberada respecto al generador:</b> aqui los singletons son campos de
-/// instancia, no <c>static</c>. SourceCrafter los emite estaticos, lo que le da una ventaja
-/// real al crear el contenedor (reutiliza lo ya construido) pero le impide desecharlos: un
-/// singleton estatico no pertenece a ningun contenedor, asi que nadie puede desecharlo. Como
-/// la disposability es uno de los cuatro ejes que este banco mide, copiar esa forma dejaria un
-/// tercio de la matriz sin poder medirse.
+/// <b>Los singletons son campos <c>static</c>, y su candado tambien.</b> Es la forma que emite
+/// SourceCrafter, y copiarla es el proposito de este contenedor: un campo estatico se lee sin
+/// desreferenciar <c>this</c>, porque el JIT puede hornear la direccion como constante. Esa es la
+/// unica diferencia de codigo entre un singleton y un scoped en todo el fichero, y es justo lo que
+/// la matriz existe para medir.
+/// </para>
+/// <para>
+/// <b>El precio de esa forma, que el banco no puede esconder:</b> un singleton estatico no
+/// pertenece a ningun contenedor, asi que "desecharlo" no es una operacion bien definida. Aqui se
+/// resuelve desechando la instancia estatica y <b>poniendo el campo a null</b> bajo el candado, de
+/// modo que el siguiente contenedor la reconstruye. Eso mantiene medible el eje de disposability,
+/// pero conviene ver lo que implica: <i>disponer un contenedor tiene efecto sobre todos los demas
+/// del proceso</i>. Es correcto en el caso real -- un proceso tiene un contenedor raiz y se dispone
+/// al terminar -- y es una bomba en cualquier escenario que cree varios a la vez. Los campos de
+/// ambito, por contraste, siguen siendo de instancia: ahi <c>static</c> no seria una forma
+/// discutible sino simplemente un error.
 /// </para>
 /// </summary>
 public sealed class LockedContainer : IDisposable, IAsyncDisposable
 {
-    // ===== Regla de escritura dentro del candado =====
+    // ===== Regla de acceso: aqui solo hay 'lock' =====
     //
-    // Los caminos frios de este fichero publican con una asignacion normal, NO con Volatile.Write.
-    // Salir de un 'lock' ya es una barrera de liberacion: garantiza que todo lo escrito dentro --
-    // el constructor del servicio incluido -- es visible para cualquiera que despues adquiera ese
-    // mismo candado. Añadir Volatile.Write dentro del candado no aporta ninguna garantia; solo
-    // repite una barrera que el monitor ya emite.
+    // Este contenedor es el titular del eje "con candado", asi que no usa Volatile ni Interlocked
+    // en ninguna parte. Mezclarlos confundiria los dos ejes que la matriz separa: una celda que
+    // dijera "con candado" y por dentro publicase con un CAS no mediria el candado, mediria una
+    // mezcla. La variante sin candado vive entera en LockFreeContainer, que es donde el CAS es lo
+    // que se mide.
     //
-    // El Volatile.READ del camino caliente si es imprescindible, y esa asimetria es la clave: el
-    // lector rapido NO toma el candado, asi que no hereda su barrera y necesita la suya. Lo unico
-    // que la lectura volatil impide es que el compilador o el procesador saquen la carga del campo
-    // fuera del bucle o la reordenen con las cargas del objeto al que apunta.
+    // Consecuencias, por si alguien las echa de menos:
     //
-    // Hay una excepcion en este fichero y esta marcada donde toca: las escrituras de los caminos
-    // asincronos ocurren DESPUES del await, fuera del candado, y por eso siguen siendo volatiles.
+    // - PUBLICAR es una asignacion normal dentro del candado. Salir de un 'lock' ya es una barrera
+    //   de liberacion: todo lo escrito dentro, constructor del servicio incluido, es visible para
+    //   quien despues adquiera ese mismo candado. Un Volatile.Write ahi no añade garantia alguna.
+    //
+    // - LEER en el camino caliente es una lectura normal, sin Volatile.Read. Esto SI es una
+    //   decision con letra pequeña, y conviene tenerla presente: el lector rapido no toma el
+    //   candado, asi que no hereda su barrera. Lo que lo salva es que el runtime de .NET da
+    //   semantica de liberacion a TODA escritura de referencia, no solo a las volatiles, asi que la
+    //   instancia nunca se publica a medio construir. Lo que se pierde es la barrera de compilador:
+    //   el JIT puede cachear la lectura del campo. Aqui da igual porque cada resolucion vuelve a
+    //   entrar al captador, pero el mismo patron dentro de un bucle de espera girarian para siempre.
+    //   ECMA-335 no lo garantiza; el runtime, si.
+    //
+    // - La SEGUNDA PRUEBA DE NULO dentro del candado no es ceremonia y no se toca. Medido con la
+    //   sonda de --check: quitarla hace que a 8 hilos se construya un 124,4% de mas y que 8.902 de
+    //   20.000 rondas acaben con dos llamadores sosteniendo instancias distintas. Es peor que no
+    //   tener candado, porque el candado serializa a los hilos y luego los deja pisarse en fila.
+
+    // ===== Candado y campos de los singletons =====
+    //
+    // El candado de los singletons es estatico porque lo que protege lo es. Que serialice la
+    // primera resolucion de todos los contenedores del proceso no importa: solo cubre caminos
+    // frios, uno por servicio en toda la vida del proceso.
+
+    private static readonly Lock SingletonGate = new();
 
     // ===== Singleton, async-kind sincrono =====
 
-    private SyncPlain? _syncPlain;
-    private SyncDisp? _syncDisp;
-    private SyncAsyncDisp? _syncAsyncDisp;
+    private static SyncPlain? _syncPlain;
+    private static SyncDisp? _syncDisp;
+    private static SyncAsyncDisp? _syncAsyncDisp;
 
     public SyncPlain SingletonSyncPlain
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Volatile.Read(ref _syncPlain) ?? SlowSyncPlain();
+        get => _syncPlain ?? SlowSyncPlain();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SyncPlain SlowSyncPlain()
+    private static SyncPlain SlowSyncPlain()
     {
-        lock (this)
+        lock (SingletonGate)
         {
             var value = _syncPlain;
             if (value is null) _syncPlain = value = new SyncPlain();
@@ -71,13 +101,13 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
     public SyncDisp SingletonSyncDisp
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Volatile.Read(ref _syncDisp) ?? SlowSyncDisp();
+        get => _syncDisp ?? SlowSyncDisp();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SyncDisp SlowSyncDisp()
+    private static SyncDisp SlowSyncDisp()
     {
-        lock (this)
+        lock (SingletonGate)
         {
             var value = _syncDisp;
             if (value is null) _syncDisp = value = new SyncDisp();
@@ -88,13 +118,13 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
     public SyncAsyncDisp SingletonSyncAsyncDisp
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => Volatile.Read(ref _syncAsyncDisp) ?? SlowSyncAsyncDisp();
+        get => _syncAsyncDisp ?? SlowSyncAsyncDisp();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private SyncAsyncDisp SlowSyncAsyncDisp()
+    private static SyncAsyncDisp SlowSyncAsyncDisp()
     {
-        lock (this)
+        lock (SingletonGate)
         {
             var value = _syncAsyncDisp;
             if (value is null) _syncAsyncDisp = value = new SyncAsyncDisp();
@@ -114,162 +144,167 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
     // menos una. Para un servicio desechable eso significa que nadie desecha las descartadas.
     // Ver LockFreeContainer, que es justo donde eso pasa y donde se mide lo que cuesta.
 
-    private VtPlain? _vtPlain;
-    private Task<VtPlain>? _vtPlainInFlight;
+    private static VtPlain? _vtPlain;
+    private static Task<VtPlain>? _vtPlainInFlight;
 
     public ValueTask<VtPlain> GetSingletonVtPlainAsync()
     {
-        var value = Volatile.Read(ref _vtPlain);
+        var value = _vtPlain;
         return value is not null ? new ValueTask<VtPlain>(value) : new(SlowVtPlainAsync());
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private Task<VtPlain> SlowVtPlainAsync()
+    private static Task<VtPlain> SlowVtPlainAsync()
     {
-        lock (this)
+        lock (SingletonGate)
         {
             var value = _vtPlain;
             return value is not null ? Task.FromResult(value) : _vtPlainInFlight ??= PublishVtPlainAsync();
         }
     }
 
-    private async Task<VtPlain> PublishVtPlainAsync()
+    private static async Task<VtPlain> PublishVtPlainAsync()
     {
         var created = await VtPlain.CreateAsync().ConfigureAwait(false);
-        // Volatile aqui SI: esta escritura ocurre despues del await, fuera del candado, y es la
-        // que empareja con el Volatile.Read del camino caliente. Es la excepcion a la regla de
-        // arriba, no un descuido.
-        Volatile.Write(ref _vtPlain, created);
+
+        // La publicacion va dentro del candado aunque ocurra despues del await. Antes era un
+        // Volatile.Write suelto, que tambien publicaba bien, pero dejaba a este contenedor usando
+        // dos mecanismos a la vez y por tanto sin poder titular el eje "con candado".
+        lock (SingletonGate)
+        {
+            _vtPlain = created;
+        }
+
         return created;
     }
 
-    private VtDisp? _vtDisp;
-    private Task<VtDisp>? _vtDispInFlight;
+    private static VtDisp? _vtDisp;
+    private static Task<VtDisp>? _vtDispInFlight;
 
     public ValueTask<VtDisp> GetSingletonVtDispAsync()
     {
-        var value = Volatile.Read(ref _vtDisp);
+        var value = _vtDisp;
         return value is not null ? new ValueTask<VtDisp>(value) : new(SlowVtDispAsync());
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private Task<VtDisp> SlowVtDispAsync()
+    private static Task<VtDisp> SlowVtDispAsync()
     {
-        lock (this)
+        lock (SingletonGate)
         {
             var value = _vtDisp;
             return value is not null ? Task.FromResult(value) : _vtDispInFlight ??= PublishVtDispAsync();
         }
     }
 
-    private async Task<VtDisp> PublishVtDispAsync()
+    private static async Task<VtDisp> PublishVtDispAsync()
     {
         var created = await VtDisp.CreateAsync().ConfigureAwait(false);
-        Volatile.Write(ref _vtDisp, created);
+        lock (SingletonGate) _vtDisp = created;
         return created;
     }
 
-    private VtAsyncDisp? _vtAsyncDisp;
-    private Task<VtAsyncDisp>? _vtAsyncDispInFlight;
+    private static VtAsyncDisp? _vtAsyncDisp;
+    private static Task<VtAsyncDisp>? _vtAsyncDispInFlight;
 
     public ValueTask<VtAsyncDisp> GetSingletonVtAsyncDispAsync()
     {
-        var value = Volatile.Read(ref _vtAsyncDisp);
+        var value = _vtAsyncDisp;
         return value is not null ? new ValueTask<VtAsyncDisp>(value) : new(SlowVtAsyncDispAsync());
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private Task<VtAsyncDisp> SlowVtAsyncDispAsync()
+    private static Task<VtAsyncDisp> SlowVtAsyncDispAsync()
     {
-        lock (this)
+        lock (SingletonGate)
         {
             var value = _vtAsyncDisp;
             return value is not null ? Task.FromResult(value) : _vtAsyncDispInFlight ??= PublishVtAsyncDispAsync();
         }
     }
 
-    private async Task<VtAsyncDisp> PublishVtAsyncDispAsync()
+    private static async Task<VtAsyncDisp> PublishVtAsyncDispAsync()
     {
         var created = await VtAsyncDisp.CreateAsync().ConfigureAwait(false);
-        Volatile.Write(ref _vtAsyncDisp, created);
+        lock (SingletonGate) _vtAsyncDisp = created;
         return created;
     }
 
-    private TaskPlain? _taskPlain;
-    private Task<TaskPlain>? _taskPlainInFlight;
+    private static TaskPlain? _taskPlain;
+    private static Task<TaskPlain>? _taskPlainInFlight;
 
     public ValueTask<TaskPlain> GetSingletonTaskPlainAsync()
     {
-        var value = Volatile.Read(ref _taskPlain);
+        var value = _taskPlain;
         return value is not null ? new ValueTask<TaskPlain>(value) : new(SlowTaskPlainAsync());
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private Task<TaskPlain> SlowTaskPlainAsync()
+    private static Task<TaskPlain> SlowTaskPlainAsync()
     {
-        lock (this)
+        lock (SingletonGate)
         {
             var value = _taskPlain;
             return value is not null ? Task.FromResult(value) : _taskPlainInFlight ??= PublishTaskPlainAsync();
         }
     }
 
-    private async Task<TaskPlain> PublishTaskPlainAsync()
+    private static async Task<TaskPlain> PublishTaskPlainAsync()
     {
         var created = await TaskPlain.CreateAsync().ConfigureAwait(false);
-        Volatile.Write(ref _taskPlain, created);
+        lock (SingletonGate) _taskPlain = created;
         return created;
     }
 
-    private TaskDisp? _taskDisp;
-    private Task<TaskDisp>? _taskDispInFlight;
+    private static TaskDisp? _taskDisp;
+    private static Task<TaskDisp>? _taskDispInFlight;
 
     public ValueTask<TaskDisp> GetSingletonTaskDispAsync()
     {
-        var value = Volatile.Read(ref _taskDisp);
+        var value = _taskDisp;
         return value is not null ? new ValueTask<TaskDisp>(value) : new(SlowTaskDispAsync());
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private Task<TaskDisp> SlowTaskDispAsync()
+    private static Task<TaskDisp> SlowTaskDispAsync()
     {
-        lock (this)
+        lock (SingletonGate)
         {
             var value = _taskDisp;
             return value is not null ? Task.FromResult(value) : _taskDispInFlight ??= PublishTaskDispAsync();
         }
     }
 
-    private async Task<TaskDisp> PublishTaskDispAsync()
+    private static async Task<TaskDisp> PublishTaskDispAsync()
     {
         var created = await TaskDisp.CreateAsync().ConfigureAwait(false);
-        Volatile.Write(ref _taskDisp, created);
+        lock (SingletonGate) _taskDisp = created;
         return created;
     }
 
-    private TaskAsyncDisp? _taskAsyncDisp;
-    private Task<TaskAsyncDisp>? _taskAsyncDispInFlight;
+    private static TaskAsyncDisp? _taskAsyncDisp;
+    private static Task<TaskAsyncDisp>? _taskAsyncDispInFlight;
 
     public ValueTask<TaskAsyncDisp> GetSingletonTaskAsyncDispAsync()
     {
-        var value = Volatile.Read(ref _taskAsyncDisp);
+        var value = _taskAsyncDisp;
         return value is not null ? new ValueTask<TaskAsyncDisp>(value) : new(SlowTaskAsyncDispAsync());
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private Task<TaskAsyncDisp> SlowTaskAsyncDispAsync()
+    private static Task<TaskAsyncDisp> SlowTaskAsyncDispAsync()
     {
-        lock (this)
+        lock (SingletonGate)
         {
             var value = _taskAsyncDisp;
             return value is not null ? Task.FromResult(value) : _taskAsyncDispInFlight ??= PublishTaskAsyncDispAsync();
         }
     }
 
-    private async Task<TaskAsyncDisp> PublishTaskAsyncDispAsync()
+    private static async Task<TaskAsyncDisp> PublishTaskAsyncDispAsync()
     {
         var created = await TaskAsyncDisp.CreateAsync().ConfigureAwait(false);
-        Volatile.Write(ref _taskAsyncDisp, created);
+        lock (SingletonGate) _taskAsyncDisp = created;
         return created;
     }
 
@@ -370,12 +405,36 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
     /// Desechar es probar campos, no recorrer una lista, <b>salvo</b> por los transitorios
     /// desechables, que son los unicos que obligan a llevar lista. Esa asimetria es una de las
     /// cosas que la matriz esta hecha para enseñar.
+    /// <para>
+    /// <b>Los singletons son estaticos, asi que hay que devolverlos a null.</b> Sin eso, el
+    /// siguiente contenedor del proceso heredaria instancias ya desechadas y la matriz mediria
+    /// objetos muertos. Con eso, la consecuencia es la contraria y tampoco es gratis: disponer un
+    /// contenedor afecta a todos los demas del proceso. No es una peculiaridad del banco sino el
+    /// precio real de emitir singletons estaticos, y aqui esta a la vista en lugar de escondido.
+    /// </para>
+    /// <para>
+    /// Las tareas en vuelo se limpian con ellos. Si no, un contenedor nuevo encontraria una tarea
+    /// ya completada apuntando a una instancia desechada y la entregaria como buena.
+    /// </para>
     /// </summary>
     public void Dispose()
     {
-        _syncDisp?.Dispose();
-        _vtDisp?.Dispose();
-        _taskDisp?.Dispose();
+        SyncDisp? syncDisp;
+        VtDisp? vtDisp;
+        TaskDisp? taskDisp;
+
+        lock (SingletonGate)
+        {
+            (syncDisp, _syncDisp) = (_syncDisp, null);
+            (vtDisp, _vtDisp) = (_vtDisp, null);
+            (taskDisp, _taskDisp) = (_taskDisp, null);
+            _vtDispInFlight = null;
+            _taskDispInFlight = null;
+        }
+
+        syncDisp?.Dispose();
+        vtDisp?.Dispose();
+        taskDisp?.Dispose();
 
         if (_transientDisposables is { } disposables)
         {
@@ -387,13 +446,57 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
     {
         Dispose();
 
-        if (_syncAsyncDisp is { } syncAsyncDisp) await syncAsyncDisp.DisposeAsync().ConfigureAwait(false);
-        if (_vtAsyncDisp is { } vtAsyncDisp) await vtAsyncDisp.DisposeAsync().ConfigureAwait(false);
-        if (_taskAsyncDisp is { } taskAsyncDisp) await taskAsyncDisp.DisposeAsync().ConfigureAwait(false);
+        SyncAsyncDisp? syncAsyncDisp;
+        VtAsyncDisp? vtAsyncDisp;
+        TaskAsyncDisp? taskAsyncDisp;
+
+        lock (SingletonGate)
+        {
+            (syncAsyncDisp, _syncAsyncDisp) = (_syncAsyncDisp, null);
+            (vtAsyncDisp, _vtAsyncDisp) = (_vtAsyncDisp, null);
+            (taskAsyncDisp, _taskAsyncDisp) = (_taskAsyncDisp, null);
+            _vtAsyncDispInFlight = null;
+            _taskAsyncDispInFlight = null;
+        }
+
+        if (syncAsyncDisp is not null) await syncAsyncDisp.DisposeAsync().ConfigureAwait(false);
+        if (vtAsyncDisp is not null) await vtAsyncDisp.DisposeAsync().ConfigureAwait(false);
+        if (taskAsyncDisp is not null) await taskAsyncDisp.DisposeAsync().ConfigureAwait(false);
 
         if (_transientAsyncDisposables is { } asyncDisposables)
         {
             foreach (var asyncDisposable in asyncDisposables) await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Devuelve los singletons estaticos que <b>no</b> son desechables a su estado inicial.
+    /// <para>
+    /// No forma parte de la semantica de un contenedor: existe porque los campos estaticos
+    /// sobreviven entre casos de prueba, y un caso que herede el singleton construido por el
+    /// anterior no esta midiendo ni comprobando lo que cree. <see cref="Dispose"/> ya limpia los
+    /// desechables porque tiene que hacerlo; esto limpia el resto.
+    /// </para>
+    /// </summary>
+    internal static void ResetSingletons()
+    {
+        lock (SingletonGate)
+        {
+            _syncPlain = null;
+            _syncDisp = null;
+            _syncAsyncDisp = null;
+            _vtPlain = null;
+            _vtDisp = null;
+            _vtAsyncDisp = null;
+            _taskPlain = null;
+            _taskDisp = null;
+            _taskAsyncDisp = null;
+            _vtPlainInFlight = null;
+            _vtDispInFlight = null;
+            _vtAsyncDispInFlight = null;
+            _taskPlainInFlight = null;
+            _taskDispInFlight = null;
+            _taskAsyncDispInFlight = null;
         }
     }
 }
