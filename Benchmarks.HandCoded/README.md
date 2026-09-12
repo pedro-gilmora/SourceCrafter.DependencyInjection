@@ -47,6 +47,10 @@ La verificacion semantica corre **siempre** antes de medir y aborta la corrida s
 de hardware (instrucciones retiradas, fallos de prediccion, fallos de cache) via ETW, que sin elevar
 no devuelve nada. Sin admin la corrida no falla: las columnas salen vacias, que es peor.
 
+**Y deja basura pesada.** Cada corrida de la tabla 2 escribe una traza ETW por metodo en
+`BenchmarkDotNet.Artifacts/`: **~760 MB por corrida**. Esta en `.gitignore`, pero conviene borrarla a
+mano porque no se limpia sola.
+
 ## Escrituras dentro del candado
 
 Los contenedores `*Locked*` son los titulares del eje "con candado", asi que **no usan `Volatile`
