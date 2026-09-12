@@ -16,6 +16,7 @@ $bench = ".\bin\Release\net10.0\Benchmarks.HandCoded.exe"
 
 & $bench --list              # tabla de valores; es tambien lo que sale sin argumentos
 & $bench --check             # solo verificacion semantica, no mide nada
+& $bench --cpu               # CPU y memoria bajo contienda (no usa BenchmarkDotNet)
 & $bench 3                   # control + publicacion
 & $bench 3841                # Report: control + los cuatro head-to-head
 & $bench 1 --fast            # iterar rapido (los tiempos NO son publicables)
@@ -41,6 +42,10 @@ lo incluye, el arnes avisa por consola de que las cifras no son publicables.
 una hora y no debe ser lo que pasa por escribir `dotnet run` sin pensar.
 
 La verificacion semantica corre **siempre** antes de medir y aborta la corrida si falla.
+
+**`--cpu` y la tabla 2 piden privilegios de administrador.** La tabla de publicacion lee contadores
+de hardware (instrucciones retiradas, fallos de prediccion, fallos de cache) via ETW, que sin elevar
+no devuelve nada. Sin admin la corrida no falla: las columnas salen vacias, que es peor.
 
 ## Escrituras dentro del candado
 
@@ -242,6 +247,63 @@ razon para preferir uno u otro no aparece en este banco, que es monohilo: un `lo
 no estorba entre peticiones porque cada ambito escribe en sus propios campos, mientras que un candado
 estatico serializa el proceso entero. Para scoped, `lock(this)`. Para singleton, da igual.
 
+### CPU y memoria: el contador de instrucciones cierra el camino caliente
+
+La tabla de tiempo no puede decidir el camino caliente: BenchmarkDotNet marca `ZeroMeasurement` en
+cuatro de las cinco filas ("indistinguible de un metodo vacio") y aun asi `lock(estatico)` marcaba
+`Ratio` 1,17, que se lee como una diferencia real. **Los contadores de hardware zanjan la duda sin
+ruido** (`dotnet run -c Release -- 2`, requiere admin):
+
+| Estrategia | Camino caliente | Publicar |
+|---|---:|---:|
+| `lock(this)` | **10 instr** | 161 instr |
+| `lock` estatico | **10 instr** | 148 instr |
+| `CompareExchange` | **10 instr** | 106 instr |
+| `Exchange` | **10 instr** | 103 instr |
+| lectura no volatil | **10 instr** | 161 instr |
+
+Diez instrucciones exactas en las cinco, con 0 branch-mispredictions, 0 cache-misses y 0 bytes. El
+empate del camino caliente deja de ser "no se distingue" y pasa a ser **identico**. La lectura no
+volatil tampoco se ahorra una sola instruccion, que es el argumento definitivo para no usarla.
+
+### CPU y memoria bajo contienda: aqui se invierte todo
+
+Lo anterior es a **un hilo**, y a un hilo un candado nunca espera. La pregunta de si el candado sale
+caro solo tiene sentido con varios hilos publicando a la vez, y ahi BenchmarkDotNet no llega. Lo mide
+`dotnet run -c Release -- --cpu`, que enfrenta N hilos por publicar el mismo servicio:
+
+| Hilos | Estrategia | CPU sobre el suelo | Bytes | Construcciones por publicacion |
+|---:|---|---:|---:|---:|
+| 2 | `lock` | **100 ns** | **32 B** | **1,00** |
+| 2 | `CompareExchange` | 199 ns | 49 B | 1,55 |
+| 2 | `Exchange` | 190 ns | 52 B | 1,62 |
+| 4 | `lock` | **381 ns** | **32 B** | **1,00** |
+| 4 | `CompareExchange` | 811 ns | 86 B | 2,70 |
+| 4 | `Exchange` | 776 ns | 80 B | 2,50 |
+| 8 | `lock` | 3.408 ns | **32 B** | **1,00** |
+| 8 | `CompareExchange` | 3.251 ns | 115 B | 3,61 |
+| 8 | `Exchange` | 3.024 ns | 121 B | 3,79 |
+
+**El orden sin contienda se da la vuelta.** A un hilo el atomico gastaba 106 instrucciones y el
+candado 161, un 52% mas. Con dos y cuatro hilos el candado gasta **la mitad de CPU** que el atomico,
+porque el perdedor de un candado duerme mientras que el perdedor de un CAS ya ha construido su
+instancia y la tira.
+
+**La memoria del candado es plana: 32 B pase lo que pase**, porque `??=` construye exactamente una
+vez. La del atomico crece con los hilos hasta casi cuadruplicarse. Esa basura es el mismo fenomeno
+que la sonda de `--check` cuenta como construcciones de mas, visto ahora en bytes.
+
+Lo unico que gana el atomico es **latencia a 8 hilos**: 450 ns de pared frente a 1.076 ns del candado,
+porque no serializa. Cuesta cuatro veces la memoria y no cambia la CPU. Y sigue siendo una latencia
+que se paga **una vez por servicio**.
+
+> Dos avisos de lectura sobre esta tabla. Las columnas de bytes y de construcciones son contadores
+> exactos y reproducen entre corridas; las de CPU no del todo. La fila del candado a 8 hilos llego a
+> dar 3.248 y 1.203 ns en dos corridas distintas (un factor de 2,7) mientras las atomicas repetian
+> dentro del 4%, porque aparcar y despertar hilos lo decide el planificador del sistema. Por eso la
+> sonda imprime una columna `disp` con la separacion entre repeticiones: **si `disp` es grande, esa
+> fila no tiene un valor unico y no se debe citar como si lo tuviera.**
+
 ## La matriz atomica
 
 Las cuatro tablas `Matrix*` cubren cada combinacion de *locking x lifetime x async-kind x
@@ -282,7 +344,7 @@ Por eso las celdas **sin candado + desechable no son una alternativa mas rapida:
 miden -- omitirlas dejaria un hueco que el lector rellenaria suponiendo -- pero no se publican como
 validas.
 
-## Tres trampas que este banco cazo
+## Cinco trampas que este banco cazo
 
 Las tres producian resultados que *parecian buenos*, que es lo que las hace peligrosas.
 
@@ -309,6 +371,25 @@ eager salen *mas baratas* que las de "crear" a secas (1,63 ns / 24 B frente a 8,
 un solo campo le basta al analisis de escape para eliminar el contenedor entero. Esas dos filas estan
 publicadas con la advertencia puesta, no borradas, porque el patron -- un escenario mas barato que
 otro estrictamente contenido en el -- es la firma de este fallo y conviene tenerla a la vista.
+
+### Y dos mas, en la sonda de contienda
+
+La sonda de `--cpu` nacio con dos defectos, y **los dos los delato su fila de control**. Se cuentan
+aqui porque ninguno daba error ni cifras absurdas a primera vista: daba tablas con pinta de correctas.
+
+**4. El contador de CPU cuantizado.** `Process.TotalProcessorTime` avanza a saltos de 15,625 ms. Con
+una ventana de 20.000 rondas cabian dos o tres saltos, asi que *todas* las cifras salian multiplos
+exactos de un tick -- y una fila marcaba **0 ns de CPU**, que es imposible. Corregido calibrando cada
+fila para que dure ~3 s, donde caben ~200 ticks y la cuantizacion baja del 1%.
+
+**5. El arnes que costaba mas que lo medido.** Con una publicacion por ronda, sincronizar 8 hilos en
+la barrera costaba ~3,6 us y la publicacion ~100 ns: la señal era el **3% del arnes**. El sintoma fue
+inconfundible en cuanto hubo control: diferencias **negativas**, es decir estrategias que "gastaban
+menos CPU que no hacer nada". Corregido publicando 64 servicios independientes por ronda, lo que
+amortiza la barrera y baja el suelo de 3.621 ns a 42 ns por publicacion.
+
+Ninguno de los dos se habria visto sin una fila que ejecute el arnes y nada mas. Es la misma leccion
+del grupo de control, cobrada por segunda vez.
 
 ## Metodologia
 

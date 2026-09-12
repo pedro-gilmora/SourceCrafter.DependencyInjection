@@ -1,4 +1,5 @@
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Diagnosers;
 
 namespace Benchmarks.HandCoded.Scenarios;
 
@@ -12,14 +13,30 @@ namespace Benchmarks.HandCoded.Scenarios;
 /// <para>
 /// <b>Las dos mitades de esta tabla miden cosas de naturaleza distinta y no se deben mezclar.</b>
 /// El camino caliente corre millones de veces y ahi las cinco estrategias ejecutan <i>el mismo
-/// codigo</i>: una lectura, una prueba de nulo y un salto. La publicacion corre <b>una vez por
-/// servicio en toda la vida del proceso</b>, y es la unica mitad donde la eleccion se nota.
+/// codigo</i>: una lectura, una prueba de nulo y un salto. Ya no es una suposicion -- la columna de
+/// instrucciones retiradas marca <b>10 en las cinco filas</b>, con cero fallos de prediccion y cero
+/// fallos de cache. La publicacion corre <b>una vez por servicio en toda la vida del proceso</b>, y
+/// es la unica mitad donde la eleccion se nota.
+/// </para>
+/// <para>
+/// <b>Por que hay contadores de hardware aqui.</b> La columna de tiempo no puede decidir el camino
+/// caliente: BenchmarkDotNet marca <c>ZeroMeasurement</c> en cuatro de las cinco filas, y aun asi
+/// <c>lock(estatico)</c> llego a marcar <c>Ratio</c> 1,17, que se lee como una diferencia real. El
+/// contador de instrucciones no tiene ruido y zanja la duda. <b>Requiere ejecutar como
+/// administrador</b>; sin elevar, las columnas salen vacias en lugar de fallar.
 /// </para>
 /// <para>
 /// De ahi la conclusion que la tabla debe hacer evidente: <b>optimizar la publicacion es optimizar
 /// algo que pasa una vez</b>. Aunque una estrategia fuese el doble de rapida publicando, el ahorro
 /// total en la vida del proceso son unos pocos nanosegundos por servicio. Lo que si es permanente es
 /// la correccion que se pierde por el camino, y eso no aparece en ninguna columna de tiempo.
+/// </para>
+/// <para>
+/// <b>Esta tabla es monohilo, y eso limita lo que puede concluir.</b> A un hilo un candado nunca
+/// espera, asi que aqui los atomicos salen mas baratos (106 instrucciones frente a 161). Con varios
+/// hilos publicando a la vez <b>el orden se invierte</b>: el perdedor de un candado duerme, mientras
+/// que el perdedor de un CAS ya construyo su instancia y la tira. Eso lo mide
+/// <see cref="ContentionProbe"/> con <c>--cpu</c>, no esta tabla.
 /// </para>
 /// <para>
 /// <b>Aviso de lectura sobre <c>Exchange</c>.</b> Va a salir de los mas rapidos publicando y
@@ -29,6 +46,11 @@ namespace Benchmarks.HandCoded.Scenarios;
 /// </para>
 /// </summary>
 [MemoryDiagnoser]
+[ThreadingDiagnoser]
+[HardwareCounters(
+    HardwareCounter.InstructionRetired,
+    HardwareCounter.BranchMispredictions,
+    HardwareCounter.CacheMisses)]
 public class PublicationBenchmark
 {
     private ScopedLockHolder _scopedLock = null!;

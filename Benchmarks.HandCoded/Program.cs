@@ -8,6 +8,8 @@ namespace Benchmarks.HandCoded;
 /// Modos:
 /// <list type="bullet">
 ///   <item><c>--check</c>: solo verificacion semantica. No mide nada.</item>
+///   <item><c>--cpu</c>: CPU y memoria de las estrategias de publicacion bajo contienda, que es el
+///   unico regimen donde divergen. BenchmarkDotNet no puede medir esto porque corre a un hilo.</item>
 ///   <item><c>--list</c>: imprime la tabla de valores de <see cref="Suite"/> y sale.</item>
 ///   <item><b>un entero</b>: mascara de bits de <see cref="Suite"/>. <c>-- 3</c> corre el control y
 ///   la tabla de publicacion. Tambien acepta hexadecimal (<c>0x0F</c>) o nombres separados por coma
@@ -36,6 +38,12 @@ public static class Program
         if (args.Contains("--check"))
         {
             return SemanticCheck.Run();
+        }
+
+        if (args.Contains("--cpu"))
+        {
+            ContentionProbe.Run();
+            return 0;
         }
 
         var fast = args.Contains("--fast");

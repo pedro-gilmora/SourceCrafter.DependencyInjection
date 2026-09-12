@@ -13,6 +13,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+    <PackageReference Include="BenchmarkDotNet.Diagnostics.Windows" Version="0.15.8" />
   </ItemGroup>
   <ItemGroup Label="Generadores contra los que se mide la version escrita a mano">
     <PackageReference Include="Jab" Version="0.12.0" PrivateAssets="all" />
