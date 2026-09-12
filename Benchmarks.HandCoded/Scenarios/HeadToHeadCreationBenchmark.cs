@@ -1,4 +1,5 @@
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Configs;
 
 using Benchmarks.HandCoded.Rivals;
 
@@ -29,47 +30,70 @@ namespace Benchmarks.HandCoded.Scenarios;
 /// registran los rivales. Un contenedor con nueve campos de servicio pesa mas que uno con tres y
 /// perderia esta tabla por su tamaño, no por su codigo.
 /// </para>
+/// <para>
+/// <b>CircleDI va en su propio grupo, con el eager escrito a mano como baseline.</b> Es la tabla
+/// donde mezclarlo con los perezosos hace mas daño, porque aqui la diferencia <i>no es de
+/// implementacion en absoluto</i>: CircleDI construye el grafo de singletons en el constructor, asi
+/// que en "crear" hace un trabajo que los perezosos aplazan, y en "crear+resolver" ya lo tiene hecho.
+/// Cada mitad de la tabla le daria un resultado opuesto y ninguno de los dos seria un juicio sobre su
+/// calidad. Enfrentado al eager escrito a mano, que tiene su mismo contrato, la comparacion vuelve a
+/// medir codigo.
+/// </para>
 /// </summary>
 [MemoryDiagnoser]
+[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
+[CategoriesColumn]
 public class HeadToHeadCreationBenchmark
 {
-    // ----- crear sin resolver -----
+    // ===== crear sin resolver =====
 
-    [Benchmark(Baseline = true, Description = "crear | Hand-coded lazy")]
-    public object CreateLazy() => new LeanLazyContainer();
-
-    [Benchmark(Description = "crear | Hand-coded eager")]
+    [BenchmarkCategory("crear | sin candados")]
+    [Benchmark(Baseline = true, Description = "Hand-coded eager")]
     public object CreateEager() => new EagerContainer();
 
-    [Benchmark(Description = "crear | SourceCrafter")]
-    public object CreateSourceCrafter() => new ScSingletonContainer();
-
-    [Benchmark(Description = "crear | CircleDI")]
+    [BenchmarkCategory("crear | sin candados")]
+    [Benchmark(Description = "CircleDI")]
     public object CreateCircleDi() => new CircleSingletonContainer();
 
-    [Benchmark(Description = "crear | Pure.DI")]
+    [BenchmarkCategory("crear | perezosos")]
+    [Benchmark(Baseline = true, Description = "Hand-coded lazy")]
+    public object CreateLazy() => new LeanLazyContainer();
+
+    [BenchmarkCategory("crear | perezosos")]
+    [Benchmark(Description = "SourceCrafter")]
+    public object CreateSourceCrafter() => new ScSingletonContainer();
+
+    [BenchmarkCategory("crear | perezosos")]
+    [Benchmark(Description = "Pure.DI")]
     public object CreatePureDi() => new PureDiSingletonContainer();
 
-    [Benchmark(Description = "crear | Jab")]
+    [BenchmarkCategory("crear | perezosos")]
+    [Benchmark(Description = "Jab")]
     public object CreateJab() => new JabSingletonContainer();
 
-    // ----- crear y resolver -----
+    // ===== crear y resolver =====
 
-    [Benchmark(Description = "crear+resolver | Hand-coded lazy")]
-    public object CreateResolveLazy() => new LeanLazyContainer().SyncPlain;
-
-    [Benchmark(Description = "crear+resolver | Hand-coded eager")]
+    [BenchmarkCategory("crear+resolver | sin candados")]
+    [Benchmark(Baseline = true, Description = "Hand-coded eager")]
     public object CreateResolveEager() => new EagerContainer().SingletonSyncPlain;
 
-    [Benchmark(Description = "crear+resolver | SourceCrafter")]
-    public object CreateResolveSourceCrafter() => new ScSingletonContainer().SyncPlain;
-
-    [Benchmark(Description = "crear+resolver | CircleDI")]
+    [BenchmarkCategory("crear+resolver | sin candados")]
+    [Benchmark(Description = "CircleDI")]
     public object CreateResolveCircleDi() => new CircleSingletonContainer().SyncPlain;
 
-    [Benchmark(Description = "crear+resolver | Pure.DI")]
+    [BenchmarkCategory("crear+resolver | perezosos")]
+    [Benchmark(Baseline = true, Description = "Hand-coded lazy")]
+    public object CreateResolveLazy() => new LeanLazyContainer().SyncPlain;
+
+    [BenchmarkCategory("crear+resolver | perezosos")]
+    [Benchmark(Description = "SourceCrafter")]
+    public object CreateResolveSourceCrafter() => new ScSingletonContainer().SyncPlain;
+
+    [BenchmarkCategory("crear+resolver | perezosos")]
+    [Benchmark(Description = "Pure.DI")]
     public object CreateResolvePureDi() => new PureDiSingletonContainer().Plain;
 
-    [Benchmark(Description = "crear+resolver | Jab")]
+    [BenchmarkCategory("crear+resolver | perezosos")]
+    [Benchmark(Description = "Jab")]
     public object CreateResolveJab() => new JabSingletonContainer().GetService<SyncPlain>();
 }

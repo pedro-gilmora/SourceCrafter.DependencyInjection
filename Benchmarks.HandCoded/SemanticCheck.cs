@@ -191,24 +191,29 @@ public static class SemanticCheck
         True("lock | los transitorios rastreados se desechan todos", first.Disposed && second.Disposed);
     }
 
-    // ================== la celda incorrecta ==================
+    // ================== las estrategias incorrectas ==================
 
     /// <summary>
-    /// Esto no comprueba nada: <b>demuestra un defecto</b>.
+    /// Esto no comprueba nada: <b>demuestra dos defectos distintos</b>, y la diferencia entre ellos
+    /// es la razon de ser de esta sonda.
     /// <para>
-    /// Publicar con <see cref="Interlocked.CompareExchange{T}"/> obliga a <i>construir antes de
-    /// intentar publicar</i>. Bajo llegada simultanea varios hilos construyen y solo uno gana:
-    /// los demas descartan lo que acaban de construir. Para un servicio sin recursos eso solo es
-    /// basura. Para un <see cref="IDisposable"/> es una <b>fuga</b>: la instancia perdedora nunca
-    /// se publico, el contenedor no la conoce, y por tanto nadie la va a desechar jamas. Y si el
-    /// constructor tenia efectos secundarios, se ejecutaron N veces.
+    /// <b>1. <see cref="Interlocked.CompareExchange{T}"/> descarta.</b> Obliga a construir antes de
+    /// poder intentar publicar, asi que bajo llegada simultanea varios hilos construyen y solo uno
+    /// gana. La <i>identidad se respeta</i> -- todos acaban viendo la instancia del ganador -- pero
+    /// lo que construyo el perdedor nunca se publico: el contenedor no lo conoce y nadie lo va a
+    /// desechar. Para un servicio sin recursos es basura; para un <see cref="IDisposable"/> es una
+    /// fuga.
     /// </para>
     /// <para>
-    /// La consecuencia para la matriz es que <b>las celdas "sin candado + desechable" no son una
-    /// alternativa mas rapida: son incorrectas</b>. Se miden igual, porque omitirlas dejaria un
-    /// hueco que el lector rellenaria suponiendo, pero se reportan marcadas. Publicar como
-    /// ganadora una celda que pierde recursos seria deshonesto por mucho que el cronometro le de
-    /// la razon.
+    /// <b>2. <see cref="Interlocked.Exchange{T}"/> rompe la identidad.</b> Escribe siempre, sin mirar
+    /// lo que habia. Un hilo puede publicar su instancia <i>encima</i> de otra que ya se entrego, de
+    /// modo que dos llamadores se quedan con dos "singletons" distintos vivos a la vez. No es un
+    /// descarte que converge: es un estado partido en dos que fallara mucho despues y lejos de aqui.
+    /// </para>
+    /// <para>
+    /// La columna de violaciones es la que separa las dos cosas. Un contador de constructores no
+    /// distingue "construi de mas" de "entregue dos cosas distintas", y son problemas de gravedad muy
+    /// diferente.
     /// </para>
     /// <para>
     /// La sonda usa hilos persistentes y una barrera. Crear un hilo por ronda <b>serializa las
@@ -219,19 +224,28 @@ public static class SemanticCheck
     private static void ProbeLockFreeDiscard()
     {
         Console.WriteLine();
-        Console.WriteLine("--- Sonda: descarte del CAS bajo llegada simultanea ---");
+        Console.WriteLine("--- Sonda: publicacion bajo llegada simultanea ---");
+        Console.WriteLine("  estrategia       hilos   ctors  de mas  identidad rota");
+
+        const int Rounds = 20_000;
 
         foreach (var threads in (int[])[2, 4, 8])
         {
-            var (lockCtors, casCtors, rounds) = RaceProbe(threads, rounds: 20_000);
-            var waste = (casCtors - rounds) * 100.0 / rounds;
+            foreach (var (name, strategy) in ((string, int)[])
+                     [("lock          ", 0), ("CompareExchange", 1), ("Exchange       ", 2)])
+            {
+                var (ctors, violations) = RaceRounds(threads, Rounds, strategy);
+                var waste = (ctors - Rounds) * 100.0 / Rounds;
 
-            Console.WriteLine(
-                $"  {threads,2} hilos | lock: {lockCtors,7} ctors | cas: {casCtors,7} ctors | " +
-                $"descartadas: {waste,5:0.0}%");
+                Console.WriteLine(
+                    $"  {name} {threads,5}  {ctors,7}  {waste,5:0.0}%  {violations,7} rondas");
+            }
         }
 
-        Console.WriteLine("  -> las celdas 'cas + desechable' FUGAN. Se miden, pero no se publican como validas.");
+        Console.WriteLine();
+        Console.WriteLine("  -> CompareExchange: descarta instancias. Incorrecto para servicios desechables.");
+        Console.WriteLine("  -> Exchange: ademas entrega instancias DISTINTAS a llamadores distintos.");
+        Console.WriteLine("     No es un singleton. Se mide para poder enseñar que sale rapido y aun asi no vale.");
     }
 
     private sealed class Counted
@@ -239,62 +253,54 @@ public static class SemanticCheck
         public Counted(StrongBox<int> ctors) => Interlocked.Increment(ref ctors.Value);
     }
 
-    private static (int LockCtors, int CasCtors, int Rounds) RaceProbe(int threads, int rounds)
+    /// <summary>
+    /// Devuelve cuantas instancias se construyeron y en cuantas rondas <b>dos llamadores vieron
+    /// instancias distintas</b>.
+    /// </summary>
+    private static (int Ctors, int Violations) RaceRounds(int threads, int rounds, int strategy)
     {
-        var lockCtors = new StrongBox<int>(0);
-        var casCtors = new StrongBox<int>(0);
+        var ctors = new StrongBox<int>(0);
+        var violations = 0;
 
-        RaceRounds(threads, rounds, lockCtors, useCas: false);
-        RaceRounds(threads, rounds, casCtors, useCas: true);
-
-        return (lockCtors.Value, casCtors.Value, rounds);
-    }
-
-    private static void RaceRounds(int threads, int rounds, StrongBox<int> ctors, bool useCas)
-    {
         Counted? shared = null;
         var gate = new Lock();
+        var observed = new Counted?[threads];
         using var barrier = new Barrier(threads);
         var workers = new Thread[threads];
 
-        // El ticket de reinicio es LOCAL a esta corrida a proposito. Como estatico se compartia
-        // entre llamadas con distinto numero de hilos, asi que el '% threads' podia quedar
-        // desalineado y reiniciar la instancia a media ronda: la sonda seguiria dando un numero,
-        // pero no el que dice medir.
-        var resetTicket = new StrongBox<int>(0);
-
         for (var i = 0; i < threads; i++)
         {
+            var index = i;
+
             workers[i] = new Thread(() =>
             {
                 for (var r = 0; r < rounds; r++)
                 {
                     barrier.SignalAndWait();
 
-                    if (Volatile.Read(ref shared) is null)
+                    // Lo que ESTE llamador se lleva. Es el dato que importa: no basta con contar
+                    // construcciones, hay que saber que instancia acabo en manos de quien.
+                    observed[index] = strategy switch
                     {
-                        if (useCas)
-                        {
-                            // Construir ANTES de poder publicar: de ahi el descarte.
-                            var created = new Counted(ctors);
-                            Interlocked.CompareExchange(ref shared, created, null);
-                        }
-                        else
-                        {
-                            lock (gate)
-                            {
-                                if (shared is null)
-                                {
-                                    Volatile.Write(ref shared, new Counted(ctors));
-                                }
-                            }
-                        }
-                    }
+                        1 => PublishWithCas(),
+                        2 => PublishWithExchange(),
+                        _ => PublishWithLock()
+                    };
 
                     barrier.SignalAndWait();
 
-                    if (Interlocked.Increment(ref resetTicket.Value) % threads == 0)
+                    if (index == 0)
                     {
+                        var first = observed[0];
+                        for (var t = 1; t < threads; t++)
+                        {
+                            if (!ReferenceEquals(observed[t], first))
+                            {
+                                violations++;
+                                break;
+                            }
+                        }
+
                         Volatile.Write(ref shared, null);
                     }
 
@@ -308,6 +314,56 @@ public static class SemanticCheck
         foreach (var worker in workers)
         {
             worker.Join();
+        }
+
+        return (ctors.Value, violations);
+
+        Counted PublishWithLock()
+        {
+            var value = Volatile.Read(ref shared);
+            if (value is not null)
+            {
+                return value;
+            }
+
+            lock (gate)
+            {
+                value = shared;
+                if (value is null)
+                {
+                    value = new Counted(ctors);
+                    Volatile.Write(ref shared, value);
+                }
+
+                return value;
+            }
+        }
+
+        Counted PublishWithCas()
+        {
+            var value = Volatile.Read(ref shared);
+            if (value is not null)
+            {
+                return value;
+            }
+
+            // Construir ANTES de poder publicar: de ahi el descarte.
+            var created = new Counted(ctors);
+            return Interlocked.CompareExchange(ref shared, created, null) ?? created;
+        }
+
+        Counted PublishWithExchange()
+        {
+            var value = Volatile.Read(ref shared);
+            if (value is not null)
+            {
+                return value;
+            }
+
+            // Escribe SIEMPRE, aunque otro hilo ya hubiese publicado y entregado la suya.
+            var created = new Counted(ctors);
+            Interlocked.Exchange(ref shared, created);
+            return created;
         }
     }
 

@@ -21,32 +21,72 @@ La verificacion semantica corre **siempre** antes de medir y aborta la corrida s
 
 Sin excepciones, y en este orden:
 
-1. **Mirar primero `ControlBenchmark`.** Son seis metodos que ejecutan el mismo codigo. Si no
-   quedan agrupados, ninguna otra tabla de esa corrida es publicable.
+1. **Mirar primero `ControlBenchmark`.** Son metodos identicos medidos a **tres magnitudes**. Si las
+   tres filas del grupo correspondiente a la tabla que quieres leer no quedan agrupadas, esa tabla no
+   es publicable.
 2. **Una diferencia con `RatioSD` comparable al `Ratio` no es una diferencia.**
 3. **La columna `Allocated` es fiable siempre**; es un recuento, no un tiempo. Cuando el tiempo es
    ruidoso y la memoria no, se reporta la memoria.
 4. **Sospechar de cualquier cifra por debajo de 0,1 ns.** Suele significar que el JIT elimino el
    escenario, no que el escenario sea rapido.
+5. **Sospechar tambien de cualquier escenario que salga mas barato que uno estrictamente contenido en
+   el.** Crear un contenedor eager cuesta 8,05 ns / 112 B; crearlo *y ademas* resolver un servicio
+   sale 1,63 ns / 24 B. No es magia: al leer un solo campo, el analisis de escape elimina el
+   contenedor entero. Esa fila no mide lo que dice medir.
 
-El suelo de discriminacion del instrumento en esta maquina es de **~9%**. Por debajo de ~3 ns el
-banco no distingue: dos filas con codigo identico llegaron a separarse un 21%.
+### Por que el control mide tres magnitudes
+
+Porque medir una sola lo hacia inutil justo donde mas falta hacia. La version anterior media el grafo
+profundo (~35 ns), pasaba con holgura, y con ese visto bueno se publicaban tablas de 0,5 ns cuyo
+`RatioSD` iba de 0,67 a 0,84. **Un control a 35 ns no dice nada sobre el ruido a 0,5 ns.**
+
+Y el resultado no es el que dicta la intuicion:
+
+| Magnitud | Dispersion entre codigo identico | Barra de error tipica |
+|---|---:|---:|
+| ~0,56 ns (lectura de campo, sin asignar) | **0,3%** | ±5,5% |
+| ~1,7 ns (una asignacion de 24 B) | **10,1%** | ±1,7% |
+| ~35 ns (grafo de 424 B) | **3,1%** | ±2,5% |
+
+El ruido **no crece ni decrece con la magnitud**: el peor grupo es el del medio. Lo que lo dispara es
+*asignar poco*, donde el estado del asignador pesa mas que el trabajo medido. Extrapolar el suelo de
+una magnitud a otra es exactamente el error que se cometio antes.
+
+Un matiz que hay que leer con cuidado: en el grupo de 0,56 ns las tres medias caen dentro del 0,3%
+**pero cada una trae una barra de ±5,5%**. Coincidir tan fino con ese error es suerte, no precision.
+El suelo real a esa magnitud es la barra, no la dispersion: **por debajo de un 6% a 0,5 ns no se
+afirma nada.**
 
 ## Resultados
 
 Medido en un i9-14900HX con afinidad fijada a los P-cores (mascara `0x5555`).
 
+### Las tablas van partidas: perezosos por un lado, CircleDI por otro
+
+**CircleDI no usa ni un solo primitivo de sincronizacion.** Construye todo en el constructor y lo deja
+en campos de solo lectura: es seguro entre hilos por inmutabilidad. Jab, Pure.DI y SourceCrafter son
+perezosos y pagan por contrato una lectura volatil, un salto y, en la primera resolucion, exclusion
+mutua.
+
+Meterlos en una sola tabla con un solo baseline presenta como diferencia de calidad lo que es una
+diferencia de contrato. Por eso cada head-to-head tiene dos grupos con su propio baseline: **sin
+candados** (hand-coded eager frente a CircleDI) y **perezosos** (hand-coded lazy frente a los tres).
+
+El efecto de separarlos es inmediato: contra su igual, **CircleDI empata en las cuatro tablas** --
+0,98x en ambito vacio, 0,98x en ciclo completo, 1,02x al crear, 1,01x al crear y resolver. Mezclado
+con los perezosos parecia ganar unas y perder otras, y ninguna de las dos lecturas era un juicio sobre
+su codigo.
+
 ### Donde se gana: el ambito vacio
 
-| | Tiempo | Asignado |
+| perezosos | Tiempo | Asignado |
 |---|---:|---:|
-| **Hand-coded lazy** | **3,18 ns** | **0 B** |
-| CircleDI | 6,67 ns | 48 B |
-| SourceCrafter | 9,63 ns | 56 B |
-| Pure.DI | 24,26 ns | 152 B |
-| Jab | 25,93 ns | 56 B |
+| **Hand-coded lazy** | **3,03 ns** | **0 B** |
+| SourceCrafter | 9,30 ns | 56 B |
+| Pure.DI | 16,66 ns | 152 B |
+| Jab | 21,76 ns | 56 B |
 
-**2,1x mas rapido que el mejor rival y sin tocar el monton.** El cero no es un error de medida: el
+**3,1x mas rapido que el mejor perezoso y sin tocar el monton.** El cero no es un error de medida: el
 analisis de escape de .NET 10 coloca el ambito en la pila, y solo puede hacerlo porque el ambito es
 pequeño (cuatro referencias), **no tiene candado propio** y **no tiene lista de desecho** -- desecha
 leyendo los campos que el compilador ya sabe que son desechables y saltando los nulos.
@@ -54,24 +94,65 @@ leyendo los campos que el compilador ya sabe que son desechables y saltando los 
 Es el escenario mayoritario en un servidor: una peticion servida desde cache, un chequeo de salud o
 una ruta estatica abren su ambito y no resuelven nada scoped.
 
+Detalle que merece atencion: el ambito **perezoso** (3,03 ns / 0 B) sale mas barato que el **eager**
+(5,31 ns / 48 B). Ser eager obliga a que el ambito contenga instancias construidas, y eso lo saca de
+la pila. La pereza no siempre cuesta.
+
 ### Donde se empata, y no se puede hacer otra cosa
 
-**Camino caliente de un singleton.** Las seis implementaciones caen entre 0,28 y 0,66 ns con
-`RatioSD` de 0,67 a 0,84. La tabla **no discrimina**, y esa es la conclusion: leer un campo
-publicado tiene un suelo duro que cualquiera alcanza. No queda nada que optimizar por ahi.
+**Camino caliente de un singleton.** Las seis implementaciones caen entre 0,507 y 0,590 ns. La
+separacion maxima es del 16%, pero las barras de error son de ±5-10% y el control a esa magnitud dice
+que por debajo del 6% no se afirma nada; el unico valor fuera de banda es CircleDI (0,92x) y esta
+justo en el limite. **La tabla no discrimina, y esa es la conclusion:** leer un campo publicado tiene
+un suelo duro que cualquiera alcanza. No queda nada que optimizar por ahi.
 
-**Ciclo completo de ambito.** Hand-coded eager 9,75 ns frente a CircleDI 10,56 ns: un 8%, dentro del
-ruido. Contra el resto si hay distancia: SourceCrafter 2,6x, Pure.DI 3,6x, Jab 4,1x.
+**Ciclo completo de ambito, sin candados.** Hand-coded eager 7,17 ns frente a CircleDI 6,97 ns, con
+72 B exactos en las dos filas. Empate.
 
-**Transitorio.** Las cinco implementaciones asignan **24 B exactos**. Los tiempos (2,1-2,7 ns) estan
-por debajo del suelo de discriminacion.
+**Transitorio.** Las cinco implementaciones asignan **24 B exactos**.
 
 ### Lo que la variante perezosa no puede ganar
 
-El ciclo completo de ambito con semantica perezosa cuesta 20,6 ns frente a los 10,56 de CircleDI.
-No es un defecto de implementacion: **la primera resolucion de cada ambito cae siempre en el camino
+El ciclo completo de ambito con semantica perezosa cuesta 15,88 ns frente a los 6,97 de CircleDI. No
+es un defecto de implementacion: **la primera resolucion de cada ambito cae siempre en el camino
 frio**, con su candado. CircleDI no lo paga porque construye en el constructor. Es el precio de la
-pereza, y se cobra una vez por ambito.
+pereza, y se cobra una vez por ambito. Contra sus iguales, el perezoso escrito a mano gana: 1,26x a
+SourceCrafter, 1,58x a Pure.DI, 2,15x a Jab.
+
+## Como publicar un singleton: cinco estrategias
+
+El eje aqui **no es la velocidad**, y la tabla lo demuestra desde los dos lados.
+
+**Camino caliente** (la instancia ya esta publicada): las cinco estrategias caen entre 0,479 y
+0,587 ns, dentro de la banda del control. Incluso la **lectura no volatil** (0,555 ns) sale igual que
+la volatil. En x86 `Volatile.Read` es gratis: **no hay nada que ganar evitandolo, y si hay un modelo
+de memoria que romper.**
+
+**Publicacion** (la primera vez, una sola vez por servicio en toda la vida del proceso):
+
+| Estrategia | Publicar | Construye de mas | Identidad rota |
+|---|---:|---:|---:|
+| `lock(this)` | 12,34 ns | 0,0% | 0 |
+| `lock` estatico | 11,43 ns | 0,0% | 0 |
+| `CompareExchange` | 6,36 ns | 14,5-38,2% | 0 |
+| `Exchange` | **5,30 ns** | 13,4-57,1% | **13-32% de las rondas** |
+
+**La opcion mas rapida es la unica que esta rota.** `Exchange` escribe siempre sin mirar lo que habia:
+el hilo A publica la instancia 1 y se la lleva, el hilo B publica la 2 encima, y todo el que llegue
+despues recibe la 2. Dos llamadores tienen dos "singletons" distintos vivos a la vez. La sonda de
+`--check` lo cuenta: hasta 6.373 de 20.000 rondas.
+
+`CompareExchange` es cualitativamente mejor -- **cero violaciones de identidad**, porque solo escribe
+si el campo sigue nulo y el perdedor devuelve lo que encontro -- pero descarta hasta un 38% de lo que
+construye. Si el servicio es `IDisposable`, a la instancia perdedora no la desecha nadie.
+
+Y lo que se compra con el riesgo son **6 nanosegundos que se cobran una vez por servicio**. Un proceso
+con cincuenta servicios ahorra 300 ns en toda su vida.
+
+Entre los dos candados no hay diferencia medible (12,34 vs 11,43 ns, con barras de ±1,01 y ±0,13). La
+razon para preferir uno u otro no aparece en este banco, que es monohilo: un `lock(this)` en un ambito
+no estorba entre peticiones porque cada ambito escribe en sus propios campos, mientras que un candado
+estatico serializa el proceso entero. Para scoped, `lock(this)`. Para singleton, da igual.
 
 ## La matriz atomica
 
@@ -90,23 +171,32 @@ disposability*. Hallazgos:
 
 ### Las celdas incorrectas
 
-Publicar sin candado usando `Interlocked.CompareExchange` obliga a **construir antes de poder
-publicar**. Medido por la sonda de `--check`:
+Publicar sin candado obliga a **construir antes de poder publicar**, y hay dos formas de hacerlo mal
+que no son igual de malas. La sonda de `--check` las separa (20.000 rondas por celda):
 
-| Hilos | Instancias descartadas |
-|---:|---:|
-| 2 | 11,3% |
-| 4 | 42,2% |
-| 8 | 82,3% |
+| Hilos | `CompareExchange` descarta | `Exchange` descarta | `Exchange` rompe identidad |
+|---:|---:|---:|---:|
+| 2 | 14,5% | 13,4% | 2.688 rondas (13,4%) |
+| 4 | 38,2% | 34,7% | 4.993 rondas (25,0%) |
+| 8 | 35,0% | 57,1% | 6.373 rondas (31,9%) |
 
-Para un servicio sin recursos eso solo es basura. Para un `IDisposable` es una **fuga**: la instancia
-perdedora nunca se publico, el contenedor no la conoce y nadie la va a desechar. Por eso las celdas
-**sin candado + desechable no son una alternativa mas rapida: son incorrectas**. Se miden -- omitirlas
-dejaria un hueco que el lector rellenaria suponiendo -- pero no se publican como validas.
+Con candado: **0,0% de descarte y 0 violaciones en las nueve celdas.**
 
-## Dos trampas que este banco cazo
+`CompareExchange` **converge**: la columna de identidad es cero en las tres filas, porque solo escribe
+si el campo sigue nulo y el perdedor devuelve lo que encontro. Su defecto es la fuga -- la instancia
+descartada nunca se publico, el contenedor no la conoce y si es `IDisposable` nadie la desecha.
 
-Ambas producian resultados que *parecian buenos*, que es lo que las hace peligrosas.
+`Exchange` es **cualitativamente peor**: escribe siempre, pisando lo que hubiera. Hasta un tercio de
+las rondas acaban con dos llamadores sosteniendo instancias distintas. Eso ya no es un singleton con
+una fuga, es que no es un singleton.
+
+Por eso las celdas **sin candado + desechable no son una alternativa mas rapida: son incorrectas**. Se
+miden -- omitirlas dejaria un hueco que el lector rellenaria suponiendo -- pero no se publican como
+validas.
+
+## Tres trampas que este banco cazo
+
+Las tres producian resultados que *parecian buenos*, que es lo que las hace peligrosas.
 
 **1. El escenario que no existia.** La primera version del ambito vacio midio `0,0097 ns con 0 B`.
 Una centesima de nanosegundo es la trescentesima parte de un ciclo de reloj. El JIT vio que el ambito
@@ -118,6 +208,19 @@ Corregido obligando a cada metodo a devolver el ambito.
 rivales, tres. Su ambito pesaba 144 B contra 48 B y perdia -- pero perdia por llevar tres veces mas
 servicios, no por estar peor escrito. Corregido con `LeanLazyContainer`, que registra exactamente los
 tres servicios de los rivales.
+
+**3. El control que validaba la magnitud equivocada.** Seis metodos identicos a ~35 ns pasaban con un
+3% de dispersion, y ese aprobado se usaba para publicar tablas de 0,5 ns cuyo `RatioSD` llegaba a
+0,84. El control daba **confianza falsa**: media una escala y avalaba otra. Corregido midiendo tres
+magnitudes, y el resultado desmonta la intuicion de la que venia el error -- el grupo mas ruidoso no
+es el mas rapido ni el mas lento, **es el del medio** (10,1% de dispersion a 1,7 ns, frente al 3,1% a
+35 ns). El ruido no es una funcion de la magnitud.
+
+**Todavia sin corregir:** en la tabla de creacion, las filas de "crear+resolver" de los contenedores
+eager salen *mas baratas* que las de "crear" a secas (1,63 ns / 24 B frente a 8,05 ns / 112 B). Leer
+un solo campo le basta al analisis de escape para eliminar el contenedor entero. Esas dos filas estan
+publicadas con la advertencia puesta, no borradas, porque el patron -- un escenario mas barato que
+otro estrictamente contenido en el -- es la firma de este fallo y conviene tenerla a la vista.
 
 ## Metodologia
 
@@ -152,4 +255,14 @@ es el artefacto de arriba fabricado a proposito.
 3. **Un `DisposeAsync` con camino rapido que se pueda alinear.** Es lo que permite al JIT probar que
    el ambito no escapa y colocarlo en la pila.
 4. **Preferir `ValueTask` a `Task` en las fabricas.** Cuatro veces menos asignacion.
-5. **No usar CAS para publicar servicios.** El descarte llega al 82%.
+5. **Publicar siempre con candado, nunca con `Interlocked`.** No es una preferencia de estilo: el
+   `Exchange` entrega instancias distintas a llamadores distintos en hasta un tercio de las carreras,
+   y el `CompareExchange`, que si respeta la identidad, fuga hasta un 38% de lo que construye. Lo que
+   se compra a cambio son **6 ns que se cobran una vez por servicio en toda la vida del proceso**.
+   Optimizar la publicacion es optimizar algo que pasa una vez.
+6. **No evitar `Volatile.Read` por rendimiento.** En el camino caliente cuesta exactamente lo mismo
+   que una lectura normal (0,555 ns frente a 0,479-0,587 ns de las demas estrategias, todas dentro de
+   la banda del control). Se estaria rompiendo el modelo de memoria a cambio de nada.
+7. **Decidir la pereza del candado por grafo.** Un contenedor cuyos servicios son todos eager no
+   necesita candado y no deberia asignarlo; uno con algun servicio perezoso lo necesita siempre y
+   hacerlo perezoso es sobrecoste puro. El generador sabe cual es cual en tiempo de compilacion.

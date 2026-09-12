@@ -1,4 +1,5 @@
 using BenchmarkDotNet.Attributes;
+using BenchmarkDotNet.Configs;
 
 using Benchmarks.HandCoded.Rivals;
 
@@ -7,34 +8,47 @@ namespace Benchmarks.HandCoded.Scenarios;
 /// <summary>
 /// Head-to-head: <b>ciclo de vida del ambito</b>. Es el escenario con margen real.
 /// <para>
-/// Mientras el camino caliente de un singleton tiene un suelo duro que todos alcanzan, el ciclo
-/// del ambito no lo tiene: lo que cuesta es lo que el ambito <b>asigne</b>, y eso son tres
-/// decisiones de diseño evitables -- el objeto del ambito, su candado si lo tiene, y su lista de
-/// desecho si la tiene. Aqui es donde una tabla discrimina de verdad.
+/// Mientras el camino caliente de un singleton tiene un suelo duro que todos alcanzan, el ciclo del
+/// ambito no lo tiene: lo que cuesta es lo que el ambito <b>asigne</b>, y eso son tres decisiones de
+/// diseño evitables -- el objeto del ambito, su candado si lo tiene, y su lista de desecho si la
+/// tiene.
 /// </para>
 /// <para>
-/// <b>Se desecha de forma asincrona en todas las filas, a proposito.</b> No es la forma mas
-/// barata; es la unica <i>uniforme</i>. El contenedor de SourceCrafter, al registrarse un servicio
-/// <see cref="IAsyncDisposable"/>, deja de implementar <see cref="IDisposable"/> por completo, asi
-/// que no tiene un <c>Dispose()</c> que medir. Darle a cada fila la forma de desecho que mas le
-/// conviene mediria seis cosas distintas; usar la unica que todos tienen mide una.
+/// <b>La tabla esta partida en dos grupos que no se comparan entre si, y esto es lo mas importante
+/// de todo el fichero.</b>
 /// </para>
 /// <para>
-/// <b>Las filas escritas a mano son la variante lean y la eager, ambas con exactamente los tres
-/// servicios que registran los rivales.</b> La primera version de esta tabla enfrentaba los
-/// contenedores de la matriz completa, que llevan nueve campos de servicio, contra los tres de Jab,
-/// CircleDI, Pure.DI y SourceCrafter: su ambito pesaba 144 B frente a 48 B y perdia, pero perdia
-/// por llevar tres veces mas servicios, no por estar peor escrito. Comparar tamaños de objeto
-/// exige que los objetos contengan lo mismo.
+/// <b>CircleDI no usa ni un solo primitivo de sincronizacion.</b> Construye todo en el constructor y
+/// lo deja en campos de solo lectura: es seguro entre hilos por inmutabilidad, no por candados.
+/// Enfrentarlo a un contenedor perezoso no compara dos implementaciones, compara <i>dos semanticas</i>,
+/// y el perezoso pierde por algo que no es un defecto suyo -- la primera resolucion de cada ambito
+/// cae por fuerza en un camino frio con exclusion mutua. Una tabla que mezcle los dos grupos
+/// convierte una diferencia de contrato en una diferencia de calidad, que es exactamente la clase de
+/// conclusion que este banco existe para no publicar.
 /// </para>
 /// <para>
-/// El ambito vacio no es un caso de laboratorio: es el <b>mayoritario</b>. Una peticion servida
-/// desde cache, un chequeo de salud o una ruta estatica abren su ambito y no resuelven nada
-/// scoped. Un contenedor que asigna el candado del ambito por adelantado paga en todas ellas por
-/// un servicio perezoso que nadie pide.
+/// Asi que hay dos comparaciones, cada una con su propio baseline:
+/// <list type="bullet">
+///   <item><b>eager</b>: la variante eager escrita a mano frente a CircleDI. Ninguno de los dos usa
+///   candados. Es la unica comparacion honesta para CircleDI.</item>
+///   <item><b>lazy</b>: la variante lean perezosa frente a Jab, Pure.DI y SourceCrafter, que son los
+///   tres perezosos. Aqui si se comparan implementaciones del mismo contrato.</item>
+/// </list>
+/// </para>
+/// <para>
+/// Todas las filas llevan los <b>mismos tres servicios</b>. Y todas desechan de forma asincrona, que
+/// no es la forma mas barata sino la unica <i>uniforme</i>: el contenedor de SourceCrafter, al
+/// registrarsele un <see cref="IAsyncDisposable"/>, deja de implementar <see cref="IDisposable"/> por
+/// completo y no tiene un <c>Dispose()</c> que medir.
+/// </para>
+/// <para>
+/// El ambito vacio no es un caso de laboratorio: es el <b>mayoritario</b>. Una peticion servida desde
+/// cache, un chequeo de salud o una ruta estatica abren su ambito y no resuelven nada scoped.
 /// </para>
 /// </summary>
 [MemoryDiagnoser]
+[GroupBenchmarksBy(BenchmarkLogicalGroupRule.ByCategory)]
+[CategoriesColumn]
 public class HeadToHeadScopeBenchmark
 {
     private LeanLazyContainer _lean = null!;
@@ -55,61 +69,62 @@ public class HeadToHeadScopeBenchmark
         _sc = new ScScopedContainer();
     }
 
-    // ===== ambito vacio: abrir y cerrar sin resolver nada =====
+    // ===== ambito vacio, sin candados: hand-coded eager vs CircleDI =====
 
-    [Benchmark(Baseline = true, Description = "vacio | Hand-coded lazy")]
-    public async Task EmptyLean()
-    {
-        var scope = _lean.CreateScope();
-        await scope.DisposeAsync();
-    }
-
-    [Benchmark(Description = "vacio | Hand-coded eager")]
+    [BenchmarkCategory("vacio | sin candados")]
+    [Benchmark(Baseline = true, Description = "Hand-coded eager")]
     public async Task EmptyEager()
     {
         var scope = _eager.CreateScope();
         await scope.DisposeAsync();
     }
 
-    [Benchmark(Description = "vacio | SourceCrafter")]
-    public async Task EmptySourceCrafter()
-    {
-        var scope = _sc.CreateScope();
-        await scope.DisposeAsync();
-    }
-
-    [Benchmark(Description = "vacio | CircleDI")]
+    [BenchmarkCategory("vacio | sin candados")]
+    [Benchmark(Description = "CircleDI")]
     public async Task EmptyCircleDi()
     {
         var scope = _circle.CreateScope();
         await scope.DisposeAsync();
     }
 
-    [Benchmark(Description = "vacio | Pure.DI")]
+    // ===== ambito vacio, perezosos =====
+
+    [BenchmarkCategory("vacio | perezosos")]
+    [Benchmark(Baseline = true, Description = "Hand-coded lazy")]
+    public async Task EmptyLean()
+    {
+        var scope = _lean.CreateScope();
+        await scope.DisposeAsync();
+    }
+
+    [BenchmarkCategory("vacio | perezosos")]
+    [Benchmark(Description = "SourceCrafter")]
+    public async Task EmptySourceCrafter()
+    {
+        var scope = _sc.CreateScope();
+        await scope.DisposeAsync();
+    }
+
+    [BenchmarkCategory("vacio | perezosos")]
+    [Benchmark(Description = "Pure.DI")]
     public async Task EmptyPureDi()
     {
         var scope = new PureDiScopedContainer(_pureDi);
         await scope.DisposeAsync();
     }
 
-    [Benchmark(Description = "vacio | Jab")]
+    [BenchmarkCategory("vacio | perezosos")]
+    [Benchmark(Description = "Jab")]
     public async Task EmptyJab()
     {
         var scope = _jab.CreateScope();
         await scope.DisposeAsync();
     }
 
-    // ===== ciclo completo: abrir, resolver un scoped desechable, cerrar =====
+    // ===== ciclo completo, sin candados =====
 
-    [Benchmark(Description = "completo | Hand-coded lazy")]
-    public async Task FullLean()
-    {
-        var scope = _lean.CreateScope();
-        _ = scope.SyncDisp;
-        await scope.DisposeAsync();
-    }
-
-    [Benchmark(Description = "completo | Hand-coded eager")]
+    [BenchmarkCategory("completo | sin candados")]
+    [Benchmark(Baseline = true, Description = "Hand-coded eager")]
     public async Task FullEager()
     {
         var scope = _eager.CreateScope();
@@ -117,15 +132,8 @@ public class HeadToHeadScopeBenchmark
         await scope.DisposeAsync();
     }
 
-    [Benchmark(Description = "completo | SourceCrafter")]
-    public async Task FullSourceCrafter()
-    {
-        var scope = _sc.CreateScope();
-        _ = scope.SyncDisp;
-        await scope.DisposeAsync();
-    }
-
-    [Benchmark(Description = "completo | CircleDI")]
+    [BenchmarkCategory("completo | sin candados")]
+    [Benchmark(Description = "CircleDI")]
     public async Task FullCircleDi()
     {
         var scope = _circle.CreateScope();
@@ -133,7 +141,28 @@ public class HeadToHeadScopeBenchmark
         await scope.DisposeAsync();
     }
 
-    [Benchmark(Description = "completo | Pure.DI")]
+    // ===== ciclo completo, perezosos =====
+
+    [BenchmarkCategory("completo | perezosos")]
+    [Benchmark(Baseline = true, Description = "Hand-coded lazy")]
+    public async Task FullLean()
+    {
+        var scope = _lean.CreateScope();
+        _ = scope.SyncDisp;
+        await scope.DisposeAsync();
+    }
+
+    [BenchmarkCategory("completo | perezosos")]
+    [Benchmark(Description = "SourceCrafter")]
+    public async Task FullSourceCrafter()
+    {
+        var scope = _sc.CreateScope();
+        _ = scope.SyncDisp;
+        await scope.DisposeAsync();
+    }
+
+    [BenchmarkCategory("completo | perezosos")]
+    [Benchmark(Description = "Pure.DI")]
     public async Task FullPureDi()
     {
         var scope = new PureDiScopedContainer(_pureDi);
@@ -141,7 +170,8 @@ public class HeadToHeadScopeBenchmark
         await scope.DisposeAsync();
     }
 
-    [Benchmark(Description = "completo | Jab")]
+    [BenchmarkCategory("completo | perezosos")]
+    [Benchmark(Description = "Jab")]
     public async Task FullJab()
     {
         var scope = _jab.CreateScope();
