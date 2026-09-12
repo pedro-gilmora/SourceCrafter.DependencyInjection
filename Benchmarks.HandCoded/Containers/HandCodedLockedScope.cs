@@ -38,7 +38,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
         lock (this)
         {
             var value = _syncPlain;
-            if (value is null) Volatile.Write(ref _syncPlain, value = new SyncPlain());
+            if (value is null) _syncPlain = value = new SyncPlain();
             return value;
         }
     }
@@ -55,7 +55,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
         lock (this)
         {
             var value = _syncDisp;
-            if (value is null) Volatile.Write(ref _syncDisp, value = new SyncDisp());
+            if (value is null) _syncDisp = value = new SyncDisp();
             return value;
         }
     }
@@ -72,7 +72,7 @@ public sealed class LockedScope(LockedContainer root) : IDisposable, IAsyncDispo
         lock (this)
         {
             var value = _syncAsyncDisp;
-            if (value is null) Volatile.Write(ref _syncAsyncDisp, value = new SyncAsyncDisp());
+            if (value is null) _syncAsyncDisp = value = new SyncAsyncDisp();
             return value;
         }
     }

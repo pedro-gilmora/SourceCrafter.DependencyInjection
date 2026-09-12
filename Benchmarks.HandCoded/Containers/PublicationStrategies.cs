@@ -59,12 +59,7 @@ public sealed class ScopedLockHolder
         lock (this)
         {
             var value = _value;
-            if (value is null)
-            {
-                value = new SyncPlain();
-                Volatile.Write(ref _value, value);
-            }
-
+            if (value is null) _value = value = new SyncPlain();
             return value;
         }
     }
@@ -102,12 +97,7 @@ public sealed class SingletonLockHolder
         lock (Gates.Singleton)
         {
             var value = _value;
-            if (value is null)
-            {
-                value = new SyncPlain();
-                Volatile.Write(ref _value, value);
-            }
-
+            if (value is null) _value = value = new SyncPlain();
             return value;
         }
     }
@@ -220,7 +210,7 @@ public sealed class PlainReadHolder
             if (value is null)
             {
                 value = new SyncPlain();
-                Volatile.Write(ref _value, value);
+                _value = value;
             }
 
             return value;

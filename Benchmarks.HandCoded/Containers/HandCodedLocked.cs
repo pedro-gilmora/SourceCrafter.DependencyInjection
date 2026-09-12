@@ -29,6 +29,22 @@ namespace Benchmarks.HandCoded;
 /// </summary>
 public sealed class LockedContainer : IDisposable, IAsyncDisposable
 {
+    // ===== Regla de escritura dentro del candado =====
+    //
+    // Los caminos frios de este fichero publican con una asignacion normal, NO con Volatile.Write.
+    // Salir de un 'lock' ya es una barrera de liberacion: garantiza que todo lo escrito dentro --
+    // el constructor del servicio incluido -- es visible para cualquiera que despues adquiera ese
+    // mismo candado. Añadir Volatile.Write dentro del candado no aporta ninguna garantia; solo
+    // repite una barrera que el monitor ya emite.
+    //
+    // El Volatile.READ del camino caliente si es imprescindible, y esa asimetria es la clave: el
+    // lector rapido NO toma el candado, asi que no hereda su barrera y necesita la suya. Lo unico
+    // que la lectura volatil impide es que el compilador o el procesador saquen la carga del campo
+    // fuera del bucle o la reordenen con las cargas del objeto al que apunta.
+    //
+    // Hay una excepcion en este fichero y esta marcada donde toca: las escrituras de los caminos
+    // asincronos ocurren DESPUES del await, fuera del candado, y por eso siguen siendo volatiles.
+
     // ===== Singleton, async-kind sincrono =====
 
     private SyncPlain? _syncPlain;
@@ -47,7 +63,7 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
         lock (this)
         {
             var value = _syncPlain;
-            if (value is null) Volatile.Write(ref _syncPlain, value = new SyncPlain());
+            if (value is null) _syncPlain = value = new SyncPlain();
             return value;
         }
     }
@@ -64,7 +80,7 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
         lock (this)
         {
             var value = _syncDisp;
-            if (value is null) Volatile.Write(ref _syncDisp, value = new SyncDisp());
+            if (value is null) _syncDisp = value = new SyncDisp();
             return value;
         }
     }
@@ -81,7 +97,7 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
         lock (this)
         {
             var value = _syncAsyncDisp;
-            if (value is null) Volatile.Write(ref _syncAsyncDisp, value = new SyncAsyncDisp());
+            if (value is null) _syncAsyncDisp = value = new SyncAsyncDisp();
             return value;
         }
     }
@@ -120,6 +136,9 @@ public sealed class LockedContainer : IDisposable, IAsyncDisposable
     private async Task<VtPlain> PublishVtPlainAsync()
     {
         var created = await VtPlain.CreateAsync().ConfigureAwait(false);
+        // Volatile aqui SI: esta escritura ocurre despues del await, fuera del candado, y es la
+        // que empareja con el Volatile.Read del camino caliente. Es la excepcion a la regla de
+        // arriba, no un descuido.
         Volatile.Write(ref _vtPlain, created);
         return created;
     }

@@ -8,14 +8,53 @@ uno, midiendo contra una implementacion escrita a mano que replica su semantica.
 
 ## Como se ejecuta
 
+Las tablas se seleccionan con una **mascara de bits**, no con comodines de cadena:
+
 ```powershell
 dotnet build -c Release
-.\bin\Release\net10.0\Benchmarks.HandCoded.exe --check          # solo verificacion semantica
-.\bin\Release\net10.0\Benchmarks.HandCoded.exe --fast --filter "*Control*"
-.\bin\Release\net10.0\Benchmarks.HandCoded.exe --filter "*"     # publicacion (~57 min, 111 casos)
+$bench = ".\bin\Release\net10.0\Benchmarks.HandCoded.exe"
+
+& $bench --list              # tabla de valores; es tambien lo que sale sin argumentos
+& $bench --check             # solo verificacion semantica, no mide nada
+& $bench 3                   # control + publicacion
+& $bench 3841                # Report: control + los cuatro head-to-head
+& $bench 1 --fast            # iterar rapido (los tiempos NO son publicables)
+& $bench Control,HeadToHeadScope   # tambien acepta nombres
+& $bench 4095                # All (~57 min, 111 casos)
 ```
 
+| Valor | Tabla | | Valor | Tabla |
+|---:|---|---|---:|---|
+| 1 | `Control` | | 128 | `MatrixTransientDisposable` |
+| 2 | `Publication` | | 256 | `HeadToHeadSingleton` |
+| 4 | `EagerVsLazy` | | 512 | `HeadToHeadScope` |
+| 8 | `ScopeLifecycle` | | 1024 | `HeadToHeadCreation` |
+| 16 | `MatrixSingleton` | | 2048 | `HeadToHeadTransient` |
+| 32 | `MatrixScoped` | | 240 | `Matrix` (las cuatro) |
+| 64 | `MatrixTransientPlain` | | 3840 | `HeadToHead` (las cuatro) |
+
+**El control es el bit 0 a proposito.** Es el unico valor impar util, asi que la costumbre correcta
+-- sumarle 1 a la mascara que te interese -- es tambien la mas corta de escribir. Si la mascara no
+lo incluye, el arnes avisa por consola de que las cifras no son publicables.
+
+**Sin argumentos no se mide nada**: se imprime la tabla y se sale. Correr las doce tablas cuesta casi
+una hora y no debe ser lo que pasa por escribir `dotnet run` sin pensar.
+
 La verificacion semantica corre **siempre** antes de medir y aborta la corrida si falla.
+
+## Escrituras dentro del candado
+
+Los caminos frios publican con una **asignacion normal**, nunca con `Volatile.Write` ni con
+`Interlocked`. Salir de un `lock` ya es una barrera de liberacion: garantiza que todo lo escrito
+dentro -- el constructor del servicio incluido -- es visible para quien despues adquiera ese mismo
+candado. Un `Volatile.Write` ahi dentro no añade ninguna garantia, solo repite una barrera que el
+monitor ya emite.
+
+La asimetria con la lectura es lo que hay que entender: **el `Volatile.Read` del camino caliente si
+es imprescindible**, porque el lector rapido *no toma el candado* y por tanto no hereda su barrera.
+
+Hay una sola excepcion, marcada en el codigo donde ocurre: las escrituras de los caminos asincronos
+suceden **despues del `await`, fuera del candado**, y esas siguen siendo volatiles.
 
 ## Protocolo de lectura
 

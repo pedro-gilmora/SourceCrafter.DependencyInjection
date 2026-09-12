@@ -48,12 +48,7 @@ public sealed class LeanLazyContainer : IDisposable, IAsyncDisposable
         lock (Gate)
         {
             var value = _syncPlain;
-            if (value is null)
-            {
-                value = new SyncPlain();
-                Volatile.Write(ref _syncPlain, value);
-            }
-
+            if (value is null) _syncPlain = value = new SyncPlain();
             return value;
         }
     }
@@ -70,12 +65,7 @@ public sealed class LeanLazyContainer : IDisposable, IAsyncDisposable
         lock (Gate)
         {
             var value = _syncDisp;
-            if (value is null)
-            {
-                value = new SyncDisp();
-                Volatile.Write(ref _syncDisp, value);
-            }
-
+            if (value is null) _syncDisp = value = new SyncDisp();
             return value;
         }
     }
@@ -92,12 +82,7 @@ public sealed class LeanLazyContainer : IDisposable, IAsyncDisposable
         lock (Gate)
         {
             var value = _syncAsyncDisp;
-            if (value is null)
-            {
-                value = new SyncAsyncDisp();
-                Volatile.Write(ref _syncAsyncDisp, value);
-            }
-
+            if (value is null) _syncAsyncDisp = value = new SyncAsyncDisp();
             return value;
         }
     }
@@ -148,12 +133,7 @@ public sealed class LeanLazyScope(LeanLazyContainer root) : IDisposable, IAsyncD
         lock (_root.Gate)
         {
             var value = _syncPlain;
-            if (value is null)
-            {
-                value = new SyncPlain();
-                Volatile.Write(ref _syncPlain, value);
-            }
-
+            if (value is null) _syncPlain = value = new SyncPlain();
             return value;
         }
     }
@@ -170,12 +150,7 @@ public sealed class LeanLazyScope(LeanLazyContainer root) : IDisposable, IAsyncD
         lock (_root.Gate)
         {
             var value = _syncDisp;
-            if (value is null)
-            {
-                value = new SyncDisp();
-                Volatile.Write(ref _syncDisp, value);
-            }
-
+            if (value is null) _syncDisp = value = new SyncDisp();
             return value;
         }
     }
@@ -192,12 +167,7 @@ public sealed class LeanLazyScope(LeanLazyContainer root) : IDisposable, IAsyncD
         lock (_root.Gate)
         {
             var value = _syncAsyncDisp;
-            if (value is null)
-            {
-                value = new SyncAsyncDisp();
-                Volatile.Write(ref _syncAsyncDisp, value);
-            }
-
+            if (value is null) _syncAsyncDisp = value = new SyncAsyncDisp();
             return value;
         }
     }
