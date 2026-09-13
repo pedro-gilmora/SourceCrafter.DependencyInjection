@@ -18,19 +18,25 @@ namespace Benchmarks.HandCoded.Scenarios;
 /// de todo el fichero.</b>
 /// </para>
 /// <para>
-/// <b>CircleDI no usa ni un solo primitivo de sincronizacion.</b> Construye todo en el constructor y
-/// lo deja en campos de solo lectura: es seguro entre hilos por inmutabilidad, no por candados.
-/// Enfrentarlo a un contenedor perezoso no compara dos implementaciones, compara <i>dos semanticas</i>,
-/// y el perezoso pierde por algo que no es un defecto suyo -- la primera resolucion de cada ambito
-/// cae por fuerza en un camino frio con exclusion mutua. Una tabla que mezcle los dos grupos
-/// convierte una diferencia de contrato en una diferencia de calidad, que es exactamente la clase de
-/// conclusion que este banco existe para no publicar.
+/// <b>CircleDI no resuelve perezosamente por defecto.</b> Construye todo en el constructor y lo deja
+/// en campos de solo lectura: en esta configuracion es seguro entre hilos por inmutabilidad, sin
+/// sincronizar al resolver. Enfrentarlo a un contenedor perezoso no compara dos implementaciones,
+/// compara <i>dos semanticas</i>, y el perezoso pierde por algo que no es un defecto suyo -- la
+/// primera resolucion de cada ambito cae por fuerza en un camino frio con exclusion mutua. Una tabla
+/// que mezcle los dos grupos convierte una diferencia de contrato en una diferencia de calidad, que
+/// es exactamente la clase de conclusion que este banco existe para no publicar.
+/// </para>
+/// <para>
+/// <b>Lo que NO se debe concluir de lo anterior es que CircleDI carezca de candados.</b> Con
+/// <c>CreationTiming.Lazy</c> emite el mismo doble chequeo con <c>lock</c> que este banco escribe a
+/// mano, y bloquea para rastrear transitorios desechables incluso en modo eager. La ventaja que se
+/// mide aqui viene de no ser perezoso, no de no sincronizar.
 /// </para>
 /// <para>
 /// Asi que hay dos comparaciones, cada una con su propio baseline:
 /// <list type="bullet">
-///   <item><b>eager</b>: la variante eager escrita a mano frente a CircleDI. Ninguno de los dos usa
-///   candados. Es la unica comparacion honesta para CircleDI.</item>
+///   <item><b>eager</b>: la variante eager escrita a mano frente a CircleDI. Ninguno de los dos
+///   sincroniza al resolver. Es la unica comparacion honesta para CircleDI.</item>
 ///   <item><b>lazy</b>: la variante lean perezosa frente a Jab, Pure.DI y SourceCrafter, que son los
 ///   tres perezosos. Aqui si se comparan implementaciones del mismo contrato.</item>
 /// </list>
@@ -69,9 +75,9 @@ public class HeadToHeadScopeBenchmark
         _sc = new ScScopedContainer();
     }
 
-    // ===== ambito vacio, sin candados: hand-coded eager vs CircleDI =====
+    // ===== ambito vacio, eager: hand-coded eager vs CircleDI =====
 
-    [BenchmarkCategory("vacio | sin candados")]
+    [BenchmarkCategory("vacio | eager")]
     [Benchmark(Baseline = true, Description = "Hand-coded eager")]
     public async Task EmptyEager()
     {
@@ -79,7 +85,7 @@ public class HeadToHeadScopeBenchmark
         await scope.DisposeAsync();
     }
 
-    [BenchmarkCategory("vacio | sin candados")]
+    [BenchmarkCategory("vacio | eager")]
     [Benchmark(Description = "CircleDI")]
     public async Task EmptyCircleDi()
     {
@@ -121,9 +127,9 @@ public class HeadToHeadScopeBenchmark
         await scope.DisposeAsync();
     }
 
-    // ===== ciclo completo, sin candados =====
+    // ===== ciclo completo, eager =====
 
-    [BenchmarkCategory("completo | sin candados")]
+    [BenchmarkCategory("completo | eager")]
     [Benchmark(Baseline = true, Description = "Hand-coded eager")]
     public async Task FullEager()
     {
@@ -132,7 +138,7 @@ public class HeadToHeadScopeBenchmark
         await scope.DisposeAsync();
     }
 
-    [BenchmarkCategory("completo | sin candados")]
+    [BenchmarkCategory("completo | eager")]
     [Benchmark(Description = "CircleDI")]
     public async Task FullCircleDi()
     {

@@ -27,13 +27,17 @@ namespace Benchmarks.HandCoded.Scenarios;
 /// bajo</i>. Una diferencia en esta tabla no significa nada sin mirar el desensamblado.
 /// </para>
 /// <para>
-/// <b>La tabla va partida en dos grupos.</b> CircleDI construye en el constructor y no usa ningun
-/// primitivo de sincronizacion: su captador es una lectura de campo de solo lectura, sin prueba de
-/// nulo y sin barrera. Los tres perezosos pagan por contrato una lectura volatil y un salto. Meter a
-/// los cinco en una sola tabla con un solo baseline presenta como diferencia de calidad lo que es
-/// una diferencia de semantica. De ahi el grupo "sin candados" (hand-coded eager frente a CircleDI,
-/// que es la unica comparacion justa para CircleDI) y el grupo "perezosos" (hand-coded lazy frente a
-/// Jab, Pure.DI y SourceCrafter).
+/// <b>La tabla va partida en dos grupos.</b> CircleDI construye en el constructor, asi que su
+/// captador es una lectura de campo de solo lectura, sin prueba de nulo y sin barrera. Los tres
+/// perezosos pagan por contrato una lectura y un salto. Meter a los cinco en una sola tabla con un
+/// solo baseline presenta como diferencia de calidad lo que es una diferencia de semantica. De ahi
+/// el grupo <b>eager</b> (hand-coded eager frente a CircleDI, que es la unica comparacion justa para
+/// CircleDI) y el grupo <b>perezosos</b> (hand-coded lazy frente a Jab, Pure.DI y SourceCrafter).
+/// </para>
+/// <para>
+/// El grupo se llama "eager" y no "sin candados" a proposito: <b>CircleDI si usa candados</b> cuando
+/// se le configura <c>CreationTiming.Lazy</c>, y tambien para rastrear transitorios desechables. Lo
+/// que le ahorra sincronizacion en esta tabla es construir en el constructor, no carecer de ella.
 /// </para>
 /// <para>
 /// <b>Expectativa declarada de antemano, para no interpretar ruido despues:</b> la corrida anterior
@@ -71,11 +75,11 @@ public class HeadToHeadSingletonBenchmark
         _ = _sc.SyncPlain;
     }
 
-    [BenchmarkCategory("sin candados")]
+    [BenchmarkCategory("eager")]
     [Benchmark(Baseline = true, Description = "Hand-coded eager")]
     public SyncPlain Eager() => _eager.SingletonSyncPlain;
 
-    [BenchmarkCategory("sin candados")]
+    [BenchmarkCategory("eager")]
     [Benchmark(Description = "CircleDI")]
     public SyncPlain CircleDi() => _circle.SyncPlain;
 

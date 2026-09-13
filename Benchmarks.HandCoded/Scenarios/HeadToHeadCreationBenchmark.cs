@@ -47,11 +47,11 @@ public class HeadToHeadCreationBenchmark
 {
     // ===== crear sin resolver =====
 
-    [BenchmarkCategory("crear | sin candados")]
+    [BenchmarkCategory("crear | eager")]
     [Benchmark(Baseline = true, Description = "Hand-coded eager")]
     public object CreateEager() => new EagerContainer();
 
-    [BenchmarkCategory("crear | sin candados")]
+    [BenchmarkCategory("crear | eager")]
     [Benchmark(Description = "CircleDI")]
     public object CreateCircleDi() => new CircleSingletonContainer();
 
@@ -73,11 +73,11 @@ public class HeadToHeadCreationBenchmark
 
     // ===== crear y resolver =====
 
-    [BenchmarkCategory("crear+resolver | sin candados")]
+    [BenchmarkCategory("crear+resolver | eager")]
     [Benchmark(Baseline = true, Description = "Hand-coded eager")]
     public object CreateResolveEager() => new EagerContainer().SingletonSyncPlain;
 
-    [BenchmarkCategory("crear+resolver | sin candados")]
+    [BenchmarkCategory("crear+resolver | eager")]
     [Benchmark(Description = "CircleDI")]
     public object CreateResolveCircleDi() => new CircleSingletonContainer().SyncPlain;
 

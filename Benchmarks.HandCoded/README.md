@@ -160,14 +160,26 @@ Medido en un i9-14900HX con afinidad fijada a los P-cores (mascara `0x5555`).
 
 ### Las tablas van partidas: perezosos por un lado, CircleDI por otro
 
-**CircleDI no usa ni un solo primitivo de sincronizacion.** Construye todo en el constructor y lo deja
-en campos de solo lectura: es seguro entre hilos por inmutabilidad. Jab, Pure.DI y SourceCrafter son
-perezosos y pagan por contrato una lectura volatil, un salto y, en la primera resolucion, exclusion
-mutua.
+**CircleDI construye todo en el constructor y lo deja en campos de solo lectura**, asi que en su
+configuracion por defecto resolver no sincroniza nada: es seguro entre hilos por inmutabilidad. Jab,
+Pure.DI y SourceCrafter son perezosos y pagan por contrato una lectura, un salto y, en la primera
+resolucion, exclusion mutua.
+
+> **Correccion.** Aqui se afirmo que "CircleDI no usa ni un solo primitivo de sincronizacion". Es
+> falso, y la diferencia importa. CircleDI **si usa candados**: con `CreationTiming.Lazy` emite
+> exactamente el mismo doble chequeo que este banco escribe a mano -- lectura no volatil fuera,
+> `lock`, segunda prueba de nulo dentro -- y para rastrear transitorios desechables bloquea
+> **incluso en modo eager**. Lo que le ahorra el candado en la resolucion no es carecer de candados,
+> es **no ser perezoso por defecto**. La razon para separarlo sigue en pie; el motivo que se daba, no.
+>
+> De paso, en esto CircleDI lo hace mejor que el codigo de este banco: bloquea sobre un
+> `private readonly Lock _lock = new()` dedicado, mientras que `LockedScope` usa `lock(this)`, que es
+> publicamente alcanzable. Y acierta en el eje: candado por ambito para los scoped, por contenedor
+> para los singleton.
 
 Meterlos en una sola tabla con un solo baseline presenta como diferencia de calidad lo que es una
-diferencia de contrato. Por eso cada head-to-head tiene dos grupos con su propio baseline: **sin
-candados** (hand-coded eager frente a CircleDI) y **perezosos** (hand-coded lazy frente a los tres).
+diferencia de contrato. Por eso cada head-to-head tiene dos grupos con su propio baseline: **eager**
+(hand-coded eager frente a CircleDI) y **perezosos** (hand-coded lazy frente a los tres).
 
 El efecto de separarlos es inmediato: contra su igual, **CircleDI empata en las cuatro tablas** --
 0,98x en ambito vacio, 0,98x en ciclo completo, 1,02x al crear, 1,01x al crear y resolver. Mezclado
@@ -203,7 +215,7 @@ que por debajo del 6% no se afirma nada; el unico valor fuera de banda es Circle
 justo en el limite. **La tabla no discrimina, y esa es la conclusion:** leer un campo publicado tiene
 un suelo duro que cualquiera alcanza. No queda nada que optimizar por ahi.
 
-**Ciclo completo de ambito, sin candados.** Hand-coded eager 7,17 ns frente a CircleDI 6,97 ns, con
+**Ciclo completo de ambito, grupo eager.** Hand-coded eager 7,17 ns frente a CircleDI 6,97 ns, con
 72 B exactos en las dos filas. Empate.
 
 **Transitorio.** Las cinco implementaciones asignan **24 B exactos**.
