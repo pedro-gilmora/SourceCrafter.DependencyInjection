@@ -335,6 +335,46 @@ disposability*. Hallazgos:
   codigo. Las seis celdas de transitorio no desechable son identicas por construccion y sirven de
   tercer grupo de control.
 
+### Por que el eje async no aparece en ningun head-to-head
+
+Porque no hay contra quien medirlo. Esto no se asume: se comprobo registrando en cada rival un
+servicio cuya unica construccion es `static ValueTask<T> CreateAsync()`. **CircleDI lo rechaza en
+compilacion:**
+
+```
+error CDI015: Wrong type of property 'Factory':
+'ValueTask<VtPlain>' <-> 'VtPlain' expected
+```
+
+En todo el codigo que genera, `async`, `await`, `Task<` y `ValueTask<` aparecen **unicamente** en
+`DisposeGeneration.g.cs`. Es decir: soporta desechado asincrono, pero no construccion asincrona. No
+es que lo haga mal ni que bloquee con `.Result` -- es que el eje no existe.
+
+Queda el atajo de registrar la *tarea* como tipo de servicio, que si compila. Vale la pena mirar lo
+que genera, porque es un buen ejemplo de por que "compila" no es "funciona":
+
+| | `[Singleton<ValueTask<T>>]` | `[Singleton<Task<T>>]` |
+|---|---|---|
+| Campo | `private ValueTask<T> _valueTask;` (**no** `readonly`) | `private readonly Task<T> _task;` |
+| Acceso | `public ref ValueTask<T> ValueTask => ref _valueTask;` | `public Task<T> Task => _task;` |
+| Al desechar | -- | `((IDisposable)_task).Dispose();` |
+
+Tres problemas, y ninguno es culpa de CircleDI: esta tratando una tarea como un valor cualquiera,
+que es exactamente lo que se le ha pedido.
+
+1. **Un `ValueTask` cacheado y entregado por `ref`.** Un `ValueTask` solo puede consumirse **una
+   vez**. Un singleton que reparte el mismo struct a todos los llamadores es comportamiento indefinido
+   en cuanto la fabrica sea `async` de verdad. Aqui no revienta solo porque `CreateAsync` envuelve un
+   resultado ya calculado.
+2. **`Task.Dispose()` al desechar el contenedor.** `Task` implementa `IDisposable`, asi que CircleDI
+   lo deseca; sobre una tarea aun pendiente eso **lanza `InvalidOperationException`**.
+3. **La fabrica corre en el constructor**, eager y sin que nadie observe la excepcion hasta el
+   primer `await`.
+
+Y en ningun caso se cachea el *resultado* esperado: cada consumidor recibe la tarea, no el valor, de
+modo que el ciclo de vida del servicio real se queda fuera del contenedor. Por eso el eje async se
+mide solo dentro de la matriz, contra las otras formas de este mismo banco.
+
 ### Las celdas incorrectas
 
 Publicar sin candado obliga a **construir antes de poder publicar**, y hay dos formas de hacerlo mal

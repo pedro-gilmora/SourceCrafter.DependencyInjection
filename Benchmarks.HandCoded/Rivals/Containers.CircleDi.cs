@@ -24,6 +24,14 @@ namespace Benchmarks.HandCoded.Rivals;
 /// dedicado, no sobre <c>this</c>, que es publicamente alcanzable. Ademas acierta en el eje, con un
 /// candado por ambito para los scoped y uno por contenedor para los singleton.
 /// </para>
+/// <para>
+/// <b>Solo se cubre el subconjunto sincrono porque CircleDI no construye de forma asincrona.</b>
+/// Registrar una fabrica que devuelva una tarea se rechaza en compilacion con
+/// <c>CDI015: Wrong type of property 'Factory': 'ValueTask&lt;VtPlain&gt;' &lt;-&gt; 'VtPlain' expected</c>.
+/// No hay <c>await</c>, ni <c>.Result</c>, ni <c>GetAwaiter().GetResult()</c> en nada de lo generado:
+/// el eje sencillamente no existe. Lo que si soporta es el <i>desechado</i> asincrono, via
+/// <c>DisposeGeneration</c>.
+/// </para>
 /// </summary>
 [ServiceProvider]
 [Singleton<SyncPlain>]
