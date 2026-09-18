@@ -62,6 +62,7 @@
 		<Compile Include="ServiceProviders.Enums.cs">
 			<DependentUpon>ServiceProviders.cs</DependentUpon>
 		</Compile>
+		<Compile Include="ServiceProviders.GenericApi.cs" />
 		<Compile Include="ServiceProviders.Models.cs">
 			<DependentUpon>ServiceProviders.cs</DependentUpon>
 		</Compile>
