@@ -44,7 +44,7 @@ public sealed class Partials : IIncrementalGenerator
         var compilation = context.CompilationProvider.Select((c, t) => new CompilationMeta(IsMsConfigInstalled(c), new Dictionary<string, ContainerConfigPartialEmmiter>(StringComparer.OrdinalIgnoreCase)));
 
         var servicesContainers = context.SyntaxProvider
-            .ForAttributeWithMetadataName("SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute",
+            .ForAttributeWithMetadataName("SourceCrafter.DependencyInjection.Attributes.ServiceProviderAttribute",
                 (node, a) => true,
                 (t, c) =>
                 {
@@ -58,7 +58,24 @@ public sealed class Partials : IIncrementalGenerator
 
                     HashSet<string> keys = new(StringComparer.Ordinal);
 
-                    foreach (var attr in cls.GetAttributes())
+                    // Dos pasadas, no una.
+                    //
+                    // 1. Un 'JsonSetting' solo se puede registrar si su 'JsonConfiguration'
+                    //    ya esta en 'methods'. Con una sola pasada eso dependia del orden en
+                    //    que el autor escribiera los atributos, y al fallar no emitia nada:
+                    //    el contenedor principal seguia refiriendose al miembro y salia un
+                    //    CS0103 sin ninguna pista de la causa.
+                    //
+                    // 2. 'JsonConfigurationAttribute' admite 'AttributeTargets.Assembly', que
+                    //    es donde vive naturalmente -- el fichero de configuracion es del
+                    //    ensamblado, no de un contenedor concreto. Solo se miraban los
+                    //    atributos de la clase, asi que '[assembly: JsonConfiguration]' se
+                    //    ignoraba en silencio y la extension no emitia absolutamente nada.
+                    //
+                    // Los de la clase se procesan despues que los del ensamblado para que el
+                    // registro mas especifico gane. 'JsonSetting' no admite 'Assembly', asi
+                    // que su pasada solo mira la clase.
+                    foreach (var attr in cls.ContainingAssembly.GetAttributes().Concat(cls.GetAttributes()))
                     {
                         switch (attr.AttributeClass?.ToGlobalNonGenericNamespace())
                         {
@@ -93,34 +110,37 @@ public sealed class Partials : IIncrementalGenerator
                                     emitter = new(nameSpace, containerTypeName, modifiers, typeName, cls.MetadataName, fileName, configMethodName, fieldName, optional, reloadOnChange, handleEnviroments);
                                 }
                                 break;
-                            case FullyQualifiedJsonSettingMetaName
-                                when attr.ConstructorArguments[0].Value is string { Length: > 0 } settingPath
-                                    && keys.Add(settingPath)
-                                    && (attr.ConstructorArguments[4].Value?.ToString() ?? "").Trim() is { } configKey
-                                    && methods.TryGetValue(configKey, out var configMethodName2):
+                        }
+                    }
 
-                                var type = attr.AttributeClass!.TypeArguments[0];
-                                var isPrimitive = type.IsPrimitive();
+                    // Segunda pasada: los settings, ya con toda la configuracion registrada.
+                    foreach (var attr in cls.GetAttributes())
+                    {
+                        if (attr.AttributeClass?.ToGlobalNonGenericNamespace() is not FullyQualifiedJsonSettingMetaName
+                            || attr.ConstructorArguments[0].Value is not string { Length: > 0 } settingPath
+                            || !keys.Add(settingPath)
+                            || (attr.ConstructorArguments[4].Value?.ToString() ?? "").Trim() is not { } configKey
+                            || !methods.TryGetValue(configKey, out var configMethodName2))
+                        {
+                            continue;
+                        }
 
-                                var lifetime = (Lifetime)(byte)attr.ConstructorArguments[1].Value!;
-                                var nameFormat2 = (string)attr.ConstructorArguments[3].Value!;
-                                var settingType = type.ToGlobalNamespaced();
-                                var shortName = type.ToTypeNameFormat();
-                                var key2 = attr.ConstructorArguments[2].Value?.ToString() ?? "";
-                                var identifier = nameFormat2.Replace("{0}", key2.Pascalize()).RemoveDuplicates()!;
-                                var fieldIdentifier = "_" + (key2 is { Length: > 0 } ? key2 : char.ToLower(shortName[0]) + shortName[1..]);
-                                bool nullable = (bool)attr.ConstructorArguments[5].Value!;
+                        var type = attr.AttributeClass!.TypeArguments[0];
+                        var isPrimitive = type.IsPrimitive();
+
+                        var lifetime = (Lifetime)(byte)attr.ConstructorArguments[1].Value!;
+                        var nameFormat2 = (string)attr.ConstructorArguments[3].Value!;
+                        var settingType = type.ToGlobalNamespaced();
+                        var shortName = type.ToTypeNameFormat();
+                        var key2 = attr.ConstructorArguments[2].Value?.ToString() ?? "";
+                        var identifier = nameFormat2.Replace("{0}", key2.Pascalize()).RemoveDuplicates()!;
+                        var fieldIdentifier = "_" + (key2 is { Length: > 0 } ? key2 : char.ToLower(shortName[0]) + shortName[1..]);
+                        bool nullable = (bool)attr.ConstructorArguments[5].Value!;
 
 #if DEBUG_SG
-                                Trace.WriteLine($"SCMSCONFDI: Building {shortName}{key2.GetHashCode()}{SymbolEqualityComparer.Default.GetHashCode(type)}");
+                        Trace.WriteLine($"SCMSCONFDI: Building {shortName}{key2.GetHashCode()}{SymbolEqualityComparer.Default.GetHashCode(type)}");
 #endif
-                                //#if DEBUG_SG || DEBUG
-                                //            var method = Dependencies.GetDependency(identity, containerTypeName, Lifetime.Singleton, settingType, key);
-                                //
-                                settings.Add(new SettingsMeta(settingPath, configMethodName2, type.AllowsNull(), isPrimitive, lifetime, settingType, identifier, fieldIdentifier, nullable));
-
-                                break;
-                        }
+                        settings.Add(new SettingsMeta(settingPath, configMethodName2, type.AllowsNull(), isPrimitive, lifetime, settingType, identifier, fieldIdentifier, nullable));
                     }
 
                     emitter?.Settings = settings;
