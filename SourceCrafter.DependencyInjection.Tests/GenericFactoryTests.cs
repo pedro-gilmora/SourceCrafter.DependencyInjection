@@ -228,20 +228,16 @@ public class GenericFactoryTests
     }
 
     /// <summary>
-    /// Estado actual: <b>la factory generica se valida pero todavia no resuelve nada</b>.
+    /// El cierre por consumo: registrar la plantilla y un consumidor basta para que
+    /// <c>ILogger&lt;OrderService&gt;</c> se resuelva.
     /// <para>
-    /// Registrar la factory no hace que <c>ILogger&lt;OrderService&gt;</c> sea satisfacible: el
-    /// consumidor falla con <c>SCDI03</c> ("no registrado") y el parametro se emite como
-    /// <c>default!</c>. Falta el cierre por consumo, que es el paso que recoge los tipos
-    /// construidos del grafo y los conecta con la factory.
-    /// </para>
-    /// <para>
-    /// Este test fija el hueco a proposito. Cuando el emparejado exista, debe fallar y
-    /// convertirse en la comprobacion de que la resolucion se emite.
+    /// El consumidor es la unica fuente que dice que ese tipo construido hace falta, asi que
+    /// la llamada emitida debe llevar el argumento de tipo explicito: en el sitio de uso no
+    /// hay nada de donde inferirlo.
     /// </para>
     /// </summary>
     [Fact]
-    public void AGenericFactoryDoesNotYetSatisfyItsConsumers()
+    public void AGenericFactorySatisfiesItsConsumers()
     {
         var result = GeneratorHarness.Run("""
             using SourceCrafter.DependencyInjection.Attributes;
@@ -265,10 +261,176 @@ public class GenericFactoryTests
             }
             """);
 
-        result.HasDiagnostic("SCDI03").Should().BeTrue(
-            "el cierre por consumo todavia no conecta la factory generica con sus consumidores");
+        result.Errors.Should().BeEmpty();
 
-        result.Source("Container").Should().Contain("default!",
-            "sin resolucion el parametro se emite como default!");
+        result.Source("Container").Should().Contain("_CreateLogger<global::Probe.OrderService>()",
+            "la llamada necesita el argumento de tipo explicito");
+    }
+
+    /// <summary>
+    /// Dos consumidores distintos cierran la misma plantilla contra tipos distintos. Cada uno
+    /// recibe su propia construccion; no se comparte nada porque es transient.
+    /// </summary>
+    [Fact]
+    public void EachConsumerClosesTheTemplateAgainstItsOwnType()
+    {
+        var result = GeneratorHarness.Run("""
+            using SourceCrafter.DependencyInjection.Attributes;
+
+            namespace Probe;
+
+            public interface ILogger<T> { }
+            public sealed class Logger<T> : ILogger<T> { }
+
+            public sealed class OrderService(ILogger<OrderService> log);
+            public sealed class Cart(ILogger<Cart> log);
+
+            [ServiceProvider]
+            [Transient(source: nameof(_CreateLogger))]
+            [Transient<OrderService>]
+            [Transient<Cart>]
+            public partial class Container
+            {
+                private static ILogger<T> _CreateLogger<T>() where T : class => new Logger<T>();
+            }
+            """);
+
+        result.Errors.Should().BeEmpty();
+
+        var source = result.Source("Container");
+
+        source.Should().Contain("_CreateLogger<global::Probe.OrderService>()");
+        source.Should().Contain("_CreateLogger<global::Probe.Cart>()");
+    }
+
+    /// <summary>
+    /// Una plantilla sin consumidores no emite nada. Es la contrapartida de ser transient sin
+    /// cache: no hay campo, ni miembro, ni tipo construido que justificar.
+    /// </summary>
+    [Fact]
+    public void ATemplateWithoutConsumersEmitsNothing()
+    {
+        var result = GeneratorHarness.Run("""
+            using SourceCrafter.DependencyInjection.Attributes;
+
+            namespace Probe;
+
+            public interface ILogger<T> { }
+            public sealed class Logger<T> : ILogger<T> { }
+
+            [ServiceProvider]
+            [Transient(source: nameof(_CreateLogger))]
+            public partial class Container
+            {
+                private static ILogger<T> _CreateLogger<T>() where T : class => new Logger<T>();
+            }
+            """);
+
+        result.Errors.Should().BeEmpty();
+        result.Sources.Should().BeEmpty("sin tipos construidos que resolver no hay nada que emitir");
+    }
+
+    /// <summary>
+    /// Las restricciones seleccionan: entre dos plantillas, solo es candidata la que el tipo
+    /// pedido satisface, y la otra se descarta en silencio sin que eso sea un error.
+    /// </summary>
+    [Fact]
+    public void ConstraintsSelectTheApplicableTemplate()
+    {
+        var result = GeneratorHarness.Run("""
+            using SourceCrafter.DependencyInjection.Attributes;
+
+            namespace Probe;
+
+            public interface IEntity { }
+            public interface IRepo<T> { }
+            public sealed class EntityRepo<T> : IRepo<T> where T : IEntity { }
+            public sealed class ValueRepo<T> : IRepo<T> where T : struct { }
+
+            public sealed class Customer : IEntity { }
+
+            public sealed class Consumer(IRepo<Customer> repo);
+
+            [ServiceProvider]
+            [Transient(source: nameof(_CreateEntityRepo))]
+            [Transient(source: nameof(_CreateValueRepo))]
+            [Transient<Consumer>]
+            public partial class Container
+            {
+                private static IRepo<T> _CreateEntityRepo<T>() where T : IEntity => new EntityRepo<T>();
+                private static IRepo<T> _CreateValueRepo<T>() where T : struct => new ValueRepo<T>();
+            }
+            """);
+
+        result.Errors.Should().BeEmpty();
+
+        var source = result.Source("Container");
+
+        source.Should().Contain("_CreateEntityRepo<global::Probe.Customer>()");
+        source.Should().NotContain("_CreateValueRepo");
+    }
+
+    /// <summary>
+    /// Cuando dos plantillas pueden producir el mismo tipo, no se inventa una precedencia por
+    /// orden de declaracion: se pide desambiguar con una clave.
+    /// </summary>
+    [Fact]
+    public void TwoApplicableTemplatesAreReportedAsAmbiguous()
+    {
+        var result = GeneratorHarness.Run("""
+            using SourceCrafter.DependencyInjection.Attributes;
+
+            namespace Probe;
+
+            public interface ILogger<T> { }
+            public sealed class Logger<T> : ILogger<T> { }
+
+            public sealed class OrderService(ILogger<OrderService> log);
+
+            [ServiceProvider]
+            [Transient(source: nameof(_CreateLogger))]
+            [Transient(source: nameof(_CreateOtherLogger))]
+            [Transient<OrderService>]
+            public partial class Container
+            {
+                private static ILogger<T> _CreateLogger<T>() where T : class => new Logger<T>();
+                private static ILogger<T> _CreateOtherLogger<T>() where T : class => new Logger<T>();
+            }
+            """);
+
+        result.HasDiagnostic("SCDI21").Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Si ninguna plantilla acepta el tipo pedido se informa la restriccion incumplida. Sin
+    /// esto el fallo aparece como un servicio no registrado, que es cierto pero inutil: la
+    /// factory existe, simplemente no admite ese tipo.
+    /// </summary>
+    [Fact]
+    public void ATypeNoTemplateAcceptsReportsTheConstraint()
+    {
+        var result = GeneratorHarness.Run("""
+            using SourceCrafter.DependencyInjection.Attributes;
+
+            namespace Probe;
+
+            public interface IEntity { }
+            public interface IRepo<T> { }
+            public sealed class Repo<T> : IRepo<T> where T : IEntity { }
+
+            public sealed class Plain { }
+
+            public sealed class Consumer(IRepo<Plain> repo);
+
+            [ServiceProvider]
+            [Transient(source: nameof(_CreateRepo))]
+            [Transient<Consumer>]
+            public partial class Container
+            {
+                private static IRepo<T> _CreateRepo<T>() where T : IEntity => new Repo<T>();
+            }
+            """);
+
+        result.HasDiagnostic("SCDI20").Should().BeTrue();
     }
 }

@@ -1,14 +1,11 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.VisualBasic;
 using SourceCrafter.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
-using System.Reflection.PortableExecutable;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -89,6 +86,16 @@ internal partial class ServiceProviders
             singletonAsyncDisposable = 0;
 
         HashSet<Diagnostic> diagnostics = [];
+
+        // Fabricas genericas pendientes de cerrar. Una plantilla no es un servicio: no se
+        // puede registrar `ILogger<T>` porque `T` no designa nada. Se guarda aparte y se
+        // instancia una vez por tipo construido que algun consumidor pida (cierre por
+        // consumo), que es lo unico que convierte la plantilla en registros concretos.
+        List<GenericFactoryTemplate> genericFactoryTemplates = [];
+
+        // Tipos construidos que ya se cerraron, para no registrar dos veces el mismo ni
+        // reentrar al resolver un parametro que la propia expansion acaba de introducir.
+        HashSet<string> closedGenericServices = [];
 
         ResolverBuilder selfDepInfo = new($"{providerFullTypeName}")
         {
@@ -229,7 +236,7 @@ internal partial class ServiceProviders
             }
         }
 
-        bool TryRegisterService(AttributeData? attr, ISymbol? sourceSymbol, out ResolverBuilder? resolver, CancellationToken cancelToken, ChildDependencyHandler? validateAsChildDependency = null)
+        bool TryRegisterService(AttributeData? attr, ISymbol? sourceSymbol, out ResolverBuilder? resolver, CancellationToken cancelToken, ChildDependencyHandler? validateAsChildDependency = null, IMethodSymbol? closedGenericFactory = null)
         {
             (SymbolKind sourceKind, ITypeSymbol? sourceType) = sourceSymbol switch
             {
@@ -288,6 +295,8 @@ internal partial class ServiceProviders
                 interfaceType = null;
             ISymbol?
                 factory = null;
+            IMethodSymbol?
+                genericFactoryTemplate = null;
             SymbolKind
                 factoryKind = default;
             Dictionary<DependencyKey, AsyncLocalResolver>
@@ -311,6 +320,21 @@ internal partial class ServiceProviders
             if (!IsValidServiceAttribute(attr, cancelToken))
             {
                 //(lifetime, exportType?.ToDisplayString(), type?.ToDisplayString(), name, false).Dump("Checking:");
+                return false;
+            }
+
+            // La plantilla se aparta con la clave y el atributo que la registraron, para que
+            // cada cierre herede lo que el usuario escribio. No produce resolver por si
+            // misma: sin consumidores no hay tipos construidos y no hay nada que emitir,
+            // que es justo el comportamiento que se quiere para una factory transient.
+            if (genericFactoryTemplate is { } template && attr is not null)
+            {
+                if (template.ReturnType.TryGetAsyncType(out var openReturn) is var _
+                    && openReturn is INamedTypeSymbol { IsGenericType: true } openNamed)
+                {
+                    genericFactoryTemplates.Add(new(template, attr, openNamed, name));
+                }
+
                 return false;
             }
 
@@ -475,12 +499,43 @@ internal partial class ServiceProviders
                 var paramName = prm.Name;
                 var paramKeyHash = paramName.GetHashCode();
 
-                if ((foundService is not null
-                        || dependencyValueBuilders.TryGetValue((paramFullTypeName, paramName), out foundServices!)
-                        || dependencyValueBuilders.TryGetValue((paramFullTypeName, ""), out foundServices!)
-                    && foundServices.Count > 0))
+                // Cierre por consumo. Si nadie ha registrado este tipo construido y hay
+                // plantillas genericas, este es el momento de instanciarlas: el parametro
+                // que se esta resolviendo es la unica fuente que dice que
+                // `ILogger<AuditLog>` hace falta. Se hace antes de buscar para que la
+                // consulta de abajo lo encuentre ya registrado y siga el camino normal.
+                if (foundService is null
+                    && genericFactoryTemplates.Count > 0
+                    && !dependencyValueBuilders.ContainsKey((paramFullTypeName, paramName))
+                    && !dependencyValueBuilders.ContainsKey((paramFullTypeName, "")))
                 {
-                    if (getServices)
+                    TryCloseGenericServiceFor(paramType, paramFullTypeName, paramName, prm);
+                }
+
+                // La busqueda se hace siempre, aunque un atributo del parametro ya haya
+                // dejado un `foundService`: las dos ramas de abajo desreferencian
+                // `foundServices`, asi que entrar con el diccionario a null es un fallo
+                // seguro. Antes la condicion era una cadena de `||` con un
+                // `&& foundServices.Count > 0` al final, pero `&&` liga mas fuerte que `||`,
+                // asi que la comprobacion de cardinalidad solo cubria la ultima alternativa
+                // y las otras dos podian entrar con null o con un diccionario vacio.
+                if (!dependencyValueBuilders.TryGetValue((paramFullTypeName, paramName), out foundServices!))
+                    dependencyValueBuilders.TryGetValue((paramFullTypeName, ""), out foundServices!);
+
+                if (foundService is not null || foundServices is { Count: > 0 })
+                {
+                    if (foundServices is null or { Count: 0 })
+                    {
+                        // Lo resolvio un atributo del propio parametro, asi que no esta
+                        // indexado bajo este tipo. Es el unico candidato que hay.
+                        resolvedSubKey = foundService!.Key;
+
+                        if (hasNoCachedDeps && !foundService.TransientWithoutCachedDeps)
+                            hasNoCachedDeps = false;
+
+                        CreateParamResolverBuilder(foundService);
+                    }
+                    else if (getServices)
                     {
                         int i = 0, len = foundServices.Values.Count - 1;
                         foreach (var service in foundServices.Values)
@@ -745,6 +800,105 @@ internal partial class ServiceProviders
                             BuildAndExpose = render.AppendMethod
                         });
 
+            // Cierra las plantillas genericas contra un tipo construido concreto que algun
+            // consumidor acaba de pedir. Registra el resultado como un servicio normal, de
+            // modo que a partir de aqui `ILogger<AuditLog>` deja de ser un caso especial.
+            void TryCloseGenericServiceFor(
+                ITypeSymbol requestedType,
+                string requestedFullName,
+                string requestedKey,
+                IParameterSymbol requestingParam)
+            {
+                // Un mismo tipo construido puede pedirse desde varios consumidores. Solo se
+                // cierra la primera vez: las siguientes ya lo encuentran registrado.
+                if (!closedGenericServices.Add(requestedFullName + '|' + requestedKey)) return;
+
+                GenericFactoryTemplate? chosen = null;
+                IMethodSymbol chosenClosed = null!;
+                GenericFactoryTemplate? ambiguousWith = null;
+                ITypeParameterSymbol? lastUnsatisfied = null;
+                string? lastCandidateName = null;
+
+                foreach (var candidate in genericFactoryTemplates)
+                {
+                    // La clave forma parte de la identidad del servicio: una plantilla con
+                    // clave solo atiende a parametros que piden esa misma clave.
+                    if (candidate.Key != requestedKey && candidate.Key is not "") continue;
+
+                    if (!TryCloseGenericFactory(candidate, requestedType, out var closed, out var unsatisfied))
+                    {
+                        if (unsatisfied is not null)
+                        {
+                            lastUnsatisfied = unsatisfied;
+                            lastCandidateName = candidate.Factory.Name;
+                        }
+
+                        continue;
+                    }
+
+                    if (chosen is null)
+                    {
+                        (chosen, chosenClosed) = (candidate, closed);
+                        continue;
+                    }
+
+                    // Dos plantillas producen el mismo tipo. No se inventa una precedencia
+                    // por orden de declaracion: eso haria depender el servicio elegido de
+                    // algo que no se lee en el sitio de registro. Se pide una clave, que es
+                    // el mecanismo de desambiguacion que el resto del contenedor ya usa.
+                    ambiguousWith = candidate;
+                    break;
+                }
+
+                var paramLocation = requestingParam.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancelToken).GetLocation()
+                    ?? attrSyntax.GetLocation();
+
+                if (ambiguousWith is not null)
+                {
+                    diagnostics.Add(ServiceContainerDiagnostics.AmbiguousGenericFactories(
+                        paramLocation,
+                        requestedType.ToDisplayString(),
+                        chosen!.Factory.Name,
+                        ambiguousWith.Factory.Name));
+
+                    return;
+                }
+
+                if (chosen is null)
+                {
+                    // Solo se informa si alguna candidata era del tipo generico correcto pero
+                    // fallo una restriccion. Si ninguna lo era, este tipo simplemente no tiene
+                    // nada que ver con las plantillas y el SCDI03 habitual es mejor mensaje.
+                    if (lastUnsatisfied is not null)
+                    {
+                        diagnostics.Add(ServiceContainerDiagnostics.NoGenericFactorySatisfiesType(
+                            paramLocation,
+                            requestedType.ToDisplayString(),
+                            lastCandidateName!,
+                            DescribeConstraint(lastUnsatisfied)));
+                    }
+
+                    return;
+                }
+
+                // Se vuelve a entrar por el registro normal con la fabrica ya construida. El
+                // atributo original viaja con la plantilla, asi que el servicio cerrado
+                // hereda lifetime y clave sin duplicar la lectura de argumentos.
+                TryRegisterService(chosen.Attribute, null, out _, cancelToken, null, chosenClosed);
+
+                static string DescribeConstraint(ITypeParameterSymbol typeParameter)
+                {
+                    if (typeParameter.HasReferenceTypeConstraint) return "class";
+                    if (typeParameter.HasValueTypeConstraint) return "struct";
+                    if (typeParameter.HasUnmanagedTypeConstraint) return "unmanaged";
+                    if (typeParameter.HasNotNullConstraint) return "notnull";
+
+                    return typeParameter.ConstraintTypes is [{ } first, ..]
+                        ? first.ToDisplayString()
+                        : typeParameter.Name;
+                }
+            }
+
             // Congela el estado del parser en un renderizador inmutable, ya proyectado a
             // cadenas, banderas y enumeraciones. Se invoca en cada salida exitosa,
             // siempre antes de que el emisor pueda ejecutar los delegados.
@@ -922,10 +1076,26 @@ internal partial class ServiceProviders
 
                                     continue;
 
-                                case { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [IMethodSymbol { ContainingType: ITypeSymbol containingType, ReturnsVoid: false, IsStatic: var isStatic } method] }:
+                                case { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [IMethodSymbol { ContainingType: ITypeSymbol containingType, ReturnsVoid: false, IsStatic: var isStatic } openMethod] }:
 
-                                    CheckInnerFactorySpecs(method);
-                                    CheckGenericFactorySpecs(method);
+                                    CheckInnerFactorySpecs(openMethod);
+                                    CheckGenericFactorySpecs(openMethod);
+
+                                    // Una plantilla generica no se registra como servicio:
+                                    // `ILogger<T>` no designa nada resoluble. Se aparta y se
+                                    // cierra despues, una vez por tipo construido que el grafo
+                                    // pida. Registrarla aqui es justo lo que hacia que el
+                                    // consumidor de `ILogger<AuditLog>` no encontrase nada.
+                                    if (openMethod.IsGenericMethod && closedGenericFactory is null)
+                                    {
+                                        genericFactoryTemplate = openMethod;
+                                        continue;
+                                    }
+
+                                    // En la reentrada por cierre llega la version construida,
+                                    // que ya devuelve el tipo concreto y por tanto recorre el
+                                    // resto del registro como cualquier factory no generica.
+                                    var method = closedGenericFactory ?? openMethod;
 
                                     factory = method;
                                     isStaticFactory = isStatic;
@@ -933,7 +1103,27 @@ internal partial class ServiceProviders
                                     initialAsyncType = AsyncKind = method.ReturnType.TryGetAsyncType(out factoryReturnType);
                                     isFactory = true;
                                     isFactoryFromCurrentProvider = SymbolEqualityComparer.Default.Equals(providerType, containingType);
-                                    factoryName = factory.Name;
+
+                                    // El nombre debe llevar los argumentos de tipo: lo que se
+                                    // emite es `_CreateLogger<AuditLog>()`, no `_CreateLogger()`.
+                                    // Sin ellos la llamada no compila, porque en el sitio de uso
+                                    // no hay nada de donde inferirlos.
+                                    factoryName = closedGenericFactory is { TypeArguments: { Length: > 0 } typeArgs }
+                                        ? $"{method.Name}<{string.Join(", ", typeArgs.Select(t => t.FullGlobalQualifiedName))}>"
+                                        : factory.Name;
+
+                                    if (closedGenericFactory is not null)
+                                    {
+                                        // En una factory el metodo es la implementacion. Al
+                                        // cerrar `ILogger<T>` el retorno es una interfaz, y
+                                        // dejar `type` nulo haria que el registro la tratase
+                                        // como interfaz sin implementar.
+                                        type = interfaceType = factoryReturnType;
+                                        typeFullName = interfaceFullTypeName = factoryReturnType!.FullGlobalQualifiedName;
+                                        factoryProviderName = isFactoryFromCurrentProvider ? providerTypeName : containingType.GlobalNamespaced;
+
+                                        continue;
+                                    }
 
                                     if (factoryReturnType is not { TypeKind: TypeKind.Interface, IsAbstract: true })
                                     {
@@ -1010,6 +1200,12 @@ internal partial class ServiceProviders
                         //    continue;
                     }
                 }
+
+                // Una plantilla generica se aparta aqui, antes de las comprobaciones que
+                // asumen un tipo concreto. `ILogger<T>` no tiene implementacion ni puede
+                // casar con nada: exigirselo produciria el SCDI03 que veiamos, cuando lo
+                // cierto es que todavia no hay nada que registrar.
+                if (genericFactoryTemplate is not null) return true;
 
                 // El alcance efectivo del candado. 'Default' se resuelve aqui, ya conocido el
                 // lifetime: un singleton comparte campo entre instancias del contenedor y
@@ -1461,6 +1657,167 @@ internal partial class ServiceProviders
             && SymbolEqualityComparer.Default.Equals(
                 lockType.ContainingAssembly,
                 compilation.GetSpecialType(SpecialType.System_Object).ContainingAssembly);
+    }
+
+    /// <summary>
+    /// Una fabrica generica a la espera de que el grafo diga que tipos construidos hacen
+    /// falta.
+    /// <para>
+    /// Se guarda el metodo sin construir junto al atributo que lo registro. El atributo se
+    /// necesita porque la expansion vuelve a pasar por el registro normal: un
+    /// <c>ILogger&lt;AuditLog&gt;</c> cerrado no es un caso especial, es un servicio como
+    /// cualquier otro, y debe heredar la clave y el resto de opciones que el usuario
+    /// escribio en la plantilla.
+    /// </para>
+    /// </summary>
+    private sealed record GenericFactoryTemplate(
+        IMethodSymbol Factory,
+        AttributeData Attribute,
+        INamedTypeSymbol OpenReturnType,
+        string Key);
+
+    /// <summary>
+    /// Decide si <paramref name="template"/> puede producir <paramref name="requested"/>, y
+    /// si puede, devuelve el metodo ya construido.
+    /// <para>
+    /// El emparejado es puramente estructural: se exige el mismo tipo generico original
+    /// (<c>ILogger&lt;&gt;</c> frente a <c>ILogger&lt;&gt;</c>) y se infiere cada parametro
+    /// de tipo por posicion. No se intenta unificar nada mas complejo, como un
+    /// <c>T</c> anidado dentro de otro generico: esos casos se rechazan en silencio y caen
+    /// en el diagnostico de "ninguna candidata", que es un mensaje mas util que una
+    /// inferencia parcial que luego falle al compilar.
+    /// </para>
+    /// </summary>
+    private static bool TryCloseGenericFactory(
+        GenericFactoryTemplate template,
+        ITypeSymbol requested,
+        out IMethodSymbol closedFactory,
+        out ITypeParameterSymbol? unsatisfied)
+    {
+        closedFactory = null!;
+        unsatisfied = null;
+
+        if (requested is not INamedTypeSymbol { IsGenericType: true } requestedNamed
+            || !SymbolEqualityComparer.Default.Equals(
+                requestedNamed.OriginalDefinition,
+                template.OpenReturnType.OriginalDefinition))
+        {
+            return false;
+        }
+
+        var typeParameters = template.Factory.TypeParameters;
+        var openArguments = template.OpenReturnType.TypeArguments;
+        var requestedArguments = requestedNamed.TypeArguments;
+
+        if (openArguments.Length != requestedArguments.Length) return false;
+
+        var inferred = new ITypeSymbol[typeParameters.Length];
+
+        for (var i = 0; i < openArguments.Length; i++)
+        {
+            if (openArguments[i] is not ITypeParameterSymbol openParameter)
+            {
+                // Posicion fija en la plantilla (por ejemplo `ILogger<int, T>`): debe casar
+                // exactamente, porque ahi no hay nada que inferir.
+                if (!SymbolEqualityComparer.Default.Equals(openArguments[i], requestedArguments[i]))
+                    return false;
+
+                continue;
+            }
+
+            var position = typeParameters.IndexOf(openParameter);
+
+            if (position < 0) return false;
+
+            // El mismo parametro de tipo aparecido dos veces debe recibir el mismo argumento.
+            if (inferred[position] is { } already
+                && !SymbolEqualityComparer.Default.Equals(already, requestedArguments[i]))
+            {
+                return false;
+            }
+
+            inferred[position] = requestedArguments[i];
+        }
+
+        foreach (var argument in inferred)
+            if (argument is null) return false;
+
+        // Las restricciones son el criterio de seleccion, no una validacion posterior: una
+        // candidata que no las satisface simplemente no es candidata, porque puede haber
+        // otra que si. Solo cuando ninguna encaja se informa, y entonces interesa saber que
+        // restriccion fallo.
+        for (var i = 0; i < typeParameters.Length; i++)
+        {
+            if (!SatisfiesConstraints(typeParameters[i], inferred[i]))
+            {
+                unsatisfied = typeParameters[i];
+                return false;
+            }
+        }
+
+        closedFactory = template.Factory.Construct(inferred);
+        return true;
+    }
+
+    /// <summary>
+    /// Comprueba las restricciones declaradas de un parametro de tipo contra el argumento
+    /// que se le quiere dar.
+    /// </summary>
+    private static bool SatisfiesConstraints(ITypeParameterSymbol typeParameter, ITypeSymbol argument)
+    {
+        if (typeParameter.HasReferenceTypeConstraint && !argument.IsReferenceType) return false;
+
+        if (typeParameter.HasValueTypeConstraint
+            && (!argument.IsValueType || IsNullableValueType(argument)))
+        {
+            return false;
+        }
+
+        if (typeParameter.HasUnmanagedTypeConstraint && argument is not { IsUnmanagedType: true }) return false;
+
+        if (typeParameter.HasNotNullConstraint && argument.NullableAnnotation is NullableAnnotation.Annotated) return false;
+
+        if (typeParameter.HasConstructorConstraint
+            && argument is not INamedTypeSymbol { IsAbstract: false, InstanceConstructors: { } ctors })
+        {
+            return false;
+        }
+        else if (typeParameter.HasConstructorConstraint
+            && argument is INamedTypeSymbol { InstanceConstructors: { } instanceCtors }
+            && !instanceCtors.Any(c => c.Parameters.Length == 0 && c.DeclaredAccessibility is Accessibility.Public))
+        {
+            return false;
+        }
+
+        foreach (var constraint in typeParameter.ConstraintTypes)
+        {
+            // Un constraint que a su vez depende de otro parametro de tipo (`where T : U`)
+            // no se verifica aqui: exigiria resolver el orden de inferencia. Se acepta y, si
+            // no encaja, el compilador lo dira sobre la llamada construida, que sigue siendo
+            // codigo del usuario.
+            if (constraint is ITypeParameterSymbol) continue;
+
+            if (!IsAssignableTo(argument, constraint)) return false;
+        }
+
+        return true;
+
+        static bool IsNullableValueType(ITypeSymbol type)
+            => type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T };
+    }
+
+    /// <summary>Conversion de identidad, herencia o implementacion de interfaz.</summary>
+    private static bool IsAssignableTo(ITypeSymbol source, ITypeSymbol target)
+    {
+        if (SymbolEqualityComparer.Default.Equals(source, target)) return true;
+
+        for (var baseType = source.BaseType; baseType is not null; baseType = baseType.BaseType)
+            if (SymbolEqualityComparer.Default.Equals(baseType, target)) return true;
+
+        foreach (var iface in source.AllInterfaces)
+            if (SymbolEqualityComparer.Default.Equals(iface, target)) return true;
+
+        return false;
     }
 
 }
