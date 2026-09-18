@@ -294,6 +294,36 @@ It is opt-in because those methods only make sense when you actually need to han
 container to code written against `IServiceProvider`; without it, every unresolvable call
 is a compile error instead of a runtime one.
 
+These members are the **fallback of interception**. An interceptor rewrites the call site,
+so it resolves with no comparison at all — but it can only do that when the compiler binds
+the concrete container there. When it cannot (the container arrives through an
+`IServiceProvider`-typed variable, or the call lives in another assembly) the call survives
+and lands here, where it is dispatched by runtime type:
+
+```csharp
+public TOut GetRequiredService<TOut>() where TOut : notnull
+{
+    switch (typeof(TOut).FullName)
+    {
+        case "MyApp.IClock":
+            return (TOut)(object)Clock;
+    }
+
+    throw new InvalidOperationException($"No service of type '{typeof(TOut)}' is registered.");
+}
+```
+
+Keyed members discriminate type and key in a single comparison, over
+`$"{typeof(TOut).FullName}|{key}"`. Constructed generics are the exception: their runtime
+`FullName` embeds the assembly-qualified name of every type argument, so it cannot be
+emitted as a `case` label and they are matched with `typeof(TOut) == typeof(X)` instead.
+
+When a type has several registrations, the **singular** members return the last one
+registered — the export type is the only criterion, whether it is an interface, an abstract
+class or a concrete one. The **plural** members return every registration of that type.
+`GetService<T>()` resolves exactly what `GetRequiredService<T>()` does but returns `null`
+instead of throwing, and neither of them resolves keyed or async registrations.
+
 The plural, un-keyed overload (`GetRequiredServices<T>()` and its async form) is declared
 even when *every* registration of that type carries a key, and it returns all of them. A
 call site that asks for "every service of this type" is not asking about keys, and the
@@ -304,7 +334,8 @@ interception already collects the keyed resolvers for it.
 A transient with no dependencies is built straight at the call site (`new Leaf()`), so by
 default it gets no named member on the container. That is the fastest shape, but it makes the
 service unreachable from *another assembly*: interception is per-compilation, so a consumer's
-call sites are never rewritten and the generic API falls back to a stub that throws.
+call sites are never rewritten, and with no member to forward to, the generic API cannot
+dispatch to it either.
 
 Opt in when your container is part of a library's public surface:
 
