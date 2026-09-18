@@ -8,7 +8,7 @@
 
 This is the **Roslyn code generator** that processes your container and generates optimized resolvers with full Microsoft.Extensions.Configuration integration:
 
-- Analyzes `[ServiceContainer]` classes and service attributes
+- Analyzes `[ServiceProvider]` classes and service attributes
 - Generates configuration-aware resolver methods
 - Supports `[JsonSetting<T>]` for strongly-typed settings
 - Integrates with `IConfiguration` from Microsoft.Extensions.DependencyInjection
@@ -47,7 +47,7 @@ Decorate your container with `[JsonSetting<T>]` to load configuration:
 ```csharp
 [assembly: JsonConfiguration]
 
-[ServiceContainer]
+[ServiceProvider]
 [JsonSetting<AppSettings>("AppSettings")]
 [Singleton<IDatabase, Database>]
 public partial class ServiceContainer;
@@ -133,7 +133,7 @@ Configuration changes are detected automatically:
 
 ### At Compile Time
 
-1. **Scans** your container class decorated with `[ServiceContainer]`
+1. **Scans** your container class decorated with `[ServiceProvider]`
 2. **Analyzes** all registered services: `[Singleton]`, `[Scoped]`, `[Transient]`, `[JsonSetting<T>]`
 3. **Builds** dependency graph and validates configuration section mapping
 4. **Generates** resolver methods with configuration binding and caching logic
