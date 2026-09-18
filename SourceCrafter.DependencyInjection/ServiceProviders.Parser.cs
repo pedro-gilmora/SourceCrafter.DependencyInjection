@@ -925,6 +925,7 @@ internal partial class ServiceProviders
                                 case { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [IMethodSymbol { ContainingType: ITypeSymbol containingType, ReturnsVoid: false, IsStatic: var isStatic } method] }:
 
                                     CheckInnerFactorySpecs(method);
+                                    CheckGenericFactorySpecs(method);
 
                                     factory = method;
                                     isStaticFactory = isStatic;
@@ -963,6 +964,43 @@ internal partial class ServiceProviders
                                 {
                                     diagnostics.Add(ServiceContainerDiagnostics.ThrowInnerFactorySpecs(method.Name, location2));
                                 }
+                            }
+
+                            // Una fabrica generica se decide por sus restricciones, asi que sin
+                            // ellas no hay criterio de emparejado; y solo puede ser transient
+                            // porque un cacheado exigiria un campo por tipo construido, conjunto
+                            // que no se conoce en el sitio de registro.
+                            void CheckGenericFactorySpecs(IMethodSymbol method)
+                            {
+                                if (!method.IsGenericMethod) return;
+
+                                var factoryLocation = method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancelToken)?.GetLocation()
+                                    ?? attrSyntax.GetLocation();
+
+                                foreach (var typeParameter in method.TypeParameters)
+                                {
+                                    if (!HasAnyConstraint(typeParameter))
+                                    {
+                                        diagnostics.Add(ServiceContainerDiagnostics.GenericFactoryTypeParameterNeedsConstraint(
+                                            factoryLocation, method.Name, typeParameter.Name));
+                                    }
+                                }
+
+                                if (lifetime is not Lifetime.Transient)
+                                {
+                                    diagnostics.Add(ServiceContainerDiagnostics.GenericFactoryMustBeTransient(
+                                        factoryLocation, method.Name, lifetime.ToString()));
+                                }
+
+                                // 'new()' queda fuera a proposito: no acota el conjunto de tipos
+                                // admisibles, solo exige un constructor sin parametros, asi que no
+                                // sirve como criterio de emparejado.
+                                static bool HasAnyConstraint(ITypeParameterSymbol typeParameter)
+                                    => typeParameter.HasReferenceTypeConstraint
+                                        || typeParameter.HasValueTypeConstraint
+                                        || typeParameter.HasUnmanagedTypeConstraint
+                                        || typeParameter.HasNotNullConstraint
+                                        || typeParameter.ConstraintTypes.Length > 0;
                             }
 
                         //case "disposability" when param.HasExplicitDefaultValue:
