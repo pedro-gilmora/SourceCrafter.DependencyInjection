@@ -190,4 +190,138 @@ public class JabLikeRoot
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Estudio: ¿cuanto de la ventaja de CircleDI en el escenario "ambito con resolucion"
+// es su forma de ambito, y cuanto es simplemente no sincronizar?
+//
+// La comparacion de contenedores media dos cosas a la vez (forma + candado), asi que
+// no permitia atribuir la diferencia. Aqui la forma se mantiene FIJA -- la ligera, la
+// de CircleDI: ambito propio, solo el campo scoped, sin virtuales -- y lo unico que
+// cambia es la sincronizacion del resolver:
+//
+//   - sin candado            : lo que hace CircleDI hoy
+//   - lock(this)             : nuestro LockOptions.Instance sobre esa misma forma
+//   - lock(objeto dedicado)  : un candado por dependencia, LockOptions.Dedicated
+//
+// Responde a la pregunta directamente: si CircleDI tuviera un candado configurado,
+// ¿seguiria rindiendo igual?
+// ---------------------------------------------------------------------------
+
+/// <summary>
+/// Abrir un ambito, resolver el servicio scoped y liberarlo. Misma forma en las tres
+/// variantes; lo unico que cambia es el candado.
+/// </summary>
+[MemoryDiagnoser]
+public class ScopeLockCostBenchmark
+{
+	private readonly LightScopeRoot _root = new();
+
+	[Benchmark(Baseline = true, Description = "No lock (CircleDI shape)")]
+	public ISession NoLock()
+	{
+		var scope = _root.CreateScopeUnlocked();
+		var session = scope.Session;
+		scope.Dispose();
+		return session;
+	}
+
+	[Benchmark(Description = "lock(this) on the same shape")]
+	public ISession LockThis()
+	{
+		var scope = _root.CreateScopeLockThis();
+		var session = scope.Session;
+		scope.Dispose();
+		return session;
+	}
+
+	[Benchmark(Description = "lock(dedicated object) on the same shape")]
+	public ISession LockDedicated()
+	{
+		var scope = _root.CreateScopeLockDedicated();
+		var session = scope.Session;
+		scope.Dispose();
+		return session;
+	}
+}
+
+/// <summary>
+/// Contenedor con la forma ligera: el ambito es una clase propia que solo lleva el campo
+/// scoped y una referencia al contenedor. Las tres clases de ambito son identicas salvo
+/// por la sincronizacion del resolver.
+/// </summary>
+public sealed class LightScopeRoot
+{
+	private static readonly IDatabase Database = new Database(new Settings());
+
+	public UnlockedScope CreateScopeUnlocked() => new(this);
+
+	public LockThisScope CreateScopeLockThis() => new(this);
+
+	public LockDedicatedScope CreateScopeLockDedicated() => new(this);
+
+	/// <summary>Sin sincronizar: un ambito modela una peticion y no se comparte entre hilos.</summary>
+	public sealed class UnlockedScope(LightScopeRoot root) : global::System.IDisposable
+	{
+		private readonly LightScopeRoot _root = root;
+		private Session? _session;
+
+		public ISession Session => _session ?? Create();
+
+		[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+		private Session Create() => _session ??= new Session(Database);
+
+		public void Dispose()
+		{
+			var disposing = _session;
+			_session = null;
+			disposing?.Dispose();
+		}
+	}
+
+	/// <summary>Cierra sobre <c>this</c>: no asigna candado, pero paga el monitor.</summary>
+	public sealed class LockThisScope(LightScopeRoot root) : global::System.IDisposable
+	{
+		private readonly LightScopeRoot _root = root;
+		private Session? _session;
+
+		public ISession Session => _session ?? Create();
+
+		[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+		private Session Create()
+		{
+			lock (this) return _session ??= new Session(Database);
+		}
+
+		public void Dispose()
+		{
+			var disposing = _session;
+			_session = null;
+			disposing?.Dispose();
+		}
+	}
+
+	/// <summary>Candado propio: ademas del monitor, asigna un objeto por ambito.</summary>
+	public sealed class LockDedicatedScope(LightScopeRoot root) : global::System.IDisposable
+	{
+		private readonly LightScopeRoot _root = root;
+		private readonly global::System.Threading.Lock _lock = new();
+		private Session? _session;
+
+		public ISession Session => _session ?? Create();
+
+		[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+		private Session Create()
+		{
+			lock (_lock) return _session ??= new Session(Database);
+		}
+
+		public void Dispose()
+		{
+			var disposing = _session;
+			_session = null;
+			disposing?.Dispose();
+		}
+	}
+}
+
 #pragma warning restore CA1816

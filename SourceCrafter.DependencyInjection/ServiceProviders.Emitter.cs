@@ -517,7 +517,7 @@ public static class ").Append(typeName).Append(@"Extensions
         /// </summary>
         static void DeclareEnsureLockHelper(StringBuilder code, ContainerRenderContext ctx, ref string? ensureLockType)
         {
-            if (ctx.InstanceLockFields.Count == 0) return;
+            if (!ctx.NeedsEnsureLockHelper) return;
 
             ensureLockType ??= ctx.InstanceLockTypeName;
 
@@ -525,16 +525,21 @@ public static class ").Append(typeName).Append(@"Extensions
         }
 
         /// <summary>
-        /// Candado unico compartido por todos los singletons sincronos del contenedor.
+        /// Candado unico del contenedor, compartido por los resolvers que eligen
+        /// <c>LockOptions.Global</c> (el valor por defecto de un singleton).
         /// <para>
         /// Un singleton no puede vigilarse con <c>lock(this)</c>: su campo de respaldo es
         /// <c>static</c>, asi que dos instancias distintas del contenedor bloquearian objetos
         /// distintos y no habria exclusion alguna. Necesita un objeto igualmente estatico.
         /// </para>
         /// <para>
-        /// Compartirlo entre todos los singletons es seguro porque el camino lento resuelve
-        /// fuera del <c>lock</c> toda dependencia que a su vez adquiera candados, de modo que
-        /// nunca se retiene este candado mientras se espera otro.
+        /// Compartirlo entre todos ellos es seguro porque el camino lento resuelve fuera del
+        /// <c>lock</c> toda dependencia que a su vez adquiera candados, de modo que nunca se
+        /// retiene este candado mientras se espera otro.
+        /// </para>
+        /// <para>
+        /// El campo se declara sin inicializar y se crea con <c>__EnsureLock</c> en la primera
+        /// resolucion: un contenedor que nunca resuelve no asigna nada.
         /// </para>
         /// </summary>
         static void AppendSingletonLock(StringBuilder code, ContainerRenderContext ctx)
@@ -542,8 +547,8 @@ public static class ").Append(typeName).Append(@"Extensions
             if (!ctx.NeedsSingletonLock) return;
 
             code.Append(@"
-    private static readonly ").Append(ctx.InstanceLockTypeName).Append(' ')
-                .Append(ResolverRenderer.SingletonLockFieldName).Append(@" = new();
+    private static ").Append(ctx.InstanceLockTypeName).Append("? ")
+                .Append(ResolverRenderer.SingletonLockFieldName).Append(@";
 ");
         }
 

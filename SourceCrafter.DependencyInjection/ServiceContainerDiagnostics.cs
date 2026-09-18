@@ -358,4 +358,26 @@ internal static class ServiceContainerDiagnostics
 
         return Diagnostic.Create(rule, location, parameterName, serviceTypeName, firstParameterName);
     }
+
+    /// <summary>
+    /// <c>LockOptions.Global</c> declara un candado <c>static</c> del contenedor, compartido
+    /// por todas sus instancias. Un servicio <c>Scoped</c> tiene un campo de respaldo por
+    /// ambito, asi que vigilarlo con un candado global serializaria ambitos independientes
+    /// sin aportar exclusion adicional: el alcance del candado debe coincidir con el del
+    /// campo. El valor correcto es <c>Instance</c> (el predeterminado) o <c>Dedicated</c>.
+    /// </summary>
+    internal static Diagnostic GlobalLockNotAllowedForScoped(Location location)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI18",
+            title: "Global lock is not compatible with scoped dependencies",
+            messageFormat: "LockOptions.Global cannot be used on a scoped dependency. Use LockOptions.Instance or LockOptions.Dedicated.",
+            category: "SourceCrafter.DependencyInjection.Usage",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            description: "A scoped dependency is backed by a per-scope field, so a container-wide static lock would serialize unrelated scopes without adding exclusion. The lock scope must match the field scope."
+        );
+
+        return Diagnostic.Create(rule, location);
+    }
 }

@@ -43,6 +43,13 @@ public enum Suite
     HeadToHeadCreation = 1 << 10,
     HeadToHeadTransient = 1 << 11,
 
+    /// <summary>
+    /// CircleDI forzado a <c>CreationTime = CreationTiming.Lazy</c> frente a SourceCrafter. Es la
+    /// unica tabla donde CircleDI compite bajo el mismo contrato que los perezosos, con el doble
+    /// chequeo y el candado que ese contrato obliga.
+    /// </summary>
+    HeadToHeadLazyCircle = 1 << 12,
+
     /// <summary>Las cuatro celdas de la matriz atomica (lifetime x async-kind x disposability).</summary>
     Matrix = MatrixSingleton | MatrixScoped | MatrixTransientPlain | MatrixTransientDisposable,
 
@@ -52,7 +59,7 @@ public enum Suite
     /// <summary>Lo que se publica en el README: control mas los cuatro head-to-head.</summary>
     Report = Control | HeadToHead,
 
-    All = Control | Publication | EagerVsLazy | ScopeLifecycle | Matrix | HeadToHead
+    All = Control | Publication | EagerVsLazy | ScopeLifecycle | Matrix | HeadToHead | HeadToHeadLazyCircle
 }
 
 /// <summary>
@@ -74,6 +81,7 @@ public static class SuiteMap
         (Suite.HeadToHeadScope, typeof(HeadToHeadScopeBenchmark)),
         (Suite.HeadToHeadCreation, typeof(HeadToHeadCreationBenchmark)),
         (Suite.HeadToHeadTransient, typeof(HeadToHeadTransientBenchmark)),
+        (Suite.HeadToHeadLazyCircle, typeof(HeadToHeadLazyCircleBenchmark)),
     ];
 
     public static Type[] Resolve(Suite suite) =>

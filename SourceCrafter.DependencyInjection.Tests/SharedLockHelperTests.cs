@@ -13,9 +13,9 @@ namespace SourceCrafter.DependencyInjection.Tests;
 public class SharedLockHelperTests
 {
     /// <summary>
-    /// Dos contenedores, cada uno con un resolver asincrono cacheado. Los asincronos son los
-    /// que conservan el esquema de un candado por dependencia, y por tanto los unicos que
-    /// necesitan crearlo perezosamente.
+    /// Dos contenedores, cada uno con un singleton cacheado. Los singletons usan
+    /// <c>LockOptions.Global</c> por defecto, y el candado global se crea de forma perezosa:
+    /// son los que arrastran el ayudante.
     /// </summary>
     const string TwoAsyncContainers = """
         using System.Threading.Tasks;
@@ -27,14 +27,14 @@ public class SharedLockHelperTests
         public sealed class Beta { }
 
         [ServiceProvider]
-        [Scoped(source: nameof(GetAlphaAsync))]
+        [Singleton(source: nameof(GetAlphaAsync))]
         public partial class FirstContainer
         {
             static Task<Alpha> GetAlphaAsync() => Task.FromResult(new Alpha());
         }
 
         [ServiceProvider]
-        [Scoped(source: nameof(GetBetaAsync))]
+        [Singleton(source: nameof(GetBetaAsync))]
         public partial class SecondContainer
         {
             static Task<Beta> GetBetaAsync() => Task.FromResult(new Beta());
@@ -88,8 +88,9 @@ public class SharedLockHelperTests
     }
 
     /// <summary>
-    /// Un contenedor sin resolvers asincronos no declara candados de instancia, asi que ni
-    /// arrastra el <c>using</c> ni provoca la emision del archivo compartido.
+    /// Un contenedor cuyas dependencias cacheadas son todas scoped se vigila con
+    /// <c>lock(this)</c>: no hay ningun campo de candado que crear, asi que ni arrastra el
+    /// <c>using</c> ni provoca la emision del archivo compartido.
     /// </summary>
     [Fact]
     public void ContainersThatNeedNoInstanceLockDoNotPullTheFile()
@@ -102,7 +103,7 @@ public class SharedLockHelperTests
             public sealed class Plain { }
 
             [ServiceProvider]
-            [Singleton<Plain>]
+            [Scoped<Plain>]
             public partial class SyncContainer { }
             """);
 

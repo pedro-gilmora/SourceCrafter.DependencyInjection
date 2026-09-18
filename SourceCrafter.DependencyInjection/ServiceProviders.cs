@@ -34,6 +34,7 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
         SourceParamName = "source",
         ImplParamName = "impl",
         IfaceParamName = "iface",
+        LocksParamName = "locks",
         SingletonAttr = $"{GlobalBaseAttributeNS}.SingletonAttribute",
         ScopedAttr = $"{GlobalBaseAttributeNS}.ScopedAttribute",
         TransientAttr = $"{GlobalBaseAttributeNS}.TransientAttribute",

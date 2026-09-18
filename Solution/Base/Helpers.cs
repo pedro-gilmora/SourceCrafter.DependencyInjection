@@ -229,7 +229,7 @@ namespace SourceCrafter.DependencyInjection
 
                 methodName = IsExternal ? methodName : Factory?.Name ?? methodName;
 
-                if (Factory != null &&IsCached && !methodName.EndsWith("Cached") && !methodName.EndsWith("Cache")) methodName += "Cached";
+                if (Factory != null && IsCached && !methodName.EndsWith("Cached") && !methodName.EndsWith("Cache")) methodName += "Cached";
                 if (!methodName.EndsWith("Async") && IsAsync) methodName += "Async";
 
                 var fieldName = "_" + methodName.Camelize();

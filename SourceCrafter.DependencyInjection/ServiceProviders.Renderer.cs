@@ -16,20 +16,20 @@ internal sealed class ContainerRenderContext
     internal readonly List<string> ScopedMembers = [];
 
     /// <summary>
-    /// Candados de instancia de los resolvers <b>asincronos</b> cacheados, que conservan el
-    /// esquema de un candado por dependencia. Ya no se asignan en el constructor: crear un
-    /// ambito pagaba un candado por cada servicio scoped declarado aunque nunca se resolviera
-    /// ninguno. La lista solo sirve para decidir si hay que emitir el ayudante <c>__EnsureLock</c>.
+    /// Algun resolver toma un candado creado de forma perezosa (<c>Global</c> o
+    /// <c>Dedicated</c>), asi que hay que emitir el ayudante compartido <c>__EnsureLock</c>.
+    /// Ya no se asignan candados en el constructor: crear un ambito pagaba un candado por
+    /// cada servicio scoped declarado aunque nunca se resolviera ninguno.
     /// </summary>
-    internal readonly List<string> InstanceLockFields = [];
+    internal bool NeedsEnsureLockHelper;
 
     /// <summary>Tipo con el que se declaran los candados de este contenedor.</summary>
     internal string InstanceLockTypeName = "object";
 
     /// <summary>
-    /// Algun resolver sincrono cacheado de vida <see cref="Lifetime.Singleton"/> se rindio con
-    /// el esquema compartido, asi que hay que emitir el candado estatico unico del contenedor.
-    /// Los scoped no necesitan campo: usan <c>this</c>.
+    /// Algun resolver cacheado usa el candado global del contenedor, asi que hay que emitir
+    /// su campo estatico unico. Los que usan <c>Instance</c> no necesitan campo: usan
+    /// <c>this</c>.
     /// </summary>
     internal bool NeedsSingletonLock;
 
@@ -95,6 +95,12 @@ internal sealed class ResolverRenderer
     /// el parser, que es quien puede consultar la compilacion.
     /// </summary>
     internal string lockTypeName { get; init; } = "object";
+
+    /// <summary>
+    /// Alcance del candado que protege al campo de respaldo, ya resuelto por el parser:
+    /// nunca vale <see cref="LockOptions.Default"/>.
+    /// </summary>
+    internal LockOptions lockOption { get; init; } = LockOptions.Global;
 
     internal IReadOnlyList<ParamBuildOptions> appendParams { get; init; } = [];
 
@@ -204,13 +210,34 @@ internal sealed class ResolverRenderer
     /// Expresion que se pasa a <c>lock(...)</c>. Debe tener el mismo alcance que el campo:
     /// un campo <c>static</c> vigilado con <c>lock(this)</c> no ofrece exclusion alguna,
     /// porque cada instancia bloquearia un objeto distinto.
+    ///
+    /// <para>Tanto el candado global como el dedicado se crean de forma perezosa con
+    /// <c>__EnsureLock</c>, asi que un contenedor que nunca resuelve no asigna ninguno.</para>
     /// </summary>
-    internal string LockExpression =>
-        UsesSharedLock
-            ? lifetime is Lifetime.Singleton ? SingletonLockFieldName : "this"
-            : lifetime is Lifetime.Singleton
-                ? LockFieldName
-                : EnsureLockMethodName + "(ref " + LockFieldName + ")";
+    internal string LockExpression => lockOption switch
+    {
+        LockOptions.Instance => "this",
+        LockOptions.Dedicated => EnsureLockMethodName + "(ref " + LockFieldName + ")",
+        _ => EnsureLockMethodName + "(ref " + SingletonLockFieldName + ")"
+    };
+
+    /// <summary>
+    /// Con <see cref="LockOptions.None"/> el camino lento no toma candado: dos hilos pueden
+    /// construir a la vez y uno de los valores se descarta.
+    /// </summary>
+    internal bool UsesLock => lockOption is not LockOptions.None;
+
+    /// <summary>
+    /// Apertura de la region protegida del camino lento. Con
+    /// <see cref="LockOptions.None"/> queda un bloque desnudo, para que la sangria y el
+    /// alcance de los locales declarados dentro no cambien segun la opcion elegida.
+    /// </summary>
+    internal string LockBlockOpen => UsesLock
+        ? @"
+        lock(" + LockExpression + @")
+        {"
+        : @"
+        {";
 
     /// <summary>
     /// Todo el proveedor comparte un unico token, copiado una sola vez en un campo de
@@ -359,44 +386,32 @@ internal sealed class ResolverRenderer
 						code.Append(exportTypeFullName).Append("? ").Append(ResultFieldName).Append(';');
 					}
 
-					// El candado tiene el mismo alcance que el campo que protege.
+					// El candado tiene el mismo alcance que el campo que protege, y ahora lo
+					// elige el autor con 'LockOptions'. Los valores por defecto ('Global' para
+					// singleton, 'Instance' para scoped) los resuelve el parser.
 					//
-					// Los resolvers sincronos comparten un unico candado por lifetime: 'this'
-					// para scoped y un estatico del contenedor para singleton. Es correcto
-					// porque el camino lento iza fuera del 'lock' todo lo que adquiere candados,
-					// asi que nadie retiene uno mientras pide otro. Medido: un ciclo completo de
-					// ambito baja de 43,33 ns / 192 B a 30,63 ns / 96 B, porque cada
-					// System.Threading.Lock que dejamos de asignar son 40 B.
-					//
-					// Los asincronos conservan el candado por dependencia porque todavia
-					// resuelven dentro de la region protegida. Se crean de forma perezosa: si
-					// se asignaran en el constructor, cada CreateScope() pagaria un candado por
-					// servicio scoped declarado aunque el ambito no resolviera ninguno.
+					// Ningun candado se asigna en el constructor: si se hiciera, cada
+					// CreateScope() pagaria un candado por servicio scoped declarado aunque el
+					// ambito no resolviera ninguno. Medido: un ciclo completo de ambito baja de
+					// 43,33 ns / 192 B a 30,63 ns / 96 B, porque cada System.Threading.Lock que
+					// dejamos de asignar son 40 B.
 					ctx.InstanceLockTypeName = lockTypeName;
 
-					if (UsesSharedLock)
+					switch (lockOption)
 					{
-						if (isSharedAcrossInstances) ctx.NeedsSingletonLock = true;
-					}
-					else
-					{
-						code.Append(@"
+						case LockOptions.Global:
+							ctx.NeedsSingletonLock = ctx.NeedsEnsureLockHelper = true;
+							break;
+
+						case LockOptions.Dedicated:
+							code.Append(@"
 	private ");
-						if (isSharedAcrossInstances) code.Append("static readonly ");
+							if (isSharedAcrossInstances) code.Append("static ");
 
-						code.Append(lockTypeName);
+							code.Append(lockTypeName).Append("? ").Append(LockFieldName).Append(';');
 
-						if (isSharedAcrossInstances)
-						{
-							code.Append(' ').Append(LockFieldName).Append(" = new()");
-						}
-						else
-						{
-							code.Append("? ").Append(LockFieldName);
-							ctx.InstanceLockFields.Add(LockFieldName);
-						}
-
-						code.Append(';');
+							ctx.NeedsEnsureLockHelper = true;
+							break;
 					}
 
 					// El camino lento vive en su propio metodo. Si el 'lock' se queda en el
@@ -417,9 +432,7 @@ internal sealed class ResolverRenderer
 
 						AppendHoistedLocals(code);
 
-						code.Append(@"
-		lock(").Append(LockExpression).Append(@")
-		{
+						code.Append(LockBlockOpen).Append(@"
 			return ").Append(backingFieldName).Append(@" ??= ");
 
 						if (isFactory) AppendFactoryCaller(code, false, false, null, useHoisted: true);
@@ -534,9 +547,7 @@ internal sealed class ResolverRenderer
 
 	[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 	private ").Append(MemberTaskTypeName).Append(' ').Append(SlowPathMethodName).Append(@"()
-	{
-		lock(").Append(LockExpression).Append(@")
-		{
+	{").Append(LockBlockOpen).Append(@"
 			if(").Append(backingFieldName).Append(@" is { } __cached
 				&& (!__cached.IsCompleted || __cached.IsCompletedSuccessfully)) return ")
 									.Append(wrapOpen).Append("__cached").Append(wrapClose).Append(@";
@@ -580,9 +591,7 @@ internal sealed class ResolverRenderer
 
 	[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 	private ").Append(MemberTaskTypeName).Append(' ').Append(SlowPathMethodName).Append(@"()
-	{
-		lock(").Append(LockExpression).Append(@")
-		{
+	{").Append(LockBlockOpen).Append(@"
 			if(").Append(backingFieldName).Append(@" is { } __cached
 				&& (!__cached.IsCompleted || __cached.IsCompletedSuccessfully)) return ")
 									.Append(wrapOpen).Append("__cached").Append(wrapClose).Append(@";
@@ -608,24 +617,33 @@ internal sealed class ResolverRenderer
 						}
 						else
 						{
-							// Se lee el campo una sola vez, a un local. Dos lecturas separadas
-							// pueden ver valores distintos; con Nullable<T> eso llega a devolver
-							// un HasValue de una lectura y un Value de otra. Medido, el local no
-							// cuesta nada (0,5607 ns frente a 0,5716) y ademas quita la varianza
-							// que el JIT introducia al rematerializar la segunda lectura.
-							code.Append(@"
+							// Con un tipo de referencia basta '??': la expresion lee el campo
+							// una sola vez y el camino lento queda en la rama derecha, asi que
+							// el getter se reduce a una lectura y un salto.
+							if (!typeIsValueType)
+							{
+								code.Append(@"
+		get => ").Append(backingFieldName).Append(" ?? ").Append(SlowPathMethodName).Append("();");
+							}
+							else
+							{
+								// Con 'Nullable<T>' hay que pasar por un local: '??' obligaria a
+								// consultar HasValue y despues Value, y dos lecturas separadas del
+								// campo pueden ver valores distintos --el liberador lo anula--, de
+								// modo que se devolveria el HasValue de una y el Value de otra.
+								// Medido, el local no cuesta nada (0,5607 ns frente a 0,5716) y
+								// ademas quita la varianza que el JIT introducia al rematerializar
+								// la segunda lectura.
+								code.Append(@"
 		get
 		{
 			var __v = ").Append(backingFieldName).Append(@";
 
-			if(__v").Append(typeIsValueType ? ".HasValue" : " is not null").Append(") return __v");
-
-							if (typeIsValueType) code.Append(".Value");
-
-							code.Append(@";
+			if(__v.HasValue) return __v.Value;
 
 			return ").Append(SlowPathMethodName).Append(@"();
 		}");
+							}
 						}
 					}
 					else
@@ -690,10 +708,7 @@ internal sealed class ResolverRenderer
 
 	[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 	private ").Append(MemberTaskTypeName).Append(' ').Append(SlowPathMethodName).Append(@"()
-	{
-
-		lock(").Append(LockExpression).Append(@")
-		{
+	{").Append(LockBlockOpen).Append(@"
 			if(").Append(backingFieldName).Append(@" is { } __cached
 				&& (!__cached.IsCompleted || __cached.IsCompletedSuccessfully)) return ")
 									.Append(wrapOpen).Append("__cached").Append(wrapClose).Append(@";

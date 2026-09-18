@@ -14,6 +14,7 @@ BenchmarkSwitcher
         typeof(ContainerCreationBenchmark),
         typeof(ResolverShapeBenchmark),
         typeof(ScopeShapeBenchmark),
+        typeof(ScopeLockCostBenchmark),
         typeof(SingletonStorageBenchmark),
         typeof(SingletonDisassemblyBenchmark),
         typeof(LockGranularityScopeBenchmark),
@@ -22,5 +23,7 @@ BenchmarkSwitcher
         typeof(AsyncCompositionCompletedBenchmark),
         typeof(AsyncCompositionPendingBenchmark),
         typeof(AsyncPublicationReadBenchmark),
-        typeof(AsyncPublicationWriteBenchmark)])
+        typeof(AsyncPublicationWriteBenchmark),
+        typeof(ValueTaskStorageReadBenchmark),
+        typeof(ValueTaskStorageWriteBenchmark)])
     .Run(args, HarnessConfig.Instance);
