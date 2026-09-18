@@ -35,7 +35,7 @@ internal sealed class ServiceDescriptor(ITypeSymbol type, string key, ITypeSymbo
         ScopedAttr = "global::SourceCrafter.DependencyInjection.Attributes.ScopedAttribute",
         TransientAttr = "global::SourceCrafter.DependencyInjection.Attributes.TransientAttribute",
         DependencyAttr = "global::SourceCrafter.DependencyInjection.Attributes.DependencyAttribute",
-        ServiceContainerAttr = "global::SourceCrafter.DependencyInjection.Attributes.ServiceContainerAttribute";
+        ServiceProviderAttr = "global::SourceCrafter.DependencyInjection.Attributes.ServiceProviderAttribute";
 
     internal string FullTypeName = null!;
     internal string ResolverMethodName = null!;
