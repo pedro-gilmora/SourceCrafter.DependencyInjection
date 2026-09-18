@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This NuGet package contains **compile-time attribute metadata** only. It provides the attribute definitions—`[ServiceContainer]`, `[Singleton<T>]`, `[Scoped<T>]`, `[Transient<T>]`, and `[JsonSetting<T>]`—without any code generator.
+This NuGet package contains **compile-time attribute metadata** only. It provides the attribute definitions—`[ServiceProvider]`, `[Singleton<T>]`, `[Scoped<T>]`, `[Transient<T>]`, and `[JsonSetting<T>]`—without any code generator.
 
 ## Use Cases
 
@@ -18,7 +18,7 @@ dotnet add package SourceCrafter.DependencyInjection.Metadata
 
 ## What's Included
 
-- `[ServiceContainer]` – Container marker
+- `[ServiceProvider]` – Container marker
 - `[Singleton<T, TImpl>]`, `[Scoped<T, TImpl>]`, `[Transient<T>]` – Service lifetime attributes
 - `[JsonSetting<T>(section)]` – Configuration loading
 - Supporting enums: `Disposability` (None, Dispose, AsyncDispose)

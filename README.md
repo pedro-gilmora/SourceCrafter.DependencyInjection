@@ -5,7 +5,7 @@ the Roslyn generator emits plain, readable C# resolvers — no reflection, no ex
 trees, no runtime container.
 
 ```csharp
-[ServiceContainer]
+[ServiceProvider]
 [Singleton<IClock, SystemClock>]
 [Scoped<DbSession>]
 [Transient<Handler>]
@@ -14,6 +14,12 @@ public partial class AppContainer { }
 using var container = new AppContainer();
 var handler = container.CreateScope().Handler;
 ```
+
+Members are strongly typed by default, so an unresolvable service is a compile error. Opt
+into the generic `IServiceProvider` surface with `[ServiceProvider(genericApi: true)]` when
+the container has to be handed to code written against `IServiceProvider`: it emits real
+`GetService<T>()` / `GetRequiredService<T>()` members, keyed and async variants included,
+that dispatch by runtime type.
 
 **Full documentation lives in [`SourceCrafter.DependencyInjection/README.md`](SourceCrafter.DependencyInjection/README.md)** —
 attribute reference, generated code walkthrough, cancellation semantics and the `SCDI`
