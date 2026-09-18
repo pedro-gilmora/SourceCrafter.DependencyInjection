@@ -1,14 +1,11 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.VisualBasic;
 using SourceCrafter.DependencyInjection;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
-using System.Reflection.PortableExecutable;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -46,7 +43,8 @@ internal partial class ServiceProviders
         bool
             hasScopedDependencies = false,
             implementsServiceProvider = providerType.AllInterfaces.Any(i => i.FullGlobalQualifiedName == "global::System.IServiceProvider"),
-            generateServiceProviderApi = false;
+            genericApi = false,
+            exportTransients = false;
 
         // Si el usuario ya declara estos miembros en su parcial, el generador no los emite.
         var hasUserEnvironmentName =
@@ -71,10 +69,9 @@ internal partial class ServiceProviders
         var defaultSubKeyComparer = EqualityComparer<DependencyKey>.Default;
 
         DependencyDictionary dependencyValueBuilders = [];
-        Dictionary<DependencyKey, string> methodNamesMap = new(defaultSubKeyComparer);
+        Dictionary<DependencyKey, (string Field, string Member)> methodNamesMap = new(defaultSubKeyComparer);
         HashSet<string> methodsRegistry = [];
         Dictionary<DependencyKey, MemberBuilder> dependencyMemberBuilders = [];
-        HashSet<ResolverBuilder> genericResolvers = new(new GenericResolverBuilderComparer());
 
         Disposability
             containerDisposability = Disposability.None,
@@ -89,6 +86,16 @@ internal partial class ServiceProviders
 
         HashSet<Diagnostic> diagnostics = [];
 
+        // Fabricas genericas pendientes de cerrar. Una plantilla no es un servicio: no se
+        // puede registrar `ILogger<T>` porque `T` no designa nada. Se guarda aparte y se
+        // instancia una vez por tipo construido que algun consumidor pida (cierre por
+        // consumo), que es lo unico que convierte la plantilla en registros concretos.
+        List<GenericFactoryTemplate> genericFactoryTemplates = [];
+
+        // Tipos construidos que ya se cerraron, para no registrar dos veces el mismo ni
+        // reentrar al resolver un parametro que la propia expansion acaba de introducir.
+        HashSet<string> closedGenericServices = [];
+
         ResolverBuilder selfDepInfo = new($"{providerFullTypeName}")
         {
             Key = (Lifetime.Singleton, providerFullTypeName, ""),
@@ -97,13 +104,25 @@ internal partial class ServiceProviders
 
         string envName = DefaultEnvName;
 
+        // Las opciones del contenedor se leen antes de registrar nada: `exportTransients`
+        // decide si un transient sin dependencias genera miembro, y el orden en que el
+        // usuario escriba los atributos no debe alterar el resultado. `envName` y
+        // `genericApi` solo se consumen despues del bucle, pero se leen aqui por coherencia.
         foreach (var attr in attributes)
         {
-            if(TryRegisterService(attr, null, out var resolver, cancelToken))
-                genericResolvers.Add(resolver!); ;
+            if (attr.AttributeClass?.FullGlobalQualifiedName is ServiceProviderAttr)
+            {
+                ReadContainerOptions(attr, cancelToken);
+                break;
+            }
         }
 
-        if (dependencyValueBuilders.Count == 0) return null!;
+        foreach (var attr in attributes)
+        {
+            TryRegisterService(attr, null, out _, cancelToken);
+        }
+
+        if (dependencyValueBuilders.Count == 0 && diagnostics.Count == 0) return null!;
 
         // El generador ya no emite constructor para los candados (se crean de forma
         // perezosa), asi que solo hay conflicto real si algun resolver usa el token de vida.
@@ -122,7 +141,7 @@ internal partial class ServiceProviders
             modifiers,
             isInterfaceProvider,
             implementsServiceProvider,
-            generateServiceProviderApi,
+            genericApi,
             hasUserEnvironmentName,
             className,
             typeName,
@@ -137,20 +156,18 @@ internal partial class ServiceProviders
             scopedDisposability,
             dependencyValueBuilders,
             dependencyMemberBuilders,
-            diagnostics,
-            genericResolvers);
+            diagnostics);
 
         diagnostics = null!;
         dependencyValueBuilders = null!;
         dependencyMemberBuilders = null!;
-        genericResolvers = null!;
 
         return emitter;
 
         /// <summary>
-        /// Lee los parametros de <c>[ServiceContainer]</c> emparejando por nombre de
+        /// Lee los parametros de <c>[ServiceProvider]</c> emparejando por nombre de
         /// parametro y no por posicion: con argumentos con nombre el orden no es fiable
-        /// (antes, <c>[ServiceContainer(generateServiceProviderApi: true)]</c> acababa
+        /// (antes, <c>[ServiceProvider(genericApi: true)]</c> acababa
         /// tomando el booleano como nombre de la variable de entorno).
         /// </summary>
         void ReadContainerOptions(AttributeData attr, CancellationToken cancelToken)
@@ -165,7 +182,10 @@ internal partial class ServiceProviders
                     envName = $@"""{v}""";
 
                 if (attr.ConstructorArguments is [_, { Value: bool flag }, ..])
-                    generateServiceProviderApi = flag;
+                    genericApi = flag;
+
+                if (attr.ConstructorArguments is [_, _, { Value: bool exportFlag }, ..])
+                    exportTransients = exportFlag;
 
                 return;
             }
@@ -197,16 +217,22 @@ internal partial class ServiceProviders
 
                         break;
 
-                    case "generateServiceProviderApi":
+                    case "genericApi":
 
-                        generateServiceProviderApi = model.GetConstantValue(arg.Expression, cancelToken) is { HasValue: true, Value: true };
+                        genericApi = model.GetConstantValue(arg.Expression, cancelToken) is { HasValue: true, Value: true };
+
+                        break;
+
+                    case "exportTransients":
+
+                        exportTransients = model.GetConstantValue(arg.Expression, cancelToken) is { HasValue: true, Value: true };
 
                         break;
                 }
             }
         }
 
-        bool TryRegisterService(AttributeData? attr, ISymbol? sourceSymbol, out ResolverBuilder? resolver, CancellationToken cancelToken, ChildDependencyHandler? validateAsChildDependency = null)
+        bool TryRegisterService(AttributeData? attr, ISymbol? sourceSymbol, out ResolverBuilder? resolver, CancellationToken cancelToken, ChildDependencyHandler? validateAsChildDependency = null, IMethodSymbol? closedGenericFactory = null)
         {
             (SymbolKind sourceKind, ITypeSymbol? sourceType) = sourceSymbol switch
             {
@@ -257,10 +283,16 @@ internal partial class ServiceProviders
                 attrClass;
             Lifetime
                 lifetime = default;
+            LockOptions
+                lockOption = default;
+            AttributeArgumentSyntax?
+                lockOptionArgSyntax = null;
             ITypeSymbol?
                 interfaceType = null;
             ISymbol?
                 factory = null;
+            IMethodSymbol?
+                genericFactoryTemplate = null;
             SymbolKind
                 factoryKind = default;
             Dictionary<DependencyKey, AsyncLocalResolver>
@@ -284,6 +316,21 @@ internal partial class ServiceProviders
             if (!IsValidServiceAttribute(attr, cancelToken))
             {
                 //(lifetime, exportType?.ToDisplayString(), type?.ToDisplayString(), name, false).Dump("Checking:");
+                return false;
+            }
+
+            // La plantilla se aparta con la clave y el atributo que la registraron, para que
+            // cada cierre herede lo que el usuario escribio. No produce resolver por si
+            // misma: sin consumidores no hay tipos construidos y no hay nada que emitir,
+            // que es justo el comportamiento que se quiere para una factory transient.
+            if (genericFactoryTemplate is { } template && attr is not null)
+            {
+                if (template.ReturnType.TryGetAsyncType(out var openReturn) is var _
+                    && openReturn is INamedTypeSymbol { IsGenericType: true } openNamed)
+                {
+                    genericFactoryTemplates.Add(new(template, attr, openNamed, name));
+                }
+
                 return false;
             }
 
@@ -315,7 +362,8 @@ internal partial class ServiceProviders
                     AppendValue = render.AppendValue,
                     AsyncKind = AsyncKind,
                     ParamsLength = prms.Length,
-                    TransientWithoutCachedDeps = isSimpleTransient
+                    TransientWithoutCachedDeps = isSimpleTransient,
+                    RuntimeTypeName = (exportType ?? type)?.RuntimeFullName
                 };
 
             // If it comes from params check, validates the symbols as dependency
@@ -359,6 +407,15 @@ internal partial class ServiceProviders
             if (isSimpleTransient)
             {
                 (backingFieldName, methodName) = GetResolverName();
+
+                // Un transient sin dependencias se inlinea en el call site y sale por aqui
+                // sin generar miembro. El problema es que entonces resulta *irresoluble*
+                // desde otro ensamblado: la interceptacion es por compilacion, y sin miembro
+                // con nombre la API generica cae en el stub que lanza. `exportTransients` lo
+                // expone sin tocar el inlinado, que se sigue aplicando dentro de la propia
+                // compilacion.
+                if (exportTransients && !isExternal) RegisterExposedMember(resolver);
+
                 //TryRegisterInterceptorMethod();
                 CommitRenderState();
                 return true;
@@ -369,6 +426,11 @@ internal partial class ServiceProviders
             byte paramPos = 0/*, valueTaskCount = 0, asyncParamCount = 0*/;
 
             Dictionary<int, HashSet<AsyncLocalResolver>> asyncParams = [];
+
+            // Un solo parametro por tipo de servicio puede quedarse sin clave. El segundo ya no
+            // tiene forma de distinguirse, asi que se registra aqui cual se llevo el comodin
+            // para poder senalar la pareja en el diagnostico.
+            Dictionary<string, string> unkeyedParamByType = [];
 
             foreach (var prm in prms)
             {
@@ -434,12 +496,43 @@ internal partial class ServiceProviders
                 var paramName = prm.Name;
                 var paramKeyHash = paramName.GetHashCode();
 
-                if ((foundService is not null
-                        || dependencyValueBuilders.TryGetValue((paramFullTypeName, paramName), out foundServices!)
-                        || dependencyValueBuilders.TryGetValue((paramFullTypeName, ""), out foundServices!)
-                    && foundServices.Count > 0))
+                // Cierre por consumo. Si nadie ha registrado este tipo construido y hay
+                // plantillas genericas, este es el momento de instanciarlas: el parametro
+                // que se esta resolviendo es la unica fuente que dice que
+                // `ILogger<AuditLog>` hace falta. Se hace antes de buscar para que la
+                // consulta de abajo lo encuentre ya registrado y siga el camino normal.
+                if (foundService is null
+                    && genericFactoryTemplates.Count > 0
+                    && !dependencyValueBuilders.ContainsKey((paramFullTypeName, paramName))
+                    && !dependencyValueBuilders.ContainsKey((paramFullTypeName, "")))
                 {
-                    if (getServices)
+                    TryCloseGenericServiceFor(paramType, paramFullTypeName, paramName, prm);
+                }
+
+                // La busqueda se hace siempre, aunque un atributo del parametro ya haya
+                // dejado un `foundService`: las dos ramas de abajo desreferencian
+                // `foundServices`, asi que entrar con el diccionario a null es un fallo
+                // seguro. Antes la condicion era una cadena de `||` con un
+                // `&& foundServices.Count > 0` al final, pero `&&` liga mas fuerte que `||`,
+                // asi que la comprobacion de cardinalidad solo cubria la ultima alternativa
+                // y las otras dos podian entrar con null o con un diccionario vacio.
+                if (!dependencyValueBuilders.TryGetValue((paramFullTypeName, paramName), out foundServices!))
+                    dependencyValueBuilders.TryGetValue((paramFullTypeName, ""), out foundServices!);
+
+                if (foundService is not null || foundServices is { Count: > 0 })
+                {
+                    if (foundServices is null or { Count: 0 })
+                    {
+                        // Lo resolvio un atributo del propio parametro, asi que no esta
+                        // indexado bajo este tipo. Es el unico candidato que hay.
+                        resolvedSubKey = foundService!.Key;
+
+                        if (hasNoCachedDeps && !foundService.TransientWithoutCachedDeps)
+                            hasNoCachedDeps = false;
+
+                        CreateParamResolverBuilder(foundService);
+                    }
+                    else if (getServices)
                     {
                         int i = 0, len = foundServices.Values.Count - 1;
                         foreach (var service in foundServices.Values)
@@ -457,6 +550,29 @@ internal partial class ServiceProviders
                     {
                         if (hasNoCachedDeps && !foundService!.TransientWithoutCachedDeps)
                             hasNoCachedDeps = false;
+
+                        // El servicio se eligio por el comodin sin clave, no porque el nombre
+                        // del parametro casara con una. Eso solo es ambiguo si hay **varios**
+                        // registros compitiendo por ese tipo: con un unico candidato, dos
+                        // parametros pueden compartirlo sin que nada quede sin decidir.
+                        // Cuando si compiten, hasta ahora ambos recibian en silencio el mismo
+                        // servicio (o se emitia un local sin declarar, CS0103).
+                        if (foundServices.Count > 1 && foundService!.Key.key is "" && paramName is not "")
+                        {
+                            if (unkeyedParamByType.TryGetValue(paramFullTypeName, out var firstParamName))
+                            {
+                                diagnostics.Add(ServiceContainerDiagnostics.AmbiguousUnkeyedParameters(
+                                    prm.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancelToken).GetLocation()
+                                        ?? attrSyntax.GetLocation(),
+                                    paramName,
+                                    paramType.ToDisplayString(),
+                                    firstParamName));
+                            }
+                            else
+                            {
+                                unkeyedParamByType[paramFullTypeName] = paramName;
+                            }
+                        }
 
                         CreateParamResolverBuilder(foundService!);
                     }
@@ -484,6 +600,23 @@ internal partial class ServiceProviders
 
                         if (foundAsyncType is not 0)
                         {
+                            // Se promociona a 'Task', no a 'foundAsyncType'. Como 'Task' es el
+                            // maximo del enum, el 'childAsyncType > AsyncKind' de mas abajo ya no
+                            // puede volver a bajarlo: un servicio que hereda su asincronia de las
+                            // dependencias acaba SIEMPRE como 'Task<T>', aunque todas ellas sean
+                            // 'ValueTask<T>'.
+                            //
+                            // No es incorrecto -- 'Task<T>' es una forma valida y segura -- pero
+                            // tiene un coste: el acelerador de resultado exige 'ValueTask' (ver
+                            // 'UsesResultFastPath' en el renderer, que con un miembro 'Task<T>'
+                            // asignaria 72 B por lectura al reconstruir la tarea), asi que nunca
+                            // alcanza a los servicios compuestos, que son la mayoria en un grafo
+                            // real. Solo lo aprovechan los que declaran 'source:' con 'ValueTask'.
+                            //
+                            // Propagar 'ValueTask' cuando todas las dependencias lo son cambiaria
+                            // la firma publica del miembro generado, asi que es una decision de
+                            // API, no una optimizacion interna: romperia a quien encadene
+                            // '.ContinueWith(...)' o asigne el resultado a un 'Task'.
                             if (AsyncKind is 0)
                                 AsyncKind = AsyncKind.Task;
 
@@ -614,7 +747,9 @@ internal partial class ServiceProviders
                     .ToDictionary(i => i.DepKey);
             }
 
-            //if (asyncParamCount > 0 && valueTaskCount == asyncParamCount) AsyncKind = AsyncKind.ValueTask;
+            // Aqui vivia el intento de propagar 'ValueTask' cuando todas las dependencias
+            // asincronas lo eran. Ver la nota en la promocion a 'AsyncKind.Task' de mas
+            // arriba: no se reactiva porque cambia la firma publica del miembro generado.
 
             (backingFieldName, methodName) = GetResolverName();
 
@@ -634,14 +769,12 @@ internal partial class ServiceProviders
             }
 
 
-            if (!isExternal && (isCached || !isSimpleTransient))
-                dependencyMemberBuilders
-                    .TryAdd((lifetime, typeFullName, name),
-                        new(lifetime, exportTypeFullName, name, AsyncKind, disposability, nameOrFormat) 
-                        {
-                            RequiresCancelToken = needsCancelToken,
-                            BuildAndExpose = render.AppendMethod 
-                        });
+            // `isSimpleTransient` tambien puede activarse arriba, cuando todos los parametros
+            // se resolvieron a valores por defecto y no queda nada que componer. Vale el
+            // mismo razonamiento que en la salida temprana: se inlinea, y solo se expone si
+            // el autor lo pidio con `exportTransients`.
+            if (!isExternal && (isCached || !isSimpleTransient || exportTransients))
+                RegisterExposedMember(resolver);
 
             resolver.TransientWithoutCachedDeps = hasNoCachedDeps;
             resolver.AsyncKind = AsyncKind;
@@ -651,6 +784,129 @@ internal partial class ServiceProviders
             CommitRenderState();
 
             return true;
+
+            // Expone el resolver como miembro con nombre del contenedor. Se lee el estado en
+            // el momento de la llamada, no al declararla: las dos salidas lo invocan en
+            // puntos distintos y con valores distintos de disposability y AsyncKind.
+            // 'exposed' llega por parametro porque 'resolver' es un 'out' y esos no se
+            // pueden capturar desde una funcion local (CS1628).
+            void RegisterExposedMember(ResolverBuilder? exposed)
+            {
+                dependencyMemberBuilders
+                    .TryAdd((lifetime, typeFullName, name),
+                        new(lifetime, exportTypeFullName, name, AsyncKind, disposability, nameOrFormat)
+                        {
+                            RequiresCancelToken = needsCancelToken,
+                            BuildAndExpose = render.AppendMethod
+                        });
+
+                // Solo un resolver con miembro se puede despachar desde la API generica:
+                // el switch reenvia al nombre, no reconstruye el valor.
+                if (exposed is not null)
+                {
+                    exposed.MemberName = methodName;
+                    exposed.MemberIsMethodShaped = AsyncKind is not 0 && (hasAsyncDependencies || needsCancelToken);
+                }
+            }
+
+            // Cierra las plantillas genericas contra un tipo construido concreto que algun
+            // consumidor acaba de pedir. Registra el resultado como un servicio normal, de
+            // modo que a partir de aqui `ILogger<AuditLog>` deja de ser un caso especial.
+            void TryCloseGenericServiceFor(
+                ITypeSymbol requestedType,
+                string requestedFullName,
+                string requestedKey,
+                IParameterSymbol requestingParam)
+            {
+                // Un mismo tipo construido puede pedirse desde varios consumidores. Solo se
+                // cierra la primera vez: las siguientes ya lo encuentran registrado.
+                if (!closedGenericServices.Add(requestedFullName + '|' + requestedKey)) return;
+
+                GenericFactoryTemplate? chosen = null;
+                IMethodSymbol chosenClosed = null!;
+                GenericFactoryTemplate? ambiguousWith = null;
+                ITypeParameterSymbol? lastUnsatisfied = null;
+                string? lastCandidateName = null;
+
+                foreach (var candidate in genericFactoryTemplates)
+                {
+                    // La clave forma parte de la identidad del servicio: una plantilla con
+                    // clave solo atiende a parametros que piden esa misma clave.
+                    if (candidate.Key != requestedKey && candidate.Key is not "") continue;
+
+                    if (!TryCloseGenericFactory(candidate, requestedType, out var closed, out var unsatisfied))
+                    {
+                        if (unsatisfied is not null)
+                        {
+                            lastUnsatisfied = unsatisfied;
+                            lastCandidateName = candidate.Factory.Name;
+                        }
+
+                        continue;
+                    }
+
+                    if (chosen is null)
+                    {
+                        (chosen, chosenClosed) = (candidate, closed);
+                        continue;
+                    }
+
+                    // Dos plantillas producen el mismo tipo. No se inventa una precedencia
+                    // por orden de declaracion: eso haria depender el servicio elegido de
+                    // algo que no se lee en el sitio de registro. Se pide una clave, que es
+                    // el mecanismo de desambiguacion que el resto del contenedor ya usa.
+                    ambiguousWith = candidate;
+                    break;
+                }
+
+                var paramLocation = requestingParam.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancelToken).GetLocation()
+                    ?? attrSyntax.GetLocation();
+
+                if (ambiguousWith is not null)
+                {
+                    diagnostics.Add(ServiceContainerDiagnostics.AmbiguousGenericFactories(
+                        paramLocation,
+                        requestedType.ToDisplayString(),
+                        chosen!.Factory.Name,
+                        ambiguousWith.Factory.Name));
+
+                    return;
+                }
+
+                if (chosen is null)
+                {
+                    // Solo se informa si alguna candidata era del tipo generico correcto pero
+                    // fallo una restriccion. Si ninguna lo era, este tipo simplemente no tiene
+                    // nada que ver con las plantillas y el SCDI03 habitual es mejor mensaje.
+                    if (lastUnsatisfied is not null)
+                    {
+                        diagnostics.Add(ServiceContainerDiagnostics.NoGenericFactorySatisfiesType(
+                            paramLocation,
+                            requestedType.ToDisplayString(),
+                            lastCandidateName!,
+                            DescribeConstraint(lastUnsatisfied)));
+                    }
+
+                    return;
+                }
+
+                // Se vuelve a entrar por el registro normal con la fabrica ya construida. El
+                // atributo original viaja con la plantilla, asi que el servicio cerrado
+                // hereda lifetime y clave sin duplicar la lectura de argumentos.
+                TryRegisterService(chosen.Attribute, null, out _, cancelToken, null, chosenClosed);
+
+                static string DescribeConstraint(ITypeParameterSymbol typeParameter)
+                {
+                    if (typeParameter.HasReferenceTypeConstraint) return "class";
+                    if (typeParameter.HasValueTypeConstraint) return "struct";
+                    if (typeParameter.HasUnmanagedTypeConstraint) return "unmanaged";
+                    if (typeParameter.HasNotNullConstraint) return "notnull";
+
+                    return typeParameter.ConstraintTypes is [{ } first, ..]
+                        ? first.ToDisplayString()
+                        : typeParameter.Name;
+                }
+            }
 
             // Congela el estado del parser en un renderizador inmutable, ya proyectado a
             // cadenas, banderas y enumeraciones. Se invoca en cada salida exitosa,
@@ -684,6 +940,7 @@ internal partial class ServiceProviders
                     typeIsNonNullable = type?.IsNullable is false,
                     hasFactorySymbol = factory is not null,
                     lockTypeName = lockTypeName,
+                    lockOption = lockOption,
                     appendParams = appendParams,
                     asyncLocalResolvers = asyncLocalResolvers
                 };
@@ -691,16 +948,14 @@ internal partial class ServiceProviders
 
             bool IsValidServiceAttribute(AttributeData? attr, CancellationToken cancelToken)
             {
-                var isContainerAttr = false;
-
                 if (attr is not { AttributeClass: { } _attrClass, ApplicationSyntaxReference: { } attrSyntaxRef }
-                    || (isContainerAttr = _attrClass.FullGlobalQualifiedName is ServiceContainerAttr)
+                    // El atributo del contenedor no registra servicio; sus opciones ya se
+                    // leyeron en la pasada previa, antes de este bucle.
+                    || _attrClass.FullGlobalQualifiedName is ServiceProviderAttr
                     || attrSyntaxRef.GetSyntax(cancelToken) is not AttributeSyntax { } _attrSyntax
                     || !TryGetAttributeParamsDefinition(model.GetSymbolInfo(_attrSyntax, cancellationToken: cancelToken), out ImmutableArray<IParameterSymbol> attrParams)
                     || !TryGetLifetime(_attrSyntax, ref _attrClass, ref isExternal, out lifetime))
                 {
-                    if (isContainerAttr) ReadContainerOptions(attr!, cancelToken);
-
                     return false;
                 }
 
@@ -767,6 +1022,27 @@ internal partial class ServiceProviders
 
                             continue;
 
+                        // El alcance del candado es una constante de compilacion: se toma del
+                        // argumento si esta escrito, y si no, del valor por defecto declarado
+                        // en el atributo. 'Default' se resuelve mas abajo segun el lifetime,
+                        // que puede venir del propio atributo generico.
+                        case LocksParamName:
+
+                            if (arg is { Expression: { } lockExpr })
+                            {
+                                if (model.GetConstantValue(lockExpr, cancellationToken: cancelToken) is { HasValue: true, Value: byte lockRaw })
+                                {
+                                    lockOption = (LockOptions)lockRaw;
+                                    lockOptionArgSyntax = arg;
+                                }
+                            }
+                            else if (param is { HasExplicitDefaultValue: true, ExplicitDefaultValue: byte lockDefault })
+                            {
+                                lockOption = (LockOptions)lockDefault;
+                            }
+
+                            continue;
+
                         case SourceParamName
 
                             when arg?.Expression is InvocationExpressionSyntax
@@ -809,9 +1085,26 @@ internal partial class ServiceProviders
 
                                     continue;
 
-                                case { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [IMethodSymbol { ContainingType: ITypeSymbol containingType, ReturnsVoid: false, IsStatic: var isStatic } method] }:
+                                case { CandidateReason: CandidateReason.MemberGroup, CandidateSymbols: [IMethodSymbol { ContainingType: ITypeSymbol containingType, ReturnsVoid: false, IsStatic: var isStatic } openMethod] }:
 
-                                    CheckInnerFactorySpecs(method);
+                                    CheckInnerFactorySpecs(openMethod);
+                                    CheckGenericFactorySpecs(openMethod);
+
+                                    // Una plantilla generica no se registra como servicio:
+                                    // `ILogger<T>` no designa nada resoluble. Se aparta y se
+                                    // cierra despues, una vez por tipo construido que el grafo
+                                    // pida. Registrarla aqui es justo lo que hacia que el
+                                    // consumidor de `ILogger<AuditLog>` no encontrase nada.
+                                    if (openMethod.IsGenericMethod && closedGenericFactory is null)
+                                    {
+                                        genericFactoryTemplate = openMethod;
+                                        continue;
+                                    }
+
+                                    // En la reentrada por cierre llega la version construida,
+                                    // que ya devuelve el tipo concreto y por tanto recorre el
+                                    // resto del registro como cualquier factory no generica.
+                                    var method = closedGenericFactory ?? openMethod;
 
                                     factory = method;
                                     isStaticFactory = isStatic;
@@ -819,7 +1112,27 @@ internal partial class ServiceProviders
                                     initialAsyncType = AsyncKind = method.ReturnType.TryGetAsyncType(out factoryReturnType);
                                     isFactory = true;
                                     isFactoryFromCurrentProvider = SymbolEqualityComparer.Default.Equals(providerType, containingType);
-                                    factoryName = factory.Name;
+
+                                    // El nombre debe llevar los argumentos de tipo: lo que se
+                                    // emite es `_CreateLogger<AuditLog>()`, no `_CreateLogger()`.
+                                    // Sin ellos la llamada no compila, porque en el sitio de uso
+                                    // no hay nada de donde inferirlos.
+                                    factoryName = closedGenericFactory is { TypeArguments: { Length: > 0 } typeArgs }
+                                        ? $"{method.Name}<{string.Join(", ", typeArgs.Select(t => t.FullGlobalQualifiedName))}>"
+                                        : factory.Name;
+
+                                    if (closedGenericFactory is not null)
+                                    {
+                                        // En una factory el metodo es la implementacion. Al
+                                        // cerrar `ILogger<T>` el retorno es una interfaz, y
+                                        // dejar `type` nulo haria que el registro la tratase
+                                        // como interfaz sin implementar.
+                                        type = interfaceType = factoryReturnType;
+                                        typeFullName = interfaceFullTypeName = factoryReturnType!.FullGlobalQualifiedName;
+                                        factoryProviderName = isFactoryFromCurrentProvider ? providerTypeName : containingType.GlobalNamespaced;
+
+                                        continue;
+                                    }
 
                                     if (factoryReturnType is not { TypeKind: TypeKind.Interface, IsAbstract: true })
                                     {
@@ -852,12 +1165,85 @@ internal partial class ServiceProviders
                                 }
                             }
 
+                            // Una fabrica generica se decide por sus restricciones, asi que sin
+                            // ellas no hay criterio de emparejado; y solo puede ser transient
+                            // porque un cacheado exigiria un campo por tipo construido, conjunto
+                            // que no se conoce en el sitio de registro.
+                            void CheckGenericFactorySpecs(IMethodSymbol method)
+                            {
+                                if (!method.IsGenericMethod) return;
+
+                                var factoryLocation = method.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax(cancelToken)?.GetLocation()
+                                    ?? attrSyntax.GetLocation();
+
+                                foreach (var typeParameter in method.TypeParameters)
+                                {
+                                    if (!HasAnyConstraint(typeParameter))
+                                    {
+                                        diagnostics.Add(ServiceContainerDiagnostics.GenericFactoryTypeParameterNeedsConstraint(
+                                            factoryLocation, method.Name, typeParameter.Name));
+                                    }
+                                }
+
+                                if (lifetime is not Lifetime.Transient)
+                                {
+                                    diagnostics.Add(ServiceContainerDiagnostics.GenericFactoryMustBeTransient(
+                                        factoryLocation, method.Name, lifetime.ToString()));
+                                }
+
+                                // 'new()' queda fuera a proposito: no acota el conjunto de tipos
+                                // admisibles, solo exige un constructor sin parametros, asi que no
+                                // sirve como criterio de emparejado.
+                                static bool HasAnyConstraint(ITypeParameterSymbol typeParameter)
+                                    => typeParameter.HasReferenceTypeConstraint
+                                        || typeParameter.HasValueTypeConstraint
+                                        || typeParameter.HasUnmanagedTypeConstraint
+                                        || typeParameter.HasNotNullConstraint
+                                        || typeParameter.ConstraintTypes.Length > 0;
+                            }
+
                         //case "disposability" when param.HasExplicitDefaultValue:
 
                         //    disposability = (Disposability)(byte)param.ExplicitDefaultValue!;
 
                         //    continue;
                     }
+                }
+
+                // Una plantilla generica se aparta aqui, antes de las comprobaciones que
+                // asumen un tipo concreto. `ILogger<T>` no tiene implementacion ni puede
+                // casar con nada: exigirselo produciria el SCDI03 que veiamos, cuando lo
+                // cierto es que todavia no hay nada que registrar.
+                if (genericFactoryTemplate is not null) return true;
+
+                // El alcance efectivo del candado. 'Default' se resuelve aqui, ya conocido el
+                // lifetime: un singleton comparte campo entre instancias del contenedor y
+                // necesita el candado estatico. Un scoped, en cambio, no se sincroniza por
+                // defecto: un ambito modela una peticion y no se comparte entre hilos, asi que
+                // el candado se pagaba siempre sin contencion (medido: 25,0 ns frente a 6,3 ns
+                // sin el). Quien comparta un ambito entre hilos pide 'LockOptions.Instance',
+                // que sigue cerrando sobre 'this' para no asignar un candado por dependencia.
+                // Un transient no cacheado nunca toma candado, asi que la opcion se ignora.
+                switch (lockOption, lifetime)
+                {
+                    case (LockOptions.Default, Lifetime.Singleton):
+                        lockOption = LockOptions.Global;
+                        break;
+
+                    case (LockOptions.Default, Lifetime.Scoped):
+                        lockOption = LockOptions.None;
+                        break;
+
+                    case (LockOptions.Default, _):
+                        lockOption = LockOptions.Instance;
+                        break;
+
+                    case (LockOptions.Global, Lifetime.Scoped):
+                        diagnostics.Add(ServiceContainerDiagnostics.GlobalLockNotAllowedForScoped(
+                            (lockOptionArgSyntax ?? (SyntaxNode)attrSyntax).GetLocation()));
+
+                        lockOption = LockOptions.Instance;
+                        break;
                 }
 
                 if (interfaceType != null)
@@ -883,6 +1269,7 @@ internal partial class ServiceProviders
                         {
                             diagnostics.Add(ServiceContainerDiagnostics.FactoryReturnMismatch(factory!, interfaceType, factoryReturnType, attrSyntax));
                         }
+
                     }
 
                     if (count < diagnostics.Count)
@@ -900,6 +1287,28 @@ internal partial class ServiceProviders
 
                 exportType ??= interfaceType ?? type!;
                 exportTypeFullName = interfaceFullTypeName ?? typeFullName;
+
+                // Task<T> y ValueTask<T> son invariantes: aunque la implementacion satisfaga la
+                // interfaz, Task<Impl> no se convierte a Task<IService>. Las comprobaciones de
+                // arriba aceptan el caso porque razonan sobre la relacion de herencia, que si se
+                // cumple; el fallo reaparece despues como CS0029 dentro del codigo generado, que
+                // es donde peor se lee. Se exige aqui que la fabrica asincrona declare ya el tipo
+                // expuesto, en vez de esperar y reenvolver en la emision (lo que costaria una
+                // maquina de estados o una asignacion extra por resolucion).
+                if (initialAsyncType is not AsyncKind.None
+                    && factoryReturnType is not null
+                    && exportType is not null
+                    && !SymbolEqualityComparer.Default.Equals(exportType, factoryReturnType))
+                {
+                    diagnostics.Add(ServiceContainerDiagnostics.AsyncFactoryMustDeclareServiceType(
+                        attrSyntax.GetLocation(),
+                        factory?.Name ?? factoryName ?? "?",
+                        initialAsyncType is AsyncKind.ValueTask ? "ValueTask" : "Task",
+                        factoryReturnType.ToDisplayString(),
+                        exportType.ToDisplayString()));
+
+                    return false;
+                }
 
                 if (!(isValid = exportType is not null && type is not null && attrClass is not null && _attrSyntax is not null)) return ReturnNotFound();
 
@@ -1040,54 +1449,169 @@ internal partial class ServiceProviders
             }
 
             /// <summary>
-            /// Resolves caching backing field member and resolver member names
+            /// Resuelve el nombre del miembro que expone el resolver y el de su campo de
+            /// respaldo, garantizando que ninguno choque con otro ya emitido.
             /// </summary>
+            /// <remarks>
+            /// Las distinciones (<c>{lifetime}</c>, <c>{key}</c>) se anaden <b>solo cuando
+            /// hacen falta</b>: se prueba el nombre mas corto y se baja por la escalera hasta
+            /// encontrar uno libre. La reserva se hace sobre el nombre <b>final</b>, ya
+            /// decorado; hacerla sobre el nombre base dejaba fuera del registro tanto los
+            /// nombres derivados de una fabrica como los pedidos con <c>nameFormat</c>, y
+            /// tampoco cubria los sufijos <c>Cached</c> / <c>Async</c>.
+            /// </remarks>
             (string, string) GetResolverName()
             {
-                var memberName = nameOrFormat is not null
-                    ? string.Format(nameOrFormat, name.Pascalize()!).RemoveDuplicates()
-                    : SanitizedTypeName();
+                // La identidad de un resolver es el subKey (lifetime, tipo de implementacion,
+                // clave). Memoizar por el tipo *expuesto* hacia que tres registros del mismo
+                // interfaz compartieran entrada y salieran con el mismo nombre
+                // (CS0102/CS0111/CS0229). Memoizar aqui, y no dentro de la escalera, tambien
+                // evita que una segunda llamada para el mismo resolver choque consigo misma y
+                // se lleve un sufijo numerico.
+                var identity = (lifetime, typeFullName, name);
 
-                memberName = (isExternal ? memberName : factory?.Name ?? memberName).TrimStart('_');
+                if (methodNamesMap.TryGetValue(identity, out var memoized)) return memoized;
 
-                if (factory is not null && isCached && !memberName.EndsWith("Cached") && !memberName.EndsWith("Cache"))
-                    memberName += "Cached";
+                // Misma regla que <c>Renderer.IsMethodShaped</c>: solo los resolvers
+                // asincronos que componen dependencias salen como metodo.
+                var isMethodShaped = AsyncKind is not 0 && (hasAsyncDependencies || needsCancelToken);
 
-                var fieldName = "_" + memberName.Camelize();
+                var key = name.Pascalize() ?? "";
+                var typeName = SanitizedTypeName();
+                var lifetimeName = lifetime.ToString();
 
-                if (!isExternal && factory is null && AsyncKind is not 0 && !isSimpleTransient) memberName = "Get" + memberName;
+                var result = Resolve();
 
-                if (!(memberName.Contains("Async") || memberName.Contains("Task")) && AsyncKind is not 0)
-                    (memberName, fieldName) = (memberName + "Async", fieldName + "Task");
+                methodNamesMap[identity] = result;
 
-                return (fieldName, memberName);
+                return result;
+
+                (string, string) Resolve()
+                {
+                    // 1. Nombre pedido por el autor: manda tal cual, no se le recorta nada.
+                    //    Antes el nombre del metodo-fabrica lo pisaba siempre, asi que
+                    //    'nameFormat' se descartaba en silencio si el registro traia 'source:'.
+                    if (nameOrFormat is not null)
+                        return ReserveOrNumber(FormatRequestedName(nameOrFormat), trimGetPrefix: false);
+
+                    // 2. Nombre del metodo-fabrica del autor.
+                    if (!isExternal && factory is not null)
+                        return ReserveOrNumber(factory.Name, trimGetPrefix: true);
+
+                    // 3. Escalera derivada del tipo.
+                    foreach (var candidate in Candidates())
+                        if (TryReserve(candidate, trimGetPrefix: true, out var reserved)) return reserved;
+
+                    return ReserveOrNumber(lifetimeName + key + typeName, trimGetPrefix: true);
+                }
+
+                /// <summary>El nombre mas corto primero; cada peldano anade una distincion.</summary>
+                IEnumerable<string> Candidates()
+                {
+                    yield return typeName;
+
+                    // Sin clave, el lifetime es lo unico que queda para desempatar.
+                    if (key is "")
+                    {
+                        yield return lifetimeName + typeName;
+
+                        yield break;
+                    }
+
+                    // Con clave, el desempate lo hace la clave y no el lifetime. Meter aqui
+                    // '{lifetime}{tipo}' la dejaria fuera del nombre: dos registros del mismo
+                    // tipo distinguidos solo por la clave saldrian como 'Db' y 'SingletonDb',
+                    // sin rastro de cual es cual y a merced del orden de declaracion.
+                    yield return typeName + key;
+                    yield return lifetimeName + key;
+                    yield return lifetimeName + key + typeName;
+                }
+
+                /// <summary>
+                /// Admite <c>{lifetime}</c>, <c>{key}</c> y <c>{tipo}</c> (o <c>{type}</c>)
+                /// ademas del <c>{0}</c> historico, que sigue siendo la clave.
+                /// </summary>
+                string FormatRequestedName(string format)
+                {
+                    var text = format
+                        .Replace("{lifetime}", lifetimeName)
+                        .Replace("{key}", key)
+                        .Replace("{tipo}", typeName)
+                        .Replace("{type}", typeName);
+
+                    // 'string.Format' lanza si el texto trae una llave suelta, y ya no queda
+                    // ningun marcador con nombre que justifique correr ese riesgo.
+                    if (text.IndexOf("{0}", StringComparison.Ordinal) >= 0)
+                        text = string.Format(text, key);
+
+                    return text.RemoveDuplicates();
+                }
+
+                /// <summary>
+                /// Ultimo recurso de la escalera: <c>...{CountBase1}</c>. Existe para que el
+                /// contenedor siempre compile, incluso cuando el autor pide dos veces el
+                /// mismo nombre con <c>nameFormat</c>.
+                /// </summary>
+                (string, string) ReserveOrNumber(string baseName, bool trimGetPrefix)
+                {
+                    if (TryReserve(baseName, trimGetPrefix, out var reserved)) return reserved;
+
+                    for (var count = 1; ; count++)
+                        if (TryReserve(baseName + count, trimGetPrefix, out reserved)) return reserved;
+                }
+
+                bool TryReserve(string baseName, bool trimGetPrefix, out (string, string) reserved)
+                {
+                    var (fieldName, memberName) = reserved = Decorate(baseName, trimGetPrefix);
+
+                    // Se comprueban los dos nombres. El campo se deriva del miembro, pero no
+                    // biyectivamente: un metodo 'GetX' y una propiedad 'X' comparten el campo
+                    // '_x', asi que mirar solo el miembro deja pasar un CS0102 del campo.
+                    if (methodsRegistry.Contains(memberName) || methodsRegistry.Contains(fieldName))
+                        return false;
+
+                    methodsRegistry.Add(memberName);
+                    methodsRegistry.Add(fieldName);
+
+                    return true;
+                }
+
+                (string, string) Decorate(string baseName, bool trimGetPrefix)
+                {
+                    var memberName = baseName.TrimStart('_');
+
+                    if (factory is not null && isCached && !memberName.EndsWith("Cached") && !memberName.EndsWith("Cache"))
+                        memberName += "Cached";
+
+                    // Una propiedad no debe llamarse 'GetX': el prefijo anuncia una operacion.
+                    // El nombre suele venir del metodo-fabrica del autor ('_GetAlphaAsync'),
+                    // asi que se recorta cuando lo derivamos nosotros; si el autor escribio el
+                    // nombre, se respeta tal cual.
+                    if (trimGetPrefix && !isMethodShaped && HasGetPrefix(memberName))
+                        memberName = memberName.Substring(3);
+
+                    // El campo se deriva *antes* del prefijo, para que campo y miembro no se
+                    // separen ('_alphaAsyncCached' / 'AlphaAsyncCached').
+                    var fieldName = "_" + memberName.Camelize();
+
+                    // El prefijo solo se anade a lo que de verdad se emite como metodo.
+                    if (!isExternal && factory is null && isMethodShaped) memberName = "Get" + memberName;
+
+                    if (!(memberName.Contains("Async") || memberName.Contains("Task")) && AsyncKind is not 0)
+                        (memberName, fieldName) = (memberName + "Async", fieldName + "Task");
+
+                    return (fieldName, memberName);
+                }
+
+                static bool HasGetPrefix(string value) =>
+                    value.Length > 3
+                    && value[0] is 'G' && value[1] is 'e' && value[2] is 't'
+                    && (char.IsUpper(value[3]) || char.IsDigit(value[3]));
             }
 
             string SanitizedTypeName()
             {
-                var sanitizedTypeName = Sanitize(type!).Replace(" ", "").Capitalize();
-
-                ref var idOut = ref CollectionsMarshal.GetValueRefOrAddDefault(methodNamesMap, (lifetime, exportTypeFullName, name), out var exists)!;
-
-                if (exists)
-                {
-                    return idOut;
-                }
-
-                var key = name.Pascalize();
-
-                if (key is "")
-                {
-                    if (!methodsRegistry.Add(idOut = sanitizedTypeName)) methodsRegistry.Add(idOut = $"{lifetime}{sanitizedTypeName}");
-                }
-                else if (!(methodsRegistry.Add(idOut = key!)
-                    || methodsRegistry.Add(idOut = $"{key}{sanitizedTypeName}")
-                    || methodsRegistry.Add(idOut = $"{lifetime}{key}")))
-                {
-                    methodsRegistry.Add(idOut = $"{lifetime}{key}{sanitizedTypeName}");
-                }
-
-                return idOut;
+                return Sanitize(type!).Replace(" ", "").Capitalize();
 
                 static string Sanitize(ITypeSymbol type)
                 {
@@ -1142,6 +1666,167 @@ internal partial class ServiceProviders
             && SymbolEqualityComparer.Default.Equals(
                 lockType.ContainingAssembly,
                 compilation.GetSpecialType(SpecialType.System_Object).ContainingAssembly);
+    }
+
+    /// <summary>
+    /// Una fabrica generica a la espera de que el grafo diga que tipos construidos hacen
+    /// falta.
+    /// <para>
+    /// Se guarda el metodo sin construir junto al atributo que lo registro. El atributo se
+    /// necesita porque la expansion vuelve a pasar por el registro normal: un
+    /// <c>ILogger&lt;AuditLog&gt;</c> cerrado no es un caso especial, es un servicio como
+    /// cualquier otro, y debe heredar la clave y el resto de opciones que el usuario
+    /// escribio en la plantilla.
+    /// </para>
+    /// </summary>
+    private sealed record GenericFactoryTemplate(
+        IMethodSymbol Factory,
+        AttributeData Attribute,
+        INamedTypeSymbol OpenReturnType,
+        string Key);
+
+    /// <summary>
+    /// Decide si <paramref name="template"/> puede producir <paramref name="requested"/>, y
+    /// si puede, devuelve el metodo ya construido.
+    /// <para>
+    /// El emparejado es puramente estructural: se exige el mismo tipo generico original
+    /// (<c>ILogger&lt;&gt;</c> frente a <c>ILogger&lt;&gt;</c>) y se infiere cada parametro
+    /// de tipo por posicion. No se intenta unificar nada mas complejo, como un
+    /// <c>T</c> anidado dentro de otro generico: esos casos se rechazan en silencio y caen
+    /// en el diagnostico de "ninguna candidata", que es un mensaje mas util que una
+    /// inferencia parcial que luego falle al compilar.
+    /// </para>
+    /// </summary>
+    private static bool TryCloseGenericFactory(
+        GenericFactoryTemplate template,
+        ITypeSymbol requested,
+        out IMethodSymbol closedFactory,
+        out ITypeParameterSymbol? unsatisfied)
+    {
+        closedFactory = null!;
+        unsatisfied = null;
+
+        if (requested is not INamedTypeSymbol { IsGenericType: true } requestedNamed
+            || !SymbolEqualityComparer.Default.Equals(
+                requestedNamed.OriginalDefinition,
+                template.OpenReturnType.OriginalDefinition))
+        {
+            return false;
+        }
+
+        var typeParameters = template.Factory.TypeParameters;
+        var openArguments = template.OpenReturnType.TypeArguments;
+        var requestedArguments = requestedNamed.TypeArguments;
+
+        if (openArguments.Length != requestedArguments.Length) return false;
+
+        var inferred = new ITypeSymbol[typeParameters.Length];
+
+        for (var i = 0; i < openArguments.Length; i++)
+        {
+            if (openArguments[i] is not ITypeParameterSymbol openParameter)
+            {
+                // Posicion fija en la plantilla (por ejemplo `ILogger<int, T>`): debe casar
+                // exactamente, porque ahi no hay nada que inferir.
+                if (!SymbolEqualityComparer.Default.Equals(openArguments[i], requestedArguments[i]))
+                    return false;
+
+                continue;
+            }
+
+            var position = typeParameters.IndexOf(openParameter);
+
+            if (position < 0) return false;
+
+            // El mismo parametro de tipo aparecido dos veces debe recibir el mismo argumento.
+            if (inferred[position] is { } already
+                && !SymbolEqualityComparer.Default.Equals(already, requestedArguments[i]))
+            {
+                return false;
+            }
+
+            inferred[position] = requestedArguments[i];
+        }
+
+        foreach (var argument in inferred)
+            if (argument is null) return false;
+
+        // Las restricciones son el criterio de seleccion, no una validacion posterior: una
+        // candidata que no las satisface simplemente no es candidata, porque puede haber
+        // otra que si. Solo cuando ninguna encaja se informa, y entonces interesa saber que
+        // restriccion fallo.
+        for (var i = 0; i < typeParameters.Length; i++)
+        {
+            if (!SatisfiesConstraints(typeParameters[i], inferred[i]))
+            {
+                unsatisfied = typeParameters[i];
+                return false;
+            }
+        }
+
+        closedFactory = template.Factory.Construct(inferred);
+        return true;
+    }
+
+    /// <summary>
+    /// Comprueba las restricciones declaradas de un parametro de tipo contra el argumento
+    /// que se le quiere dar.
+    /// </summary>
+    private static bool SatisfiesConstraints(ITypeParameterSymbol typeParameter, ITypeSymbol argument)
+    {
+        if (typeParameter.HasReferenceTypeConstraint && !argument.IsReferenceType) return false;
+
+        if (typeParameter.HasValueTypeConstraint
+            && (!argument.IsValueType || IsNullableValueType(argument)))
+        {
+            return false;
+        }
+
+        if (typeParameter.HasUnmanagedTypeConstraint && argument is not { IsUnmanagedType: true }) return false;
+
+        if (typeParameter.HasNotNullConstraint && argument.NullableAnnotation is NullableAnnotation.Annotated) return false;
+
+        if (typeParameter.HasConstructorConstraint
+            && argument is not INamedTypeSymbol { IsAbstract: false, InstanceConstructors: { } ctors })
+        {
+            return false;
+        }
+        else if (typeParameter.HasConstructorConstraint
+            && argument is INamedTypeSymbol { InstanceConstructors: { } instanceCtors }
+            && !instanceCtors.Any(c => c.Parameters.Length == 0 && c.DeclaredAccessibility is Accessibility.Public))
+        {
+            return false;
+        }
+
+        foreach (var constraint in typeParameter.ConstraintTypes)
+        {
+            // Un constraint que a su vez depende de otro parametro de tipo (`where T : U`)
+            // no se verifica aqui: exigiria resolver el orden de inferencia. Se acepta y, si
+            // no encaja, el compilador lo dira sobre la llamada construida, que sigue siendo
+            // codigo del usuario.
+            if (constraint is ITypeParameterSymbol) continue;
+
+            if (!IsAssignableTo(argument, constraint)) return false;
+        }
+
+        return true;
+
+        static bool IsNullableValueType(ITypeSymbol type)
+            => type is INamedTypeSymbol { OriginalDefinition.SpecialType: SpecialType.System_Nullable_T };
+    }
+
+    /// <summary>Conversion de identidad, herencia o implementacion de interfaz.</summary>
+    private static bool IsAssignableTo(ITypeSymbol source, ITypeSymbol target)
+    {
+        if (SymbolEqualityComparer.Default.Equals(source, target)) return true;
+
+        for (var baseType = source.BaseType; baseType is not null; baseType = baseType.BaseType)
+            if (SymbolEqualityComparer.Default.Equals(baseType, target)) return true;
+
+        foreach (var iface in source.AllInterfaces)
+            if (SymbolEqualityComparer.Default.Equals(iface, target)) return true;
+
+        return false;
     }
 
 }
