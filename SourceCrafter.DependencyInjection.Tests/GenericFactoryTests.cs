@@ -226,4 +226,49 @@ public class GenericFactoryTests
         result.HasDiagnostic("SCDI19").Should().BeFalse();
         result.HasDiagnostic("SCDI22").Should().BeFalse();
     }
+
+    /// <summary>
+    /// Estado actual: <b>la factory generica se valida pero todavia no resuelve nada</b>.
+    /// <para>
+    /// Registrar la factory no hace que <c>ILogger&lt;OrderService&gt;</c> sea satisfacible: el
+    /// consumidor falla con <c>SCDI03</c> ("no registrado") y el parametro se emite como
+    /// <c>default!</c>. Falta el cierre por consumo, que es el paso que recoge los tipos
+    /// construidos del grafo y los conecta con la factory.
+    /// </para>
+    /// <para>
+    /// Este test fija el hueco a proposito. Cuando el emparejado exista, debe fallar y
+    /// convertirse en la comprobacion de que la resolucion se emite.
+    /// </para>
+    /// </summary>
+    [Fact]
+    public void AGenericFactoryDoesNotYetSatisfyItsConsumers()
+    {
+        var result = GeneratorHarness.Run("""
+            using SourceCrafter.DependencyInjection.Attributes;
+
+            namespace Probe;
+
+            public interface ILogger<T> { }
+            public sealed class Logger<T> : ILogger<T> { }
+
+            public sealed class OrderService(ILogger<OrderService> log)
+            {
+                public ILogger<OrderService> Log => log;
+            }
+
+            [ServiceProvider]
+            [Transient(source: nameof(_CreateLogger))]
+            [Transient<OrderService>]
+            public partial class Container
+            {
+                private static ILogger<T> _CreateLogger<T>() where T : class => new Logger<T>();
+            }
+            """);
+
+        result.HasDiagnostic("SCDI03").Should().BeTrue(
+            "el cierre por consumo todavia no conecta la factory generica con sus consumidores");
+
+        result.Source("Container").Should().Contain("default!",
+            "sin resolucion el parametro se emite como default!");
+    }
 }
