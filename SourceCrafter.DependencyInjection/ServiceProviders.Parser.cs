@@ -72,7 +72,6 @@ internal partial class ServiceProviders
         Dictionary<DependencyKey, (string Field, string Member)> methodNamesMap = new(defaultSubKeyComparer);
         HashSet<string> methodsRegistry = [];
         Dictionary<DependencyKey, MemberBuilder> dependencyMemberBuilders = [];
-        HashSet<ResolverBuilder> genericResolvers = new(new GenericResolverBuilderComparer());
 
         Disposability
             containerDisposability = Disposability.None,
@@ -120,8 +119,7 @@ internal partial class ServiceProviders
 
         foreach (var attr in attributes)
         {
-            if(TryRegisterService(attr, null, out var resolver, cancelToken))
-                genericResolvers.Add(resolver!); ;
+            TryRegisterService(attr, null, out _, cancelToken);
         }
 
         if (dependencyValueBuilders.Count == 0 && diagnostics.Count == 0) return null!;
@@ -158,13 +156,11 @@ internal partial class ServiceProviders
             scopedDisposability,
             dependencyValueBuilders,
             dependencyMemberBuilders,
-            diagnostics,
-            genericResolvers);
+            diagnostics);
 
         diagnostics = null!;
         dependencyValueBuilders = null!;
         dependencyMemberBuilders = null!;
-        genericResolvers = null!;
 
         return emitter;
 
@@ -366,7 +362,8 @@ internal partial class ServiceProviders
                     AppendValue = render.AppendValue,
                     AsyncKind = AsyncKind,
                     ParamsLength = prms.Length,
-                    TransientWithoutCachedDeps = isSimpleTransient
+                    TransientWithoutCachedDeps = isSimpleTransient,
+                    RuntimeTypeName = (exportType ?? type)?.RuntimeFullName
                 };
 
             // If it comes from params check, validates the symbols as dependency
@@ -417,7 +414,7 @@ internal partial class ServiceProviders
                 // con nombre la API generica cae en el stub que lanza. `exportTransients` lo
                 // expone sin tocar el inlinado, que se sigue aplicando dentro de la propia
                 // compilacion.
-                if (exportTransients && !isExternal) RegisterExposedMember();
+                if (exportTransients && !isExternal) RegisterExposedMember(resolver);
 
                 //TryRegisterInterceptorMethod();
                 CommitRenderState();
@@ -777,7 +774,7 @@ internal partial class ServiceProviders
             // mismo razonamiento que en la salida temprana: se inlinea, y solo se expone si
             // el autor lo pidio con `exportTransients`.
             if (!isExternal && (isCached || !isSimpleTransient || exportTransients))
-                RegisterExposedMember();
+                RegisterExposedMember(resolver);
 
             resolver.TransientWithoutCachedDeps = hasNoCachedDeps;
             resolver.AsyncKind = AsyncKind;
@@ -791,7 +788,10 @@ internal partial class ServiceProviders
             // Expone el resolver como miembro con nombre del contenedor. Se lee el estado en
             // el momento de la llamada, no al declararla: las dos salidas lo invocan en
             // puntos distintos y con valores distintos de disposability y AsyncKind.
-            void RegisterExposedMember() =>
+            // 'exposed' llega por parametro porque 'resolver' es un 'out' y esos no se
+            // pueden capturar desde una funcion local (CS1628).
+            void RegisterExposedMember(ResolverBuilder? exposed)
+            {
                 dependencyMemberBuilders
                     .TryAdd((lifetime, typeFullName, name),
                         new(lifetime, exportTypeFullName, name, AsyncKind, disposability, nameOrFormat)
@@ -799,6 +799,15 @@ internal partial class ServiceProviders
                             RequiresCancelToken = needsCancelToken,
                             BuildAndExpose = render.AppendMethod
                         });
+
+                // Solo un resolver con miembro se puede despachar desde la API generica:
+                // el switch reenvia al nombre, no reconstruye el valor.
+                if (exposed is not null)
+                {
+                    exposed.MemberName = methodName;
+                    exposed.MemberIsMethodShaped = AsyncKind is not 0 && (hasAsyncDependencies || needsCancelToken);
+                }
+            }
 
             // Cierra las plantillas genericas contra un tipo construido concreto que algun
             // consumidor acaba de pedir. Registra el resultado como un servicio normal, de

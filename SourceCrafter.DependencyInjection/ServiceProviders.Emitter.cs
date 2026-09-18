@@ -36,8 +36,7 @@ internal partial class ServiceProviders
         Disposability scopedDisposability,
         DependencyDictionary dependencyValueBuilders,
         Dictionary<DependencyKey, MemberBuilder> dependencyMemberBuilder,
-        HashSet<Diagnostic> diagnostics,
-        HashSet<ResolverBuilder> genericResolvers) : IEquatable<Emitter>
+        HashSet<Diagnostic> diagnostics) : IEquatable<Emitter>
     {
         internal readonly HashSet<Diagnostic> Diagnostics = diagnostics;
         internal readonly DependencyDictionary DependencyValueBuilders = dependencyValueBuilders;
@@ -358,7 +357,7 @@ internal partial class ServiceProviders
 ");
 			}
 
-            var emitGenericApi = genericApi && genericResolvers.Count > 0;
+            var emitGenericApi = genericApi && dependencyValueBuilders.Count > 0;
 
             if (implementsServiceProvider || emitGenericApi)
             {
@@ -374,22 +373,10 @@ internal partial class ServiceProviders
 
                 if (emitGenericApi)
                 {
-                    foreach (var genericResolver in genericResolvers)
-                        genericResolver.GenericMemberSignature(code);
-
-                    // Un sitio de llamada sin clave que pide *todos* los servicios de un tipo
-                    // se sirve tambien con los registros que si tienen clave: es lo que hace
-                    // el fallback de CollectMsDIServiceCalls. Sin esta declaracion ese sitio
-                    // no compila (CS1061) y el fallback queda inalcanzable.
-                    foreach (var asyncKind in genericResolvers
-                        .Where(r => r.Key.key != "")
-                        .Select(r => r.AsyncKind)
-                        .Distinct()
-                        .Where(kind => !genericResolvers.Any(r => r.Key.key == "" && r.AsyncKind == kind))
-                        .OrderBy(kind => kind))
-                    {
-                        ResolverBuilder.AppendSignature(code, asyncKind, false, true);
-                    }
+                    // La API generica se emite como despachador real y no como firma que
+                    // lanza: es el fallback de los interceptores para los sitios de llamada
+                    // que el compilador no puede enlazar al contenedor concreto.
+                    GenericApiEmitter.Emit(code, GenericApiEmitter.Collect(dependencyValueBuilders));
                 }
 
                 code.Append(@"

@@ -63,27 +63,6 @@ class AsyncLocalResolver(DependencyKey dep)
     }
 }
 
-/// <summary>
-/// Agrupa los resolvedores que producen la *misma* firma generica de compatibilidad.
-/// Solo cuentan "tiene clave" y el tipo de asincronia: el CancellationToken ya no
-/// aparece en la firma, asi que incluirlo aqui generaria dos miembros identicos.
-/// </summary>
-class GenericResolverBuilderComparer : IEqualityComparer<ResolverBuilder>
-{
-    public bool Equals(ResolverBuilder? x, ResolverBuilder? y)
-    {
-        if (ReferenceEquals(x, y)) return true;
-        if (x is null || y is null) return false;
-
-        return (x.Key.key != "", x.AsyncKind) == (y.Key.key != "", y.AsyncKind);
-    }
-
-    public int GetHashCode([DisallowNull] ResolverBuilder obj)
-    {
-        return HashCode.Combine(obj.Key.key != "", obj.AsyncKind);
-    }
-}
-
 internal class ResolverBuilder(string toStr)
 {
     internal DependencyKey Key;
@@ -98,63 +77,24 @@ internal class ResolverBuilder(string toStr)
     internal bool TransientWithoutCachedDeps;
 
     /// <summary>
-    /// Emite los miembros genericos de compatibilidad con <c>IServiceProvider</c>.
-    ///
-    /// <para>Ninguna sobrecarga acepta un <c>CancellationToken</c>: el contenedor resuelve
-    /// con su propio token de vida (<c>__lifetimeToken</c>), asi que aceptar uno del
-    /// llamador solo prometeria una cancelacion que nunca se honra. Ademas, un valor
-    /// cacheado se entrega a todos los llamadores, por lo que grabar en el el token del
-    /// primero seria incorrecto.</para>
+    /// Nombre del miembro del contenedor que resuelve este servicio, o <c>null</c> si el
+    /// resolver no llego a exponerse (un transient inlineado sin <c>exportTransients</c>).
+    /// Sin miembro no hay nada a lo que despachar, asi que esos quedan fuera del
+    /// <c>switch</c> de la API generica.
     /// </summary>
-    internal void GenericMemberSignature(StringBuilder code)
-    {
-        AppendSignature(code, AsyncKind, Key.key != "", false);
-        AppendSignature(code, AsyncKind, Key.key != "", true);
-    }
+    internal string? MemberName;
 
     /// <summary>
-    /// Emite una firma de la API generica de compatibilidad.
+    /// Discriminador de este servicio en el <c>switch</c> de la API generica: el
+    /// <c>typeof(T).FullName</c> del tipo expuesto. Es <c>null</c> para los genericos
+    /// construidos, que se comparan por <c>typeof</c> en vez de por cadena.
     /// </summary>
-    internal static void AppendSignature(StringBuilder code, AsyncKind asyncKind, bool hasKey, bool isMultiple)
-    {
-        code.Append(@"
-    public ");
+    internal string? RuntimeTypeName;
 
-        switch (asyncKind)
-        {
-            case AsyncKind.None:
-                code.Append("TOut");
-                if (isMultiple) code.Append("[]");
-                break;
-            case AsyncKind.ValueTask:
-                code.Append("global::System.Threading.Tasks.ValueTask<TOut");
-                if (isMultiple) code.Append("[]");
-                code.Append('>');
-                break;
-            case AsyncKind.Task:
-                code.Append("global::System.Threading.Tasks.Task<TOut");
-                if (isMultiple) code.Append("[]");
-                code.Append('>');
-                break;
-        }
-
-        code.Append(" GetRequired");
-
-        if (hasKey) code.Append("Keyed");
-
-        if (asyncKind == AsyncKind.ValueTask) code.Append("Value");
-
-        code.Append("Service");
-
-        if (isMultiple) code.Append('s');
-
-        code.Append(asyncKind > 0 ? "Async<TOut>(" : "<TOut>(");
-
-        if (hasKey) code.Append("string key");
-
-        code.Append(@") where TOut : notnull => throw new global::System.NotImplementedException();
-");
-    }
+    /// <summary>
+    /// Cierto si el miembro se emite como metodo y por tanto hay que invocarlo.
+    /// </summary>
+    internal bool MemberIsMethodShaped;
 
     public override string ToString() => toStr;
 }
