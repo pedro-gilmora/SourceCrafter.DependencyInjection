@@ -16,6 +16,8 @@ namespace SourceCrafter.DependencyInjection.Tests
 
             serverContainer.B.IAs[1].Should().Be(serverContainer.AA);
 
+            serverContainer.AuditLog.Logger.Log("fdsfdsdfsdfsfdsd");
+
             var db = await serverContainer.GetDatabaseAsync();
 
             db.TrySave(out var setting1);
@@ -54,7 +56,7 @@ namespace SourceCrafter.DependencyInjection.Tests
             //Uncommenting this will complain with SCDI11: No dependency resolver was found for 'global::System.DateTime' at 'Server' container
             //var _ = serverContainer.GetRequiredService<DateTime>();
 
-var db = await serverContainer.GetRequiredServiceAsync<IDatabase>();
+            var db = await serverContainer.GetRequiredServiceAsync<IDatabase>();
 
             db.TrySave(out var setting1);
 
