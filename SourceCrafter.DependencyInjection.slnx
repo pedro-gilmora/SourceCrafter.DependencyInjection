@@ -1,4 +1,4 @@
-<Solution>
+﻿<Solution>
   <Configurations>
     <BuildType Name="Debug" />
     <BuildType Name="DEBUG_SG" />
@@ -31,6 +31,7 @@
     <File Path="Solution/Interop/ServiceMetadata.cs" />
     <File Path="Solution/Metadata/Attributes.cs" />
   </Folder>
+  <Project Path="Benchmarks.HandCoded/Benchmarks.HandCoded.csproj" />
   <Project Path="Benchmarks/Benchmarks.csproj" />
   <Project Path="SourceCrafter.DependencyInjection.Metadata/SourceCrafter.DependencyInjection.Metadata.csproj">
     <BuildType Solution="DEBUG_SG|*" Project="Debug" />
@@ -41,7 +42,4 @@
   <Project Path="SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj" />
   <Project Path="SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj" />
   <Project Path="SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj" />
-  <Project Path="Tests/Tests.csproj" Id="ece23692-dd85-4e60-b9f3-e52873867cda">
-    <BuildType Solution="DEBUG_SG|*" Project="Debug" />
-  </Project>
 </Solution>
