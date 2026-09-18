@@ -63,27 +63,6 @@ class AsyncLocalResolver(DependencyKey dep)
     }
 }
 
-/// <summary>
-/// Agrupa los resolvedores que producen la *misma* firma generica de compatibilidad.
-/// Solo cuentan "tiene clave" y el tipo de asincronia: el CancellationToken ya no
-/// aparece en la firma, asi que incluirlo aqui generaria dos miembros identicos.
-/// </summary>
-class GenericResolverBuilderComparer : IEqualityComparer<ResolverBuilder>
-{
-    public bool Equals(ResolverBuilder? x, ResolverBuilder? y)
-    {
-        if (ReferenceEquals(x, y)) return true;
-        if (x is null || y is null) return false;
-
-        return (x.Key.key != "", x.AsyncKind) == (y.Key.key != "", y.AsyncKind);
-    }
-
-    public int GetHashCode([DisallowNull] ResolverBuilder obj)
-    {
-        return HashCode.Combine(obj.Key.key != "", obj.AsyncKind);
-    }
-}
-
 internal class ResolverBuilder(string toStr)
 {
     internal DependencyKey Key;
@@ -98,63 +77,24 @@ internal class ResolverBuilder(string toStr)
     internal bool TransientWithoutCachedDeps;
 
     /// <summary>
-    /// Emite los miembros genericos de compatibilidad con <c>IServiceProvider</c>.
-    ///
-    /// <para>Ninguna sobrecarga acepta un <c>CancellationToken</c>: el contenedor resuelve
-    /// con su propio token de vida (<c>__lifetimeToken</c>), asi que aceptar uno del
-    /// llamador solo prometeria una cancelacion que nunca se honra. Ademas, un valor
-    /// cacheado se entrega a todos los llamadores, por lo que grabar en el el token del
-    /// primero seria incorrecto.</para>
+    /// Nombre del miembro del contenedor que resuelve este servicio, o <c>null</c> si el
+    /// resolver no llego a exponerse (un transient inlineado sin <c>exportTransients</c>).
+    /// Sin miembro no hay nada a lo que despachar, asi que esos quedan fuera del
+    /// <c>switch</c> de la API generica.
     /// </summary>
-    internal void GenericMemberSignature(StringBuilder code)
-    {
-        AppendSignature(code, AsyncKind, Key.key != "", false);
-        AppendSignature(code, AsyncKind, Key.key != "", true);
-    }
+    internal string? MemberName;
 
     /// <summary>
-    /// Emite una firma de la API generica de compatibilidad.
+    /// Discriminador de este servicio en el <c>switch</c> de la API generica: el
+    /// <c>typeof(T).FullName</c> del tipo expuesto. Es <c>null</c> para los genericos
+    /// construidos, que se comparan por <c>typeof</c> en vez de por cadena.
     /// </summary>
-    internal static void AppendSignature(StringBuilder code, AsyncKind asyncKind, bool hasKey, bool isMultiple)
-    {
-        code.Append(@"
-    public ");
+    internal string? RuntimeTypeName;
 
-        switch (asyncKind)
-        {
-            case AsyncKind.None:
-                code.Append("TOut");
-                if (isMultiple) code.Append("[]");
-                break;
-            case AsyncKind.ValueTask:
-                code.Append("global::System.Threading.Tasks.ValueTask<TOut");
-                if (isMultiple) code.Append("[]");
-                code.Append('>');
-                break;
-            case AsyncKind.Task:
-                code.Append("global::System.Threading.Tasks.Task<TOut");
-                if (isMultiple) code.Append("[]");
-                code.Append('>');
-                break;
-        }
-
-        code.Append(" GetRequired");
-
-        if (hasKey) code.Append("Keyed");
-
-        if (asyncKind == AsyncKind.ValueTask) code.Append("Value");
-
-        code.Append("Service");
-
-        if (isMultiple) code.Append('s');
-
-        code.Append(asyncKind > 0 ? "Async<TOut>(" : "<TOut>(");
-
-        if (hasKey) code.Append("string key");
-
-        code.Append(@") where TOut : notnull => throw new global::System.NotImplementedException();
-");
-    }
+    /// <summary>
+    /// Cierto si el miembro se emite como metodo y por tanto hay que invocarlo.
+    /// </summary>
+    internal bool MemberIsMethodShaped;
 
     public override string ToString() => toStr;
 }
@@ -168,11 +108,17 @@ internal class ResolverBuilder(string toStr)
 /// Dependencias asincronas que este elemento resuelve por el camino. Si otro elemento del
 /// mismo array esta aqui dentro <b>y</b> es cacheado, esperar a este ya lo deja completo.
 /// </param>
+/// <param name="IsValueTask">
+/// Cierto si el local <c>__tN</c> sera un <c>ValueTask&lt;T&gt;</c>. Importa porque
+/// <c>ValueTask</c> no expone <c>Exception</c> y <c>AsTask()</c> sobre una ya consumida
+/// lanza, asi que su excepcion no se puede observar sin consumirla.
+/// </param>
 internal readonly record struct InterceptorElement(
     bool IsAsync,
     Action<StringBuilder, bool> Append,
     DependencyKey Key,
-    IReadOnlyCollection<DependencyKey> ResolvedDeps);
+    IReadOnlyCollection<DependencyKey> ResolvedDeps,
+    bool IsValueTask);
 
 internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool multiple, AsyncKind asyncKind, string exportTypeFullName, bool isKeyed, InterceptableLocation builtFrom, InterceptorElement firstDependency)
 {
@@ -194,6 +140,82 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
     /// </summary>
     internal readonly InterceptableLocation BuiltFrom = builtFrom;
 
+    /// <summary>
+    /// Numero que distingue a este interceptor de los demas. Se asigna antes de emitir el
+    /// contenedor porque el campo de cache de los elementos scoped se declara ahi dentro,
+    /// mientras que el metodo interceptor se emite despues, en la clase de extensiones.
+    /// </summary>
+    internal int Index;
+
+    /// <summary>
+    /// Lifetime del array que devuelve el interceptor, o <c>null</c> si no se puede cachear.
+    ///
+    /// <para>Es el <b>minimo</b> de los lifetimes de sus elementos. Basta un elemento
+    /// transitorio para que no haya cache posible: un transitorio promete una instancia nueva
+    /// por llamada, asi que guardar el array convertiria ese elemento en un singleton de
+    /// hecho. No es una cuestion de rendimiento sino de semantica.</para>
+    ///
+    /// <para>Si todos son singleton el array es el mismo para todo el proceso y el campo es
+    /// estatico. Si hay alguno scoped el array solo vale dentro de su ambito, asi que el
+    /// campo es de instancia y cada <c>CreateScope()</c> estrena el suyo.</para>
+    /// </summary>
+    internal Lifetime? CacheLifetime
+    {
+        get
+        {
+            // Sin array no hay nada que ahorrar: el valor unico ya lo cachea su miembro.
+            if (!multiple) return null;
+
+            var result = Lifetime.Singleton;
+
+            foreach (var element in AppendInterceptorValue)
+            {
+                if (element.Key.lifetime is Lifetime.Transient) return null;
+
+                if (element.Key.lifetime is Lifetime.Scoped) result = Lifetime.Scoped;
+            }
+
+            return result;
+        }
+    }
+
+    internal string CacheFieldName => "__interceptorCache" + Index;
+
+    /// <summary>
+    /// Expresion con la que se lee y escribe la cache. Los elementos scoped viven en la
+    /// instancia que recibe el interceptor; los singleton, en un estatico de la clase de
+    /// extensiones.
+    /// </summary>
+    string CacheAccess => CacheLifetime is Lifetime.Scoped ? "provider." + CacheFieldName : CacheFieldName;
+
+    /// <summary>
+    /// Reserva el numero de este interceptor. Se salta los que no tienen sitio de llamada
+    /// para que la numeracion sea la misma que la de la emision.
+    /// </summary>
+    internal void AssignIndex(ref int i)
+    {
+        if (Locations.Count == 0) return;
+
+        Index = ++i;
+    }
+
+    /// <summary>
+    /// Declara dentro del contenedor el campo de cache de un interceptor cuyo array depende
+    /// del ambito. Los singleton no pasan por aqui: su campo se declara en la clase de
+    /// extensiones junto al metodo.
+    /// </summary>
+    internal void AppendScopedCacheField(StringBuilder code)
+    {
+        if (Locations.Count == 0 || CacheLifetime is not Lifetime.Scoped) return;
+
+        // 'internal' y no 'private': quien lo lee es el metodo interceptor, que vive en la
+        // clase de extensiones del mismo ensamblado.
+        code.Append(@"
+
+    internal ").Append(exportTypeFullName).Append("[]? ").Append(CacheFieldName).Append(@";
+");
+    }
+
     public override bool Equals(object? obj)
     {
         return (obj as Interceptor)?.Key.Equals(Key) ?? false;
@@ -203,9 +225,16 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
         return Key.GetHashCode();
     }
 
-    internal void Append(StringBuilder code, string providerTypeName, ref int i)
+    internal void Append(StringBuilder code, string providerTypeName)
     {
         if (Locations.Count == 0) return;
+
+        if (CacheLifetime is Lifetime.Singleton)
+        {
+            code.Append(@"
+    private static ").Append(exportTypeFullName).Append("[]? ").Append(CacheFieldName).Append(@";
+");
+        }
 
         foreach (var item in Locations)
         {
@@ -213,10 +242,10 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
     [global::System.Runtime.CompilerServices.InterceptsLocation(").Append(item.Version).Append(@", """).Append(item.Data).Append('"').Append(@")] //").Append(item.GetDisplayLocation());
         }
 
-        AppendInterceptor(code, providerTypeName, ref i);
+        AppendInterceptor(code, providerTypeName);
     }
 
-    void AppendInterceptor(StringBuilder code, string providerTypeName, ref int i)
+    void AppendInterceptor(StringBuilder code, string providerTypeName)
     {
         code.Append(@"
     public static ");
@@ -243,13 +272,15 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
                 break;
         }
 
-        code.Append(" InterceptorCall").Append(++i).Append(@"(this ").Append(providerTypeName);
+        code.Append(" InterceptorCall").Append(Index).Append(@"(this ").Append(providerTypeName);
 
         //if (isScopedCall) code.Append(".Scoped");
 
         code.Append(" provider");
 
         if (IsKeyed) code.Append(", string _");
+
+        var cached = CacheLifetime is not null;
 
         if (useAsync)
         {
@@ -258,6 +289,15 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
             // luego se esperan una a una.
             code.Append(@")
     {");
+
+            // La cache guarda el array ya resuelto, no la tarea: una tarea fallida se
+            // quedaria cacheada y todo el proceso heredaria el fallo. Si dos llamadas
+            // concurrentes se cruzan, cada una construye un array cuyos elementos son los
+            // mismos objetos cacheados, asi que la carrera solo desperdicia una asignacion.
+            if (cached)
+                code.Append(@"
+        if (").Append(CacheAccess).Append(@" is { } __cached) return __cached;
+");
 
             var index = 0;
 
@@ -282,19 +322,45 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
             // una tarea distinta en cada llamada.
             var resolvedBy = ResolveCoverage();
 
+            // Si dos tareas fallan, el primer await lanza y las demas quedan huerfanas: su
+            // excepcion nunca se observa y termina en TaskScheduler.UnobservedTaskException.
+            // Observarlas en el camino de salida cuesta cero (medido en la Fase 17: el
+            // try/catch es indistinguible de no tenerlo), pero solo se puede hacer sobre
+            // Task<T>. ValueTask<T> no expone Exception, y AsTask() sobre una ya consumida
+            // lanza InvalidOperationException, asi que ahi se deja como estaba.
+            var observable = AppendInterceptorValue
+                .Where(e => e.IsAsync)
+                .ToList();
+
+            var observes = observable.Count > 1 && observable.TrueForAll(e => !e.IsValueTask);
+
+            if (observes)
+                code.Append(@"
+
+        try
+        {");
+
+            // Sangria extra para el cuerpo que queda dentro del try. NormalizeLayout convierte
+            // cada 4 espacios en un tabulador, asi que se cuenta en espacios.
+            var pad = observes ? "    " : "";
+
             var awaited = new Dictionary<int, int>();
 
             foreach (var coveringIndex in resolvedBy.Values.Distinct().OrderBy(i => i))
             {
                 code.Append(@"
-        var __r").Append(awaited.Count).Append(" = await __t").Append(coveringIndex).Append(';');
+        ").Append(pad).Append("var __r").Append(awaited.Count).Append(" = await __t").Append(coveringIndex).Append(';');
 
                 awaited.Add(coveringIndex, awaited.Count);
             }
 
             code.Append(@"
 
-        return [");
+        ").Append(pad).Append("return ");
+
+            if (cached) code.Append(CacheAccess).Append(" = ");
+
+            code.Append('[');
 
             index = 0;
 
@@ -303,7 +369,7 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
                 if (index > 0) code.Append(',');
 
                 code.Append(@"
-            ");
+            ").Append(pad);
 
                 if (!element.IsAsync) element.Append(code, true);
                 else if (resolvedBy.TryGetValue(index, out var coveringIndex))
@@ -315,7 +381,33 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
                 index++;
             }
 
-            code.Append(@"];
+            code.Append("];");
+
+            if (observes)
+            {
+                code.Append(@"
+        }
+        catch
+        {");
+
+                index = 0;
+
+                foreach (var element in AppendInterceptorValue)
+                {
+                    if (element.IsAsync)
+                        code.Append(@"
+            _ = __t").Append(index).Append(".Exception;");
+
+                    index++;
+                }
+
+                code.Append(@"
+
+            throw;
+        }");
+            }
+
+            code.Append(@"
     }
 ");
 
@@ -365,6 +457,11 @@ internal class Interceptor(FirstLevelDependencyKey key, string methodName, bool 
 
         if (multiple)
         {
+            // Sin candado a proposito: todos los elementos son cacheados, asi que dos
+            // arrays construidos a la vez contienen exactamente los mismos objetos. Lo
+            // unico que cuesta una carrera es la asignacion que se iba a ahorrar.
+            if (cached) code.Append(CacheAccess).Append(" ??= ");
+
             code.Append(@"[
         ");
 
