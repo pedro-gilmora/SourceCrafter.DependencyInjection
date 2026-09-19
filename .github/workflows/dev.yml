@@ -1,11 +1,13 @@
 name: 'SourceCrafter.DependencyInjection: Build, Test & Deploy for .NET 10'
 
 on:
-  pull_request_review:
-    types: [ submitted ]
   # GitHub no deja aprobar la propia PR, asi que en un repositorio de un solo
-  # autor el evento de review nunca llega. Este disparador permite lanzar el
-  # mismo trabajo a mano indicando el numero de la PR.
+  # autor el evento de review nunca llega. La integracion real es el merge en
+  # dev, asi que ese es el hito que publica.
+  pull_request:
+    types: [ closed ]
+    branches: [ dev ]
+  # Permite relanzar el mismo trabajo a mano indicando el numero de la PR.
   workflow_dispatch:
     inputs:
       pr_number:
@@ -13,7 +15,7 @@ on:
         required: true
         type: string
 
-# El token por defecto de un evento de review es de solo lectura: sin esto
+# El token por defecto de estos eventos es de solo lectura: sin esto
 # fallan tanto la creacion del release como la consulta de commits de la PR.
 permissions:
   contents: write
@@ -21,15 +23,15 @@ permissions:
   actions: read
 
 jobs:
-  # Los dos disparadores traen la PR en sitios distintos: el de review la trae en
+  # Los dos disparadores traen la PR en sitios distintos: el de cierre la trae en
   # el payload y el manual solo da su numero. Este trabajo normaliza ambos casos
   # para que el resto lea siempre las mismas salidas.
   resolve:
     name: 'Resolve pull request'
     runs-on: 'ubuntu-latest'
-    # Una review tambien se emite como commented o changes_requested: solo la
-    # aprobacion despliega. El disparador manual es una aprobacion explicita.
-    if: github.event_name == 'workflow_dispatch' || github.event.review.state == 'approved'
+    # Una PR tambien se cierra sin integrar: solo el merge despliega. El
+    # disparador manual es una integracion explicita.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
     outputs:
       number: ${{ steps.pr.outputs.number }}
       head_sha: ${{ steps.pr.outputs.head_sha }}
@@ -45,13 +47,14 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         PR_NUMBER: ${{ github.event_name == 'workflow_dispatch' && inputs.pr_number || github.event.pull_request.number }}
-        APPROVER: ${{ github.event_name == 'workflow_dispatch' && github.triggering_actor || github.event.review.user.login }}
+        APPROVER: ${{ github.event_name == 'workflow_dispatch' && github.triggering_actor || github.event.pull_request.merged_by.login }}
       run: |
         pr=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}")
 
-        # Un borrador no se despliega venga de donde venga el disparador.
+        # Un borrador no se despliega venga de donde venga el disparador, y en
+        # el lanzamiento manual solo se acepta una PR ya integrada.
         draft=$(jq -r '.draft' <<< "$pr")
-        state=$(jq -r '.state' <<< "$pr")
+        merged=$(jq -r '.merged' <<< "$pr")
 
         {
           echo "number=${PR_NUMBER}"
@@ -61,7 +64,7 @@ jobs:
           echo "title=$(jq -r '.title' <<< "$pr")"
           echo "url=$(jq -r '.html_url' <<< "$pr")"
           echo "approver=${APPROVER}"
-          echo "proceed=$([ "$draft" = 'false' ] && [ "$state" = 'open' ] && echo true || echo false)"
+          echo "proceed=$([ "$draft" = 'false' ] && [ "$merged" = 'true' ] && echo true || echo false)"
         } >> "$GITHUB_OUTPUT"
 
   try-deliver:
@@ -74,8 +77,8 @@ jobs:
     - name: Get source code
       uses: actions/checkout@v3
       with:
-        # El evento apunta al merge base, no al codigo revisado: hay que pedir
-        # explicitamente la cabeza de la PR recien aprobada.
+        # El evento apunta al merge base, no al codigo integrado: hay que pedir
+        # explicitamente la cabeza de la PR recien fusionada.
         ref: ${{ needs.resolve.outputs.head_sha }}
         
     - name: Setup .NET
@@ -93,9 +96,9 @@ jobs:
         version=""$(( $(date --date='now' +%Y) - $created_year )).$(date +%y).$(date +%j).$(( $time_num / 5 ))""
         echo "VERSION=${version}" >> $GITHUB_ENV
 
-        # Una review no trae head_commit ni commits: ese par solo viaja en el evento
-        # push. Se reconstruyen desde la API para que el resto del script siga leyendo
-        # la misma forma. El titulo de la PR hace de asunto porque describe el conjunto.
+        # El evento de PR no trae head_commit ni commits: ese par solo viaja en el
+        # evento push. Se reconstruyen desde la API para que el resto del script siga
+        # leyendo la misma forma. El titulo de la PR hace de asunto porque describe el conjunto.
         gh api "repos/${{ github.repository }}/pulls/${{ needs.resolve.outputs.number }}/commits" --paginate > pr_commits.json
 
         jq -n \
@@ -127,8 +130,8 @@ jobs:
         }
       
     - name: Publish generator and endpoints to Nuget
-      # La rama que decide es la destino del merge: en una review github.ref_name
-      # apunta a la rama por defecto. El marcador [Release] viaja en el titulo de la PR.
+      # La rama que decide es la destino del merge: en un evento de PR github.ref_name
+      # apunta a la referencia de la propia PR. El marcador [Release] viaja en el titulo de la PR.
       if: needs.resolve.outputs.base_ref == 'dev' && startsWith(needs.resolve.outputs.title, '[Release]')
       id: publish
       run: | 
@@ -262,7 +265,7 @@ jobs:
 
         🌿 **Branch:** $(escape '${{ needs.resolve.outputs.head_ref }}') → $(escape '${{ needs.resolve.outputs.base_ref }}')
 
-        👍 **Approved by:** [${{ needs.resolve.outputs.approver }}](https://github.com/${{ needs.resolve.outputs.approver }})
+        🔀 **Merged by:** [${{ needs.resolve.outputs.approver }}](https://github.com/${{ needs.resolve.outputs.approver }})
 
         🔗 **Change:** [$( $githubEvent.head_commit.id.Substring(0,8) )]($( $githubEvent.head_commit.url ))
 
@@ -308,7 +311,7 @@ jobs:
 
           # El cuerpo va entre comillas: sin ellas PowerShell parte el argumento por cada
           # espacio y salto de linea, y gh recibe la tabla despedazada.
-          # El tag debe colgar del commit revisado: en un evento de review el
+          # El tag debe colgar del commit integrado: en un evento de PR el
           # repositorio local esta en esa cabeza, pero gh apuntaria por defecto a
           # la rama por defecto del repositorio.
           gh release create v${{ env.VERSION }} --target ${{ needs.resolve.outputs.head_sha }} -t "$(subject $githubEvent.head_commit.message)" -n "$releaseNotes"
