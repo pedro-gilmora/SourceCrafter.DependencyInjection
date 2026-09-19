@@ -26,7 +26,7 @@ public sealed class Flaky
     }
 }
 
-[ServiceContainer]
+[ServiceProvider]
 [Singleton<Flaky>(source: nameof(CreateFlakyAsync))]
 public partial class FlakyContainer
 {

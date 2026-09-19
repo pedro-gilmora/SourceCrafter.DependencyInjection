@@ -49,15 +49,26 @@ static class GeneratorHarness
         return dir ?? throw new InvalidOperationException("No se encontro la raiz del repositorio.");
     });
 
-    static readonly Lazy<IIncrementalGenerator> Generator = new(() =>
+    static readonly Lazy<IIncrementalGenerator> Generator = new(() => Load("SourceCrafter.DependencyInjection"));
+
+    /// <summary>
+    /// La extension de configuracion vive en su propio ensamblado y emite un
+    /// <c>partial</c> aparte del contenedor. Roslyn ejecuta ambos generadores sobre la
+    /// <b>misma</b> compilacion de entrada, asi que ninguno ve la salida del otro: el
+    /// contrato entre ellos es el nombre del miembro. Por eso hay que ejecutarlos juntos
+    /// para comprobar que ese contrato se cumple.
+    /// </summary>
+    static readonly Lazy<IIncrementalGenerator> ConfigurationGenerator =
+        new(() => Load("SourceCrafter.DependencyInjection.MsConfiguration"));
+
+    static IIncrementalGenerator Load(string project)
     {
-        var dll = NewestAssembly("SourceCrafter.DependencyInjection");
-        var type = Assembly.LoadFrom(dll)
+        var type = Assembly.LoadFrom(NewestAssembly(project))
             .GetTypes()
             .First(t => typeof(IIncrementalGenerator).IsAssignableFrom(t) && !t.IsAbstract);
 
         return (IIncrementalGenerator)Activator.CreateInstance(type)!;
-    });
+    }
 
     static readonly Lazy<IReadOnlyList<MetadataReference>> References = new(() =>
     {
@@ -70,6 +81,26 @@ static class GeneratorHarness
         }
 
         refs.Add(MetadataReference.CreateFromFile(NewestAssembly("SourceCrafter.DependencyInjection.Metadata")));
+
+        return refs;
+    });
+
+    /// <summary>
+    /// Las de siempre mas lo que necesita la extension de configuracion: sus atributos y
+    /// los ensamblados de <c>Microsoft.Extensions.Configuration</c>. Sin estos ultimos la
+    /// extension se desactiva a proposito, asi que omitirlos daria un falso verde.
+    /// </summary>
+    static readonly Lazy<IReadOnlyList<MetadataReference>> ConfigurationReferences = new(() =>
+    {
+        List<MetadataReference> refs = [.. References.Value];
+
+        refs.Add(MetadataReference.CreateFromFile(
+            NewestAssembly("SourceCrafter.DependencyInjection.MsConfiguration.Metadata")));
+
+        foreach (var dll in Directory.EnumerateFiles(AppContext.BaseDirectory, "Microsoft.Extensions.Configuration*.dll"))
+        {
+            try { refs.Add(MetadataReference.CreateFromFile(dll)); } catch (Exception) { }
+        }
 
         return refs;
     });
@@ -104,6 +135,25 @@ static class GeneratorHarness
 
         var driver = CreateDriver(options)
             .RunGeneratorsAndUpdateCompilation(CreateCompilation(source, options), out var output, out _);
+
+        return Collect(driver, output);
+    }
+
+    /// <summary>
+    /// Compila <paramref name="source"/> con el generador de contenedores <b>y</b> el de
+    /// configuracion, que es como se usan en un proyecto real.
+    /// </summary>
+    internal static Result RunWithConfiguration(string source)
+    {
+        var compilation = CSharpCompilation.Create(
+            "Probe",
+            [CSharpSyntaxTree.ParseText(source, ParseOptions, "Probe.cs")],
+            ConfigurationReferences.Value,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
+
+        var driver = CSharpGeneratorDriver
+            .Create([Generator.Value.AsSourceGenerator(), ConfigurationGenerator.Value.AsSourceGenerator()], parseOptions: ParseOptions)
+            .RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
 
         return Collect(driver, output);
     }

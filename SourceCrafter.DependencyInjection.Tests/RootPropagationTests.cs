@@ -23,7 +23,7 @@ namespace SourceCrafter.DependencyInjection.Tests
     }
 
     /// <summary>Variante A: dependencia <em>scoped</em> <b>no</b> desechable.</summary>
-    [ServiceContainer]
+    [ServiceProvider]
     [Scoped<RootProbe>(source: nameof(ResolveProbe))]
     public partial class PlainRootProbeContainer
     {
@@ -34,7 +34,7 @@ namespace SourceCrafter.DependencyInjection.Tests
     /// Variante B: dependencia <em>scoped</em> desechable, que es la unica forma de
     /// que el emisor rellene el cuerpo de la clase <c>Scoped</c>.
     /// </summary>
-    [ServiceContainer]
+    [ServiceProvider]
     [Scoped<DisposableRootProbe>(source: nameof(ResolveProbe))]
     public partial class DisposableRootProbeContainer
     {

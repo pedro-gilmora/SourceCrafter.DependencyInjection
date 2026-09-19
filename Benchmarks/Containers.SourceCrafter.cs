@@ -5,7 +5,7 @@ namespace Benchmarks;
 /// <summary>
 /// Contenedor de SourceCrafter.DependencyInjection sobre el grafo comun de <c>Services.cs</c>.
 /// </summary>
-[ServiceContainer]
+[ServiceProvider]
 [Transient<ISettings, Settings>]
 [Singleton<IDatabase, Database>]
 [Scoped<ISession, Session>]
