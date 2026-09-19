@@ -201,7 +201,7 @@ internal static class ServiceContainerDiagnostics
     {
         DiagnosticDescriptor rule = new(
             id: "SCDI10",
-            title: "Return type doesn't match service {4} type",
+            title: "Factory return type doesn't match the service type",
             messageFormat: "{0} {1} as return type for method {2}, should match {3} as service base {4}.",
             category: "SourceCrafter.DependencyInjection.Design",
             defaultSeverity: DiagnosticSeverity.Error,
@@ -293,5 +293,211 @@ internal static class ServiceContainerDiagnostics
         );
 
         return Diagnostic.Create(rule, location, containerClassName);
+    }
+
+    /// <summary>
+    /// Una fabrica asincrona debe declarar exactamente el tipo expuesto por el servicio.
+    /// <para>
+    /// No es una limitacion del generador sino de la plataforma: <c>Task&lt;T&gt;</c> y
+    /// <c>ValueTask&lt;T&gt;</c> son <b>invariantes</b>, asi que un <c>Task&lt;Impl&gt;</c> no
+    /// se convierte a <c>Task&lt;IService&gt;</c> aunque <c>Impl</c> implemente
+    /// <c>IService</c>. Sin este diagnostico la incompatibilidad no se detecta al analizar y
+    /// reaparece como un CS0029 dentro de codigo generado, que es donde peor se lee.
+    /// </para>
+    /// <para>
+    /// Salvarlo desde la generacion exigiria esperar y reenvolver el resultado, es decir una
+    /// maquina de estados o una asignacion extra por resolucion. Cambiar el tipo declarado de
+    /// la fabrica no cuesta nada y deja el codigo emitido como un paso directo.
+    /// </para>
+    /// </summary>
+    internal static Diagnostic AsyncFactoryMustDeclareServiceType(
+        Location location,
+        string factoryName,
+        string asyncTypeName,
+        string factoryTypeArgument,
+        string serviceTypeName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI16",
+            title: "Async factory must declare the service type as its task argument",
+            messageFormat: "Async factory '{0}' returns '{1}<{2}>' but the service is exposed as '{3}'. Declare it as '{1}<{3}>'.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            description: "Task<T> and ValueTask<T> are invariant, so Task<Implementation> is not convertible to Task<IService>. Declaring the exposed type on the factory keeps the generated resolver a direct pass-through instead of an extra await-and-rewrap."
+        );
+
+        return Diagnostic.Create(rule, location, factoryName, asyncTypeName, factoryTypeArgument, serviceTypeName);
+    }
+
+    /// <summary>
+    /// Dos parametros del mismo tipo de servicio sin forma de distinguirlos.
+    /// <para>
+    /// Se permite <b>uno</b> sin clave; a partir del segundo hay que desambiguar, bien
+    /// nombrando el parametro igual que una clave registrada, bien anotandolo con el atributo
+    /// de lifetime y clave que corresponda. Antes este caso no se diagnosticaba: los dos
+    /// parametros recibian en silencio el mismo servicio, o se emitia una referencia a un
+    /// local nunca declarado y salia un CS0103 dentro del codigo generado.
+    /// </para>
+    /// </summary>
+    internal static Diagnostic AmbiguousUnkeyedParameters(
+        Location location,
+        string parameterName,
+        string serviceTypeName,
+        string firstParameterName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI17",
+            title: "Ambiguous parameters of the same service type",
+            messageFormat: "Parameter '{0}' and '{2}' both resolve '{1}' with no key. Name '{0}' after a registered key, or annotate it with the matching lifetime attribute and key.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            description: "Only one parameter of a given service type may go unkeyed. Any further parameter of the same type must be disambiguated, otherwise the generator cannot tell which registration each one wants."
+        );
+
+        return Diagnostic.Create(rule, location, parameterName, serviceTypeName, firstParameterName);
+    }
+
+    /// <summary>
+    /// <c>LockOptions.Global</c> declara un candado <c>static</c> del contenedor, compartido
+    /// por todas sus instancias. Un servicio <c>Scoped</c> tiene un campo de respaldo por
+    /// ambito, asi que vigilarlo con un candado global serializaria ambitos independientes
+    /// sin aportar exclusion adicional: el alcance del candado debe coincidir con el del
+    /// campo. El valor correcto es <c>Instance</c> (el predeterminado) o <c>Dedicated</c>.
+    /// </summary>
+    internal static Diagnostic GlobalLockNotAllowedForScoped(Location location)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI18",
+            title: "Global lock is not compatible with scoped dependencies",
+            messageFormat: "LockOptions.Global cannot be used on a scoped dependency. Use LockOptions.Instance or LockOptions.Dedicated.",
+            category: "SourceCrafter.DependencyInjection.Usage",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            description: "A scoped dependency is backed by a per-scope field, so a container-wide static lock would serialize unrelated scopes without adding exclusion. The lock scope must match the field scope."
+        );
+
+        return Diagnostic.Create(rule, location);
+    }
+
+    /// <summary>
+    /// Una fabrica generica debe restringir cada uno de sus parametros de tipo.
+    /// <para>
+    /// Sin restricciones, <c>T</c> es cualquier cosa: el emparejado no puede descartar
+    /// candidatas y la fabrica se vuelve aplicable a todo servicio construido del mismo nombre
+    /// generico, que es justo lo que hace imposible decidir cual usar. La restriccion no es
+    /// decorativa, es el criterio con el que el generador elige.
+    /// </para>
+    /// <para>
+    /// Basta con una: un tipo base, una interfaz, <c>class</c> o <c>struct</c>.
+    /// </para>
+    /// </summary>
+    internal static Diagnostic GenericFactoryTypeParameterNeedsConstraint(
+        Location location,
+        string factoryName,
+        string typeParameterName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI19",
+            title: "Generic factory type parameter must be constrained",
+            messageFormat: "Type parameter '{1}' of generic factory '{0}' has no constraints. Add at least a base type, an interface, 'class' or 'struct'.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            description: "Constraints are what the generator matches against when choosing a generic factory. An unconstrained type parameter makes the factory applicable to every constructed type, which removes any basis for picking one candidate over another."
+        );
+
+        return Diagnostic.Create(rule, location, factoryName, typeParameterName);
+    }
+
+    /// <summary>
+    /// Se pidio un tipo construido que ninguna fabrica generica registrada puede producir,
+    /// porque ninguna de sus restricciones lo admite.
+    /// <para>
+    /// Se informa el tipo pedido y la restriccion incumplida de la candidata mas cercana, que
+    /// es casi siempre lo que hay que corregir. Sin esto el fallo aparece como un servicio no
+    /// registrado, que es un mensaje cierto pero inutil: la fabrica existe, simplemente no
+    /// acepta ese argumento.
+    /// </para>
+    /// </summary>
+    internal static Diagnostic NoGenericFactorySatisfiesType(
+        Location location,
+        string requestedTypeName,
+        string factoryName,
+        string unsatisfiedConstraint)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI20",
+            title: "No generic factory accepts the requested type argument",
+            messageFormat: "No registered generic factory can produce '{0}'. The closest candidate '{1}' requires '{2}'.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            description: "The generic factory is registered but its constraints exclude the requested type argument. Either widen the constraint or register a concrete service for that constructed type."
+        );
+
+        return Diagnostic.Create(rule, location, requestedTypeName, factoryName, unsatisfiedConstraint);
+    }
+
+    /// <summary>
+    /// Dos fabricas genericas pueden producir el mismo tipo construido y ninguna es mas
+    /// especifica que la otra.
+    /// <para>
+    /// <b>La salida es la clave, no un orden de desempate.</b> Inventar una regla de
+    /// precedencia -- la declarada primero, la del ensamblado actual -- resolveria el caso a
+    /// costa de que el servicio elegido dependa de algo que no se lee en el sitio de registro.
+    /// Una clave es explicita y ya es el mecanismo de desambiguacion del resto del generador,
+    /// asi que no añade vocabulario nuevo.
+    /// </para>
+    /// </summary>
+    internal static Diagnostic AmbiguousGenericFactories(
+        Location location,
+        string requestedTypeName,
+        string firstFactoryName,
+        string secondFactoryName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI21",
+            title: "Ambiguous generic factories for the same constructed type",
+            messageFormat: "Generic factories '{1}' and '{2}' both produce '{0}' and neither is more specific. Give them distinct keys and request the service by key.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            description: "When two generic factories match equally well, the generator does not guess. Keys are the existing disambiguation mechanism and make the choice explicit at the registration site instead of depending on declaration order."
+        );
+
+        return Diagnostic.Create(rule, location, requestedTypeName, firstFactoryName, secondFactoryName);
+    }
+
+    /// <summary>
+    /// Una fabrica generica solo puede registrarse como <c>Transient</c>.
+    /// <para>
+    /// Un lifetime cacheado necesita un campo de respaldo <b>por tipo construido</b>, y ese
+    /// conjunto no se conoce al registrar la fabrica sino al recorrer a sus consumidores. Con
+    /// pocos tipos el coste es un campo por cada uno; con una familia amplia es una superficie
+    /// de memoria que crece sin que se vea en el sitio de registro.
+    /// </para>
+    /// <para>
+    /// Si un tipo construido concreto necesita cachearse, registrarlo por separado con su
+    /// lifetime: ahi el campo es uno, explicito y visible.
+    /// </para>
+    /// </summary>
+    internal static Diagnostic GenericFactoryMustBeTransient(
+        Location location,
+        string factoryName,
+        string lifetimeName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI22",
+            title: "Generic factories can only be registered as transient",
+            messageFormat: "Generic factory '{0}' cannot be registered as '{1}'. Use Transient, or register the specific constructed type separately if it needs caching.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true,
+            description: "A cached lifetime needs one backing field per constructed type, and that set is only known from the consumers rather than from the registration. Keeping generic factories transient prevents a memory footprint that is invisible at the registration site."
+        );
+
+        return Diagnostic.Create(rule, location, factoryName, lifetimeName);
     }
 }

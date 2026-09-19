@@ -27,7 +27,7 @@ public class GeneratedCodeTests
             public System.Threading.Tasks.ValueTask DisposeAsync() => default;
         }
 
-        [ServiceContainer]
+        [ServiceProvider]
         [Singleton<ISvc, Svc>]
         [Scoped<Session>]
         public partial class Container { }
@@ -46,9 +46,15 @@ public class GeneratedCodeTests
     /// Un scoped que depende de un singleton y de un transient que a su vez arrastra otro
     /// singleton. Sirve para comprobar el izado: ninguna de esas resoluciones puede quedar
     /// dentro del <c>lock</c> del scoped.
+    /// <para>
+    /// El scoped pide <see cref="LockOptions.Instance"/> de forma explicita porque el izado
+    /// solo es observable cuando hay candado, y desde que los ambitos no se sincronizan por
+    /// defecto no lo hay salvo que se pida.
+    /// </para>
     /// </summary>
     const string CrossLifetimeContainer = """
         using SourceCrafter.DependencyInjection.Attributes;
+        using SourceCrafter.DependencyInjection.Constants;
 
         namespace Probe;
 
@@ -57,11 +63,11 @@ public class GeneratedCodeTests
         public sealed class Wrapper(Clock clock) { }
         public sealed class Session(Config config, Wrapper wrapper) { }
 
-        [ServiceContainer]
+        [ServiceProvider]
         [Singleton<Config>]
         [Singleton<Clock>]
         [Transient<Wrapper>]
-        [Scoped<Session>]
+        [Scoped<Session>(locks: LockOptions.Instance)]
         public partial class Container { }
         """;
 
@@ -77,20 +83,43 @@ public class GeneratedCodeTests
         // Un campo 'static' vigilado con 'lock(this)' no ofrece exclusion alguna: cada
         // instancia del contenedor bloquearia un objeto distinto. El candado tiene que
         // tener el mismo alcance que el campo que protege.
-        code.Should().Contain("private static readonly global::System.Threading.Lock __singletonLock = new();");
-        code.Should().Contain("lock(__singletonLock)");
+        code.Should().Contain("private static global::System.Threading.Lock? __singletonLock;");
+        code.Should().Contain("lock(__EnsureLock(ref __singletonLock))");
     }
 
     [Fact]
-    public void ScopedResolversLockOnTheScopeItself()
+    public void ScopedResolversAreNotSynchronizedByDefault()
     {
         var code = GeneratorHarness.Run(SingletonAndScopedContainer).Source("Container");
 
         code.Should().Contain("private global::Probe.Session? _session;");
 
-        // 'this' ya es un objeto por ambito: sirve de candado sin asignar nada. Cada
-        // System.Threading.Lock que dejamos de crear son 40 B, y se pagaban por servicio
-        // scoped declarado aunque el ambito no resolviera ninguno.
+        // Un ambito modela una peticion y no se comparte entre hilos, asi que el candado
+        // se pagaba siempre sin contencion: 25,0 ns frente a 6,3 ns sin el (ver
+        // ScopeLockCostBenchmark). El campo sigue siendo por ambito, de modo que dos
+        // peticiones distintas no pueden pisarse.
+        code.Should().NotContain("lock(this)");
+    }
+
+    [Fact]
+    public void ScopedResolversLockOnTheScopeItselfWhenAskedTo()
+    {
+        var code = GeneratorHarness.Run("""
+            using SourceCrafter.DependencyInjection.Attributes;
+            using SourceCrafter.DependencyInjection.Constants;
+
+            namespace Probe;
+
+            public class Session { }
+
+            [ServiceProvider]
+            [Scoped<Session>(locks: LockOptions.Instance)]
+            public partial class Container { }
+            """).Source("Container");
+
+        // Cuando el usuario declara que el ambito se comparte, 'this' sirve de candado sin
+        // asignar nada. Cada System.Threading.Lock que dejamos de crear son 40 B, y se
+        // pagarian por servicio scoped declarado aunque el ambito no resolviera ninguno.
         code.Should().Contain("lock(this)");
     }
 
@@ -100,9 +129,10 @@ public class GeneratedCodeTests
         var code = GeneratorHarness.Run(SingletonAndScopedContainer).Source("Container");
 
         // Un unico candado estatico para todos los singletons, y ninguno por dependencia.
+        // Ademas se crea de forma perezosa: un contenedor que nunca resuelve no asigna nada.
         code.Should().NotContain("_svcLock");
         code.Should().NotContain("_sessionLock");
-        code.Should().NotContain("__EnsureLock");
+        code.Should().NotContain("= new();");
     }
 
     [Fact]
@@ -130,6 +160,18 @@ public class GeneratedCodeTests
         slowPath[lockIndex..].Should().NotContain("Wrapper");
     }
 
+    [Fact]
+    public void TheScopeTypeIsSealed()
+    {
+        var code = GeneratorHarness.Run(SingletonAndScopedContainer).Source("Container");
+
+        // No es cosmetico. Con 'Scoped' abierta el JIT no puede devirtualizar Dispose/Root/
+        // CreateScope y recurre a devirtualizacion especulativa guiada por perfil, que acierta
+        // de forma intermitente: medido en ScopeShapeBenchmark, 7,94 ns con desviacion tipica
+        // de 1,898 ns (distribucion multimodal) frente a 3,49 ns y 0,053 ns al sellarla.
+        code.Should().Contain("public sealed class Scoped");
+    }
+
     static string Between(string text, string start, string end)
     {
         var from = text.IndexOf(start, System.StringComparison.Ordinal);
@@ -146,10 +188,9 @@ public class GeneratedCodeTests
     {
         var code = GeneratorHarness.Run(SingletonAndScopedContainer).Source("Container");
 
-        // Dos lecturas separadas pueden ver valores distintos; con Nullable<T> eso llega a
-        // devolver el HasValue de una y el Value de otra. Medido, el local es gratis.
-        code.Should().Contain("var __v = _session;");
-        code.Should().Contain("if(__v is not null) return __v;");
+        // '??' lee el campo una sola vez y deja el camino lento en la rama derecha. Dos
+        // lecturas separadas podrian ver valores distintos: el liberador anula el campo.
+        code.Should().Contain("get => _session ?? __Create_session();");
     }
 
     // ---------- Tipo del candado ----------
@@ -161,7 +202,7 @@ public class GeneratedCodeTests
 
         // System.Threading.Lock evita la cabecera de sincronizacion del objeto y le da al
         // compilador la forma que sabe convertir en EnterScope.
-        code.Should().Contain("private static readonly global::System.Threading.Lock __singletonLock = new();");
+        code.Should().Contain("private static global::System.Threading.Lock? __singletonLock;");
     }
 
     [Fact]
@@ -172,7 +213,7 @@ public class GeneratedCodeTests
 
         // Con C# 12 el compilador no reconoce 'lock' sobre Lock: convertiria la variable a
         // object, volveria a Monitor y ademas avisaria (CS9216). Emitir object es mejor.
-        code.Should().Contain("private static readonly object __singletonLock = new();");
+        code.Should().Contain("private static object? __singletonLock;");
         code.Should().NotContain("System.Threading.Lock");
 
         result.Errors.Should().BeEmpty();
@@ -189,7 +230,7 @@ public class GeneratedCodeTests
         // separarlo y 0,55 ns (1,03x) despues, por delante de Jab y de Pure.DI.
         code.Should().Contain("MethodImplOptions.NoInlining");
         code.Should().Contain("__Create_svc()");
-        code.Should().Contain("return __Create_svc();");
+        code.Should().Contain("get => _svc ?? __Create_svc();");
 
         // El getter no puede contener el candado.
         var getter = code[code.IndexOf("public global::Probe.ISvc Svc", StringComparison.Ordinal)..];
@@ -219,7 +260,7 @@ public class GeneratedCodeTests
             public sealed class Middle(Inner a, Inner b) { }
             public sealed class Outer(Middle a, Middle b) { }
 
-            [ServiceContainer]
+            [ServiceProvider]
             [Transient<Inner>]
             [Transient<Middle>]
             [Transient<Outer>]
@@ -260,7 +301,7 @@ public class GeneratedCodeTests
 
             public sealed class Svc;
 
-            [ServiceContainer]
+            [ServiceProvider]
             [Singleton<Svc>(source: nameof(Create))]
             public partial class Container
             {
@@ -291,7 +332,7 @@ public class GeneratedCodeTests
                 public System.Threading.Tasks.ValueTask DisposeAsync() => default;
             }
 
-            [ServiceContainer]
+            [ServiceProvider]
             [Scoped<Svc>]
             public partial class Container
             {
@@ -314,7 +355,7 @@ public class GeneratedCodeTests
 
         namespace Probe;
 
-        [ServiceContainer(generateServiceProviderApi: true)]
+        [ServiceProvider(genericApi: true)]
         [Singleton("count", source: nameof(LoadAsync))]
         [Singleton("other", source: nameof(LoadWithoutTokenAsync))]
         public partial class Container
@@ -382,7 +423,7 @@ public class GeneratedCodeTests
             public Db Db { get; } = db;
         }
 
-        [ServiceContainer]
+        [ServiceProvider]
         [Singleton(source: nameof(GetCfgAsync))]
         [Singleton(source: nameof(GetDbAsync))]
         [Singleton<Svc>]
@@ -431,7 +472,7 @@ public class GeneratedCodeTests
             public Cfg Cfg { get; } = cfg;
         }
 
-        [ServiceContainer]
+        [ServiceProvider]
         [Singleton(source: nameof(GetCfgAsync))]
         [Singleton(source: nameof(GetDbAsync))]
         [Singleton<Svc>]
@@ -470,7 +511,7 @@ public class GeneratedCodeTests
         public sealed class A1 : IA { }
         public sealed class A2 : IA { }
 
-        [ServiceContainer(generateServiceProviderApi: true)]
+        [ServiceProvider(genericApi: true)]
         [Transient<IA, A1>]
         [Singleton<IA, A2>]
         public partial class Container { }
@@ -574,7 +615,7 @@ public class GeneratedCodeTests
                 public System.Threading.Tasks.ValueTask DisposeAsync() => default;
             }
 
-            [ServiceContainer]
+            [ServiceProvider]
             [Singleton<A>]
             [Scoped<B>]
             public partial class Container { }

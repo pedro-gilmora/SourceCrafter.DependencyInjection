@@ -97,7 +97,7 @@ namespace SourceCrafter.DependencyInjection
                 if (attrData is { AttributeClass: { } _attrClass, ApplicationSyntaxReference: { } attrSyntaxRef }
                     && attrSyntaxRef.GetSyntax() is AttributeSyntax { } attrSyntax
                     && model.GetSymbolInfo(attrSyntax).Symbol is IMethodSymbol { Parameters: var attrParams }
-                    && !_attrClass.Name.StartsWith("ServiceContainer")
+                    && !_attrClass.Name.StartsWith("ServiceProvider")
                     && GetLifetimeFromCtor(ref _attrClass, ref IsExternal, attrSyntax, out Lifetime))
                 {
                     AttrSyntax = attrSyntax;
@@ -229,7 +229,7 @@ namespace SourceCrafter.DependencyInjection
 
                 methodName = IsExternal ? methodName : Factory?.Name ?? methodName;
 
-                if (Factory != null &&IsCached && !methodName.EndsWith("Cached") && !methodName.EndsWith("Cache")) methodName += "Cached";
+                if (Factory != null && IsCached && !methodName.EndsWith("Cached") && !methodName.EndsWith("Cache")) methodName += "Cached";
                 if (!methodName.EndsWith("Async") && IsAsync) methodName += "Async";
 
                 var fieldName = "_" + methodName.Camelize();

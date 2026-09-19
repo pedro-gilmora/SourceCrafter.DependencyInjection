@@ -39,7 +39,7 @@ dotnet add package SourceCrafter.DependencyInjection.MsConfiguration.Metadata
 1. **Library Author**: Adds `SourceCrafter.DependencyInjection.MsConfiguration.Metadata` to library
 2. **Library**: Decorates container with configuration attributes:
    ```csharp
-   [ServiceContainer]
+   [ServiceProvider]
    [JsonSetting<AppSettings>("AppSettings")]
    public partial class ServiceContainer { }
    ```
@@ -56,7 +56,7 @@ public class AppSettings {
 }
 
 // In library project (only metadata dependency)
-[ServiceContainer]
+[ServiceProvider]
 [JsonSetting<AppSettings>("AppSettings")]
 [Singleton<IAuthService, AuthService>]
 public partial class ServiceContainer { }
