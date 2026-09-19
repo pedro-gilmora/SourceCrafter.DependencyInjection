@@ -90,7 +90,13 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
       run: |
-        created_year=$( date -d @${{ github.event.repository.created_at }} +%Y )
+        # El evento push trae created_at como epoch, pero el de pull_request lo
+        # trae en ISO 8601: se normalizan ambas formas antes de pedir el año.
+        created_at='${{ github.event.repository.created_at }}'
+        case "$created_at" in
+          ''|*[!0-9]*) created_year=$( date -d "$created_at" +%Y ) ;;
+          *)           created_year=$( date -d "@$created_at" +%Y ) ;;
+        esac
         time_num=$(date +%H%M | sed 's/^0*//')  # Remove leading zeros to avoid octal interpretation
         time_num=${time_num:-0}  # Handle case where all digits are 0
         version=""$(( $(date --date='now' +%Y) - $created_year )).$(date +%y).$(date +%j).$(( $time_num / 5 ))""
