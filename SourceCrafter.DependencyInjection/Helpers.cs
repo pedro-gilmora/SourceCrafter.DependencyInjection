@@ -85,6 +85,52 @@ namespace SourceCrafter.DependencyInjection
             internal string TypeNameFormat => t.ToDisplayString(_typeNameFormat);
 
             internal string NameOnly => t.ToDisplayString(_symbolNameOnly);
+
+            /// <summary>
+            /// Nombre con el que <c>typeof(T).FullName</c> identifica al tipo en ejecucion:
+            /// espacios de nombres con punto, tipos anidados con <c>+</c> y aridad con
+            /// <c>`n</c>.
+            ///
+            /// <para>Devuelve <c>null</c> para un generico *construido*. En ejecucion su
+            /// <c>FullName</c> incrusta el nombre cualificado de ensamblado de cada argumento
+            /// (version, cultura y token incluidos), que no se puede reproducir como constante
+            /// de compilacion fiable. Quien discrimina esos tipos debe compararlos con
+            /// <c>typeof(T) == typeof(X)</c>, que ademas el JIT pliega a constante.</para>
+            /// </summary>
+            internal string? RuntimeFullName
+            {
+                get
+                {
+                    if (t is not INamedTypeSymbol named) return null;
+
+                    if (named.IsGenericType && !named.IsUnboundGenericType) return null;
+
+                    var parts = new Stack<INamedTypeSymbol>();
+
+                    for (var current = named; current is not null; current = current.ContainingType)
+                        parts.Push(current);
+
+                    var ret = new StringBuilder();
+
+                    if (named.ContainingNamespace is { IsGlobalNamespace: false } ns)
+                        ret.Append(ns.ToDisplayString()).Append('.');
+
+                    var first = true;
+
+                    foreach (var part in parts)
+                    {
+                        if (!first) ret.Append('+');
+
+                        ret.Append(part.Name);
+
+                        if (part.Arity > 0) ret.Append('`').Append(part.Arity);
+
+                        first = false;
+                    }
+
+                    return ret.ToString();
+                }
+            }
         }
 
         extension(ITypeSymbol type)

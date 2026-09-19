@@ -13,7 +13,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class ServiceContainerAttribute(string envName = "DOTNET_ENVIRONMENT", bool generateServiceProviderApi = false) : Attribute;
+        class ServiceProviderAttribute(string envName = "DOTNET_ENVIRONMENT", bool genericApi = false, bool exportTransients = false) : Attribute;
 
         [AttributeUsage(AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META
@@ -29,7 +29,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class SingletonAttribute<TImplementation>(string key = "", string? source = null, string? nameFormat = null) : Attribute;
+        class SingletonAttribute<TImplementation>(string key = "", string? source = null, string? nameFormat = null, LockOptions locks = LockOptions.Default) : Attribute;
 
         [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct, AllowMultiple = true)]
 #if DISG_META
@@ -37,7 +37,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class SingletonAttribute<T, TImplementation>(string key = "", string? source = null, string? nameFormat = null) : Attribute where TImplementation : T where T : notnull;
+        class SingletonAttribute<T, TImplementation>(string key = "", string? source = null, string? nameFormat = null, LockOptions locks = LockOptions.Default) : Attribute where TImplementation : T where T : notnull;
 
         [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META
@@ -45,7 +45,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class SingletonAttribute(string key = "", Type? impl = null, Type? iface = null, string? source = null, string? nameFormat = null) : Attribute;
+        class SingletonAttribute(string key = "", Type? impl = null, Type? iface = null, string? source = null, string? nameFormat = null, LockOptions locks = LockOptions.Default) : Attribute;
 
         [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META
@@ -53,7 +53,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class ScopedAttribute<TImplementation>(string key = "", string? source = null, string? nameFormat = null) : Attribute;
+        class ScopedAttribute<TImplementation>(string key = "", string? source = null, string? nameFormat = null, LockOptions locks = LockOptions.Default) : Attribute;
 
         [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct, AllowMultiple = true)]
 #if DISG_META
@@ -61,7 +61,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class ScopedAttribute<T, TImplementation>(string key = "", string? source = null, string? nameFormat = null) : Attribute where TImplementation : T where T : notnull;
+        class ScopedAttribute<T, TImplementation>(string key = "", string? source = null, string? nameFormat = null, LockOptions locks = LockOptions.Default) : Attribute where TImplementation : T where T : notnull;
 
         [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META
@@ -69,7 +69,7 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal 
 #endif
-        class ScopedAttribute(string key = "", Type? impl = null, Type? iface = null, string? source = null, string? nameFormat = null) : Attribute;
+        class ScopedAttribute(string key = "", Type? impl = null, Type? iface = null, string? source = null, string? nameFormat = null, LockOptions locks = LockOptions.Default) : Attribute;
 
         [AttributeUsage(AttributeTargets.Constructor | AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct | AttributeTargets.Parameter, AllowMultiple = true)]
 #if DISG_META
@@ -100,6 +100,6 @@ namespace SourceCrafter.DependencyInjection
 #else
         internal
 #endif
-        abstract class DependencyAttribute(Lifetime lifetime, string key = "", string? source = null, string? nameFormat = null) : Attribute;
+        abstract class DependencyAttribute(Lifetime lifetime, string key = "", string? source = null, string? nameFormat = null, LockOptions locks = LockOptions.Default) : Attribute;
     }
 }

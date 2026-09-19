@@ -19,6 +19,7 @@ public abstract class ContainerBenchmark
     protected SourceCrafterContainer SourceCrafter = null!;
     protected JabContainer Jab = null!;
     protected PureDiContainer PureDi = null!;
+    protected CircleDiContainer CircleDi = null!;
     protected StrongInjectContainer StrongInject = null!;
     protected DieContainer Die = null!;
 
@@ -34,6 +35,7 @@ public abstract class ContainerBenchmark
         SourceCrafter = new SourceCrafterContainer();
         Jab = new JabContainer();
         PureDi = new PureDiContainer();
+        CircleDi = new CircleDiContainer();
         StrongInject = new StrongInjectContainer();
         Die = DieContainer.DIE_CreateContainer();
 
@@ -42,6 +44,7 @@ public abstract class ContainerBenchmark
         _ = SourceCrafter.Database;
         _ = Jab.GetService<IDatabase>();
         _ = PureDi.Database;
+        _ = CircleDi.Database;
         _ = Si<IDatabase>().Run(static (x, _) => x, 0);
         _ = Die.GetDatabase();
     }
@@ -52,6 +55,7 @@ public abstract class ContainerBenchmark
         SourceCrafter.Dispose();
         Jab.Dispose();
         PureDi.Dispose();
+        CircleDi.Dispose();
         StrongInject.Dispose();
         Die.Dispose();
     }
@@ -76,6 +80,9 @@ public class SingletonBenchmark : ContainerBenchmark
 
     [Benchmark(Description = "Pure.DI")]
     public IDatabase PureDiDi() => PureDi.Database;
+
+    [Benchmark(Description = "CircleDI")]
+    public IDatabase CircleDiDi() => CircleDi.Database;
 
     // StrongInject entrega un Owned<T> o ejecuta el consumo dentro de Run: en ambos casos
     // hace mas trabajo que los demas porque rastrea la propiedad para el desecho.
@@ -104,6 +111,9 @@ public class TransientBenchmark : ContainerBenchmark
 
     [Benchmark(Description = "Pure.DI")]
     public Level3 PureDiDi() => PureDi.Transient;
+
+    [Benchmark(Description = "CircleDI")]
+    public Level3 CircleDiDi() => CircleDi.Level3;
 
     [Benchmark(Description = "StrongInject")]
     public Level3 StrongInjectDi() => Si<Level3>().Run(static (x, _) => x, 0);
@@ -135,6 +145,9 @@ public class ComplexGraphBenchmark : ContainerBenchmark
     [Benchmark(Description = "Pure.DI")]
     public Level1 PureDiDi() => PureDi.Complex;
 
+    [Benchmark(Description = "CircleDI")]
+    public Level1 CircleDiDi() => CircleDi.Level1;
+
     [Benchmark(Description = "StrongInject")]
     public Level1 StrongInjectDi() => Si<Level1>().Run(static (x, _) => x, 0);
 
@@ -154,6 +167,13 @@ public class ComplexGraphBenchmark : ContainerBenchmark
 /// StrongInject modela la vida con propiedad (<c>Owned&lt;T&gt;</c>) y DIE con "transient
 /// scopes" atados a una funcion de creacion. Inventarles un equivalente daria una cifra que
 /// no corresponde a nada que un usuario suyo pueda escribir.
+/// </para>
+/// <para>
+/// Aqui es donde este contenedor pierde: CircleDI abre el ambito, resuelve y lo libera en
+/// 6,3 ns y 24 B, frente a 25,0 ns y 64 B de SourceCrafter (y 22,6 ns / 64 B de Jab). Los
+/// 40 B de diferencia son el candado de instancia mas el campo de cache; CircleDI no
+/// sincroniza el ambito porque asume que no se comparte entre hilos. Es una diferencia de
+/// garantias, no de calidad de codegen, pero conviene no disimularla.
 /// </para>
 /// </summary>
 public class ScopeBenchmark : ContainerBenchmark
@@ -190,6 +210,15 @@ public class ScopeBenchmark : ContainerBenchmark
     public ISession PureDiDi()
     {
         var scope = new PureDiContainer(PureDi);
+        var session = scope.Session;
+        scope.Dispose();
+        return session;
+    }
+
+    [Benchmark(Description = "CircleDI")]
+    public ISession CircleDiDi()
+    {
+        var scope = CircleDi.CreateScope();
         var session = scope.Session;
         scope.Dispose();
         return session;
@@ -234,6 +263,14 @@ public class EmptyScopeBenchmark : ContainerBenchmark
         scope.Dispose();
         return scope;
     }
+
+    [Benchmark(Description = "CircleDI")]
+    public object CircleDiDi()
+    {
+        var scope = CircleDi.CreateScope();
+        scope.Dispose();
+        return scope;
+    }
 }
 
 /// <summary>
@@ -273,6 +310,13 @@ public class ContainerCreationBenchmark
     public object PureDiDi()
     {
         using var container = new PureDiContainer();
+        return container.Database;
+    }
+
+    [Benchmark(Description = "CircleDI")]
+    public object CircleDiDi()
+    {
+        using var container = new CircleDiContainer();
         return container.Database;
     }
 

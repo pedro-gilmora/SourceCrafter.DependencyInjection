@@ -4,7 +4,7 @@ using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
 
 namespace SourceCrafter.DependencyInjection.Tests
 {
-    [ServiceContainer("ASPNETCORE_ENVIRONMENT", generateServiceProviderApi: true)]
+    [ServiceProvider("ASPNETCORE_ENVIRONMENT", genericApi: true)]
     [JsonConfiguration]
     [Transient<IA, A>]
     [Singleton<IA, AA>]
@@ -16,6 +16,8 @@ namespace SourceCrafter.DependencyInjection.Tests
     [Singleton<IDatabase, Database>]
     [Scoped<IAuthService, AuthService>]
     [Transient(impl:typeof(EmployeeController))]
+    [Transient(source: nameof(_CreateLogger))]
+    [Transient<AuditLog>]
     public partial class Server : IServiceProvider
     {
         static Task<int> GetCountAsync(Server _, CancellationToken token) => Task.FromResult(1);
@@ -23,6 +25,8 @@ namespace SourceCrafter.DependencyInjection.Tests
         static ValueTask<Guid> ResolveRequestIdTask2 => new(Guid.NewGuid());
 
         static int GetCount(int count, [Root] Server _) => count;
+
+        private static ILogger<T> _CreateLogger<T>() where T : class => new Logger<T>();
     }
 
     #region TestType
@@ -77,6 +81,21 @@ namespace SourceCrafter.DependencyInjection.Tests
 
     public class EmployeeController(IAuthService authService, IDatabase application, int count, Guid reqId);
 
+    public interface ILogger<T>
+    {
+        void Log(string message);
+    }
+
+    public sealed class Logger<T> : ILogger<T>
+    {
+        public void Log(string message) { }
+    }
+
+    public class AuditLog(ILogger<AuditLog> logger)
+    {
+        public ILogger<AuditLog> Logger { get; } = logger;
+    }
+
     public class AppSettings
 
     {
@@ -92,7 +111,7 @@ namespace SourceCrafter.DependencyInjection.Tests
 
 namespace SourceCrafter.DependencyInjection.Tests.Sub
 {
-    [ServiceContainer("DOTNET_ENVIRONMENT")]
+    [ServiceProvider("DOTNET_ENVIRONMENT")]
     [JsonConfiguration]
     [JsonSetting<AppSettings>("AppConfig")]
     [Scoped("times", source: nameof(IConfigModule.GetCountAsync))]
