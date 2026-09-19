@@ -21,7 +21,7 @@ internal partial class ServiceProviders
         string modifiers,
         bool isInterfaceProvider,
         bool implementsServiceProvider,
-        bool generateServiceProviderApi,
+        bool genericApi,
         bool hasUserEnvironmentName,
         string className,
         string typeName,
@@ -36,8 +36,7 @@ internal partial class ServiceProviders
         Disposability scopedDisposability,
         DependencyDictionary dependencyValueBuilders,
         Dictionary<DependencyKey, MemberBuilder> dependencyMemberBuilder,
-        HashSet<Diagnostic> diagnostics,
-        HashSet<ResolverBuilder> genericResolvers) : IEquatable<Emitter>
+        HashSet<Diagnostic> diagnostics) : IEquatable<Emitter>
     {
         internal readonly HashSet<Diagnostic> Diagnostics = diagnostics;
         internal readonly DependencyDictionary DependencyValueBuilders = dependencyValueBuilders;
@@ -45,11 +44,18 @@ internal partial class ServiceProviders
         internal readonly string ClassName = className;
 
         /// <summary>
+        /// Un contenedor cuyas registraciones fallaron todas no tiene nada que emitir, pero
+        /// si tiene que <b>informar</b>. Se conserva el emisor para no perder sus diagnosticos
+        /// y se omite el archivo.
+        /// </summary>
+        internal bool HasServices => dependencyValueBuilders.Count > 0;
+
+        /// <summary>
         /// Un contenedor solo puede reclamar llamadas interceptables si expone una
         /// superficie que interceptar: o implementa <c>IServiceProvider</c> (y por tanto
         /// hereda los metodos de extension) o genera la API generica propia.
         /// </summary>
-        internal bool EmitsInterceptors => implementsServiceProvider || generateServiceProviderApi;
+        internal bool EmitsInterceptors => implementsServiceProvider || genericApi;
 
         string GetFileName(Dictionary<string, byte> uniqueName)
         {
@@ -63,6 +69,7 @@ internal partial class ServiceProviders
             Dictionary<string, byte> uniqueNames,
             Dictionary<FirstLevelDependencyKey, Interceptor> interceptors,
             ref bool addTasksExtensions,
+            ref string? ensureLockType,
             ref int interceptorsCount,
             out string fileName,
             out string codeStr)
@@ -86,6 +93,22 @@ internal partial class ServiceProviders
             // reflejando el valor parseado, no el derivado en tiempo de emisión.
             var effectiveDisposability = (Disposability)Math.Max((byte)scopedDisposability, (byte)containerDisposability);
 
+            // Un desechable *sincrono* resuelto de forma *asincrona* solo se alcanza tras
+            // esperar la tarea que lo envuelve, asi que su liberador es forzosamente
+            // 'async'. Antes esto salia como 'async void' —excepciones no observables que
+            // tumban el proceso— porque el tipo de retorno se decidia mirando solo la
+            // disposability del servicio. Si liberar exige esperar, el contenedor es
+            // IAsyncDisposable aunque el servicio solo implemente IDisposable: no hay forma
+            // de cumplir un 'Dispose()' sincrono sin bloquear ni perder la excepcion.
+            var effectiveScopedDisposability = scopedDisposability;
+
+            if (asyncScopedDisposable > 0 && effectiveScopedDisposability is Disposability.Disposable)
+                effectiveScopedDisposability = Disposability.AsyncDisposable;
+
+            if (asyncScopedDisposable + asyncSingletonDisposable > 0
+                && effectiveDisposability is Disposability.Disposable)
+                effectiveDisposability = Disposability.AsyncDisposable;
+
             // El propio CancellationTokenSource es desechable: un contenedor que lo use
             // tiene que liberarlo aunque ninguno de sus servicios sea desechable, o el
             // registro de cancelacion se queda colgando.
@@ -103,6 +126,10 @@ internal partial class ServiceProviders
 
 ");
             }
+
+            // Tiene que ir aqui, con el resto de directivas: 'using static' no se admite una
+            // vez abierta la declaracion de espacio de nombres.
+            DeclareEnsureLockHelper(code, ctx, ref ensureLockType);
 
             if (nameSpace is { } ns)
             {
@@ -149,8 +176,8 @@ internal partial class ServiceProviders
 
 			bool isDisposable = effectiveDisposability > Disposability.None,
 				usesLifetimeToken = ctx.UsesLifetimeToken,
-				hasScopedDisposers = scopedDisposers.Count > 0 && scopedDisposability > Disposability.None,
-				scopedDisposeIsAsync = scopedDisposability > Disposability.Disposable,
+				hasScopedDisposers = scopedDisposers.Count > 0 && effectiveScopedDisposability > Disposability.None,
+				scopedDisposeIsAsync = effectiveScopedDisposability > Disposability.Disposable,
 				containerDisposeIsAsync = effectiveDisposability > Disposability.Disposable;
 
 			string scopedDisposeMethodName = scopedDisposeIsAsync ? "ScopedDisposeAsync" : "ScopedDispose",
@@ -180,14 +207,20 @@ internal partial class ServiceProviders
 
 			AppendConstructor(code, ctx, usesLifetimeToken);
 
-			AppendEnsureLockHelper(code, ctx);
-
 			AppendSingletonLock(code, ctx);
 
 			code.Append(members);
 
 			if (scopedMembers.Count > 0)
 			{
+				// 'Scoped' se sella. No es cosmetico: mientras la clase quedaba abierta, el JIT
+				// no podia devirtualizar Dispose/Root/CreateScope sobre ella y recurria a
+				// devirtualizacion especulativa guiada por perfil, que unas veces acierta y
+				// otras no. Medido en ScopeShapeBenchmark, un ciclo completo de ambito baja de
+				// 7,94 ns a 3,49 ns (2,3x) y la desviacion tipica de 1,898 ns a 0,053 ns: la
+				// distribucion dejaba de ser unimodal justamente por ese fallo intermitente.
+				// Sellar no quita ninguna capacidad: nada puede heredar de un tipo anidado
+				// que el generador emite entero.
 				code.Append(@"
 	private ").Append(typeName).Append(@" _root = default!;
 
@@ -195,7 +228,7 @@ internal partial class ServiceProviders
 
 	public virtual Scoped CreateScope() => new() { _root = this };
 
-	public class Scoped : ").Append(typeName).Append(@"
+	public sealed class Scoped : ").Append(typeName).Append(@"
 	{
 		public override ").Append(typeName).Append(@" Root => _root;
 
@@ -324,7 +357,7 @@ internal partial class ServiceProviders
 ");
 			}
 
-            var emitGenericApi = generateServiceProviderApi && genericResolvers.Count > 0;
+            var emitGenericApi = genericApi && dependencyValueBuilders.Count > 0;
 
             if (implementsServiceProvider || emitGenericApi)
             {
@@ -340,27 +373,28 @@ internal partial class ServiceProviders
 
                 if (emitGenericApi)
                 {
-                    foreach (var genericResolver in genericResolvers)
-                        genericResolver.GenericMemberSignature(code);
-
-                    // Un sitio de llamada sin clave que pide *todos* los servicios de un tipo
-                    // se sirve tambien con los registros que si tienen clave: es lo que hace
-                    // el fallback de CollectMsDIServiceCalls. Sin esta declaracion ese sitio
-                    // no compila (CS1061) y el fallback queda inalcanzable.
-                    foreach (var asyncKind in genericResolvers
-                        .Where(r => r.Key.key != "")
-                        .Select(r => r.AsyncKind)
-                        .Distinct()
-                        .Where(kind => !genericResolvers.Any(r => r.Key.key == "" && r.AsyncKind == kind))
-                        .OrderBy(kind => kind))
-                    {
-                        ResolverBuilder.AppendSignature(code, asyncKind, false, true);
-                    }
+                    // La API generica se emite como despachador real y no como firma que
+                    // lanza: es el fallback de los interceptores para los sitios de llamada
+                    // que el compilador no puede enlazar al contenedor concreto.
+                    GenericApiEmitter.Emit(code, GenericApiEmitter.Collect(dependencyValueBuilders));
                 }
 
                 code.Append(@"
     #endregion");
             }
+
+            // Los numeros de interceptor se reparten antes de cerrar la clase porque el
+            // campo de cache de un array que depende del ambito tiene que declararse aqui
+            // dentro, mientras que el metodo que lo usa se emite despues.
+            if (EmitsInterceptors)
+            {
+                foreach (var item in interceptors.Values)
+                {
+                    item.AssignIndex(ref interceptorsCount);
+                    item.AppendScopedCacheField(code);
+                }
+            }
+
             code.Append(@"
 }
 ");
@@ -373,7 +407,7 @@ public static class ").Append(typeName).Append(@"Extensions
 
                 foreach (var item in interceptors.Values)
                 {
-                    item.Append(code, ClassName, ref interceptorsCount);
+                    item.Append(code, ClassName);
                 }
 
                 code.Append('}');
@@ -452,50 +486,47 @@ public static class ").Append(typeName).Append(@"Extensions
         }
 
         /// <summary>
-        /// Crea un candado de instancia la primera vez que se necesita.
+        /// Declara que este contenedor necesita el ayudante compartido <c>__EnsureLock</c> y
+        /// emite el <c>using static</c> que lo trae al ambito. El cuerpo ya no se emite aqui:
+        /// vive en un unico archivo por compilacion, porque era identico en cada contenedor y
+        /// ensuciaba la cabecera de todos sus archivos generados.
         /// <para>
-        /// Se usa <c>Interlocked.CompareExchange</c> y no <c>??=</c>: este ultimo se expande
-        /// a leer-comprobar-escribir, que no es atomico, y dos hilos pueden acabar con
-        /// candados distintos y por tanto sin exclusion alguna.
+        /// Se propaga el <b>tipo</b> del candado, no una bandera: el archivo compartido lo
+        /// necesita para declararse, y <see cref="SupportsDedicatedLockType"/> lo decide por
+        /// compilacion, asi que todos los contenedores coinciden. <c>null</c> significa que
+        /// ningun contenedor lo necesita y el archivo no se emite.
         /// </para>
         /// <para>
-        /// El camino rapido de cada resolver (<c>if (_x is not null) return _x;</c>) no llega
-        /// aqui, asi que el coste en caliente es cero; a cambio, crear un ambito deja de
-        /// pagar un candado por cada servicio scoped declarado.
+        /// Se trae con <c>using static</c> en vez de cualificar cada llamada: el ayudante
+        /// aparece dentro de un <c>lock(...)</c> por cada resolver asincrono cacheado, y
+        /// cualificarlos costaria mas texto del que ahorra centralizar el cuerpo.
         /// </para>
         /// </summary>
-        static void AppendEnsureLockHelper(StringBuilder code, ContainerRenderContext ctx)
+        static void DeclareEnsureLockHelper(StringBuilder code, ContainerRenderContext ctx, ref string? ensureLockType)
         {
-            if (ctx.InstanceLockFields.Count == 0) return;
+            if (!ctx.NeedsEnsureLockHelper) return;
 
-            var lockType = ctx.InstanceLockTypeName;
+            ensureLockType ??= ctx.InstanceLockTypeName;
 
-            code.Append(@"
-    private static ").Append(lockType).Append(' ').Append(ResolverRenderer.EnsureLockMethodName)
-                .Append("(ref ").Append(lockType).Append(@"? location)
-    {
-        var current = global::System.Threading.Volatile.Read(ref location);
-
-        if (current is not null) return current;
-
-        var created = new ").Append(lockType).Append(@"();
-
-        return global::System.Threading.Interlocked.CompareExchange(ref location, created, null) ?? created;
-    }
-");
+            code.Append("using static global::SourceCrafter.DependencyInjection.Extensions.Locks;\n\n");
         }
 
         /// <summary>
-        /// Candado unico compartido por todos los singletons sincronos del contenedor.
+        /// Candado unico del contenedor, compartido por los resolvers que eligen
+        /// <c>LockOptions.Global</c> (el valor por defecto de un singleton).
         /// <para>
         /// Un singleton no puede vigilarse con <c>lock(this)</c>: su campo de respaldo es
         /// <c>static</c>, asi que dos instancias distintas del contenedor bloquearian objetos
         /// distintos y no habria exclusion alguna. Necesita un objeto igualmente estatico.
         /// </para>
         /// <para>
-        /// Compartirlo entre todos los singletons es seguro porque el camino lento resuelve
-        /// fuera del <c>lock</c> toda dependencia que a su vez adquiera candados, de modo que
-        /// nunca se retiene este candado mientras se espera otro.
+        /// Compartirlo entre todos ellos es seguro porque el camino lento resuelve fuera del
+        /// <c>lock</c> toda dependencia que a su vez adquiera candados, de modo que nunca se
+        /// retiene este candado mientras se espera otro.
+        /// </para>
+        /// <para>
+        /// El campo se declara sin inicializar y se crea con <c>__EnsureLock</c> en la primera
+        /// resolucion: un contenedor que nunca resuelve no asigna nada.
         /// </para>
         /// </summary>
         static void AppendSingletonLock(StringBuilder code, ContainerRenderContext ctx)
@@ -503,8 +534,8 @@ public static class ").Append(typeName).Append(@"Extensions
             if (!ctx.NeedsSingletonLock) return;
 
             code.Append(@"
-    private static readonly ").Append(ctx.InstanceLockTypeName).Append(' ')
-                .Append(ResolverRenderer.SingletonLockFieldName).Append(@" = new();
+    private static ").Append(ctx.InstanceLockTypeName).Append("? ")
+                .Append(ResolverRenderer.SingletonLockFieldName).Append(@";
 ");
         }
 
@@ -570,11 +601,16 @@ public static class ").Append(typeName).Append(@"Extensions
         {
             var key = (serviceCall.ReturnType, serviceCall.Key);
 
+            // Lo que decide si el elemento produce una tarea es el *resolvedor*, no el sitio
+            // de llamada. Con el AsyncKind del sitio, un registro sincrono dentro de un
+            // GetRequiredServicesAsync<T>() se marcaba como tarea y se emitia 'await' sobre
+            // un valor corriente (CS1061).
             var element = new InterceptorElement(
-                serviceCall.AsyncKind > 0,
+                resolver.AsyncKind > 0,
                 AppendDependency,
                 resolver.Key,
-                [.. resolver.AsyncLocalResolvers.Keys]);
+                [.. resolver.AsyncLocalResolvers.Keys],
+                resolver.AsyncKind is AsyncKind.ValueTask);
 
             var interceptor = CollectionsMarshal.GetValueRefOrAddDefault(interceptors, key, out var exists) ??=
                 new(key,
@@ -619,7 +655,7 @@ public static class ").Append(typeName).Append(@"Extensions
         {
             return other is not null
                     && (ReferenceEquals(other, this)
-                        || other.EqualsTo(this, containerDisposability, isInterfaceProvider, implementsServiceProvider, generateServiceProviderApi, hasUserEnvironmentName, nameSpace, typeName, modifiers, envName, dependencyMemberBuilder));
+                        || other.EqualsTo(this, containerDisposability, isInterfaceProvider, implementsServiceProvider, genericApi, hasUserEnvironmentName, nameSpace, typeName, modifiers, envName, dependencyMemberBuilder));
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -628,7 +664,7 @@ public static class ").Append(typeName).Append(@"Extensions
             Disposability _containerDisposability,
             bool _isInterfaceProvider,
             bool _implementsServiceProvider,
-            bool _generateServiceProviderApi,
+            bool _genericApi,
             bool _hasUserEnvironmentName,
             string? _nameSpace,
             string _typeName,
@@ -639,7 +675,7 @@ public static class ").Append(typeName).Append(@"Extensions
             return _containerDisposability == containerDisposability
                 && _isInterfaceProvider == isInterfaceProvider
                 && _implementsServiceProvider == implementsServiceProvider
-                && _generateServiceProviderApi == generateServiceProviderApi
+                && _genericApi == genericApi
                 && _hasUserEnvironmentName == hasUserEnvironmentName
                 && _nameSpace == nameSpace
                 && _typeName == typeName
@@ -657,7 +693,7 @@ public static class ").Append(typeName).Append(@"Extensions
             hashCode.Add(containerDisposability);
             hashCode.Add(isInterfaceProvider);
             hashCode.Add(implementsServiceProvider);
-            hashCode.Add(generateServiceProviderApi);
+            hashCode.Add(genericApi);
             hashCode.Add(hasUserEnvironmentName);
             hashCode.Add(nameSpace);
             hashCode.Add(typeName);

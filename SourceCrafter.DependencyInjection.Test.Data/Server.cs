@@ -5,7 +5,7 @@ using SourceCrafter.DependencyInjection.MsConfiguration.Metadata;
 
 namespace SourceCrafter.DependencyInjection.Tests
 {
-    [ServiceContainer("ASPNETCORE_ENVIRONMENT")]
+    [ServiceProvider("ASPNETCORE_ENVIRONMENT")]
     [Scoped<IA, A>]
     [Singleton<IA, AA>]
     [Singleton<B>]

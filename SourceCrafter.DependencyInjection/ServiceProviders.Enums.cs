@@ -3,3 +3,5 @@
 internal enum AsyncKind : byte { None, ValueTask, Task }
 
 internal enum Disposability : byte { None, Disposable, AsyncDisposable }
+
+internal enum LockOptions : byte { Default, Global, Instance, Dedicated, None }
