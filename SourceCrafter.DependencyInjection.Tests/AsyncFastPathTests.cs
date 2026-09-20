@@ -38,8 +38,7 @@ public partial class RacedContainer
 /// de Roslyn no lo detecta porque da por hecho que nadie mas escribe el campo.</para>
 ///
 /// <para>La forma actual usa la designacion del patron, <c>is { ... } __v</c>: el IL carga
-/// el campo una sola vez y ademas deja el valor ya desenvuelto, asi que la variante
-/// <c>ValueTask</c> no necesita <c>.Value</c>.</para>
+/// el campo una sola vez y ademas deja el valor ya desenvuelto.</para>
 /// </summary>
 public class AsyncFastPathTests
 {
@@ -81,13 +80,18 @@ public class AsyncFastPathTests
 	/// <para>El campo de la tarea sigue existiendo, pero solo para compartir la resolucion
 	/// en vuelo y para liberar.</para>
 	/// </summary>
+	/// <summary>
+	/// Una fabrica <c>ValueTask&lt;T&gt;</c> se expone igualmente como <c>Task&lt;T&gt;</c>:
+	/// el campo que la respalda ya era <c>Task&lt;T&gt;</c>, asi que el camino caliente
+	/// devuelve ese mismo campo sin envolver, convertir ni consultar un <c>.Value</c>.
+	/// </summary>
 	[Fact]
 	public void TheValueTaskVariantNeedsNoValueCallInTheFastPath()
 	{
 		var code = GeneratorHarness.Run(AsyncCachedContainer).Source("Container");
 
-		code.Should().Contain(
-			"if(_plainAsyncCachedResult is { } __v) return new global::System.Threading.Tasks.ValueTask<global::Probe.Plain>(__v);");
+		code.Should().Contain("if(_plainAsyncCached is { IsCompletedSuccessfully: true } __v) return __v;");
+		code.Should().NotContain("ValueTask<global::Probe.Plain>");
 		code.Should().NotContain("return _plainAsyncCached.Value;");
 		code.Should().NotContain("return __v.Value;");
 	}

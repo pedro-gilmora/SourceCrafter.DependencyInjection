@@ -79,10 +79,19 @@ internal class ResolverBuilder(string toStr)
     /// <summary>
     /// Nombre del miembro del contenedor que resuelve este servicio, o <c>null</c> si el
     /// resolver no llego a exponerse (un transient inlineado sin <c>exportTransients</c>).
-    /// Sin miembro no hay nada a lo que despachar, asi que esos quedan fuera del
-    /// <c>switch</c> de la API generica.
     /// </summary>
     internal string? MemberName;
+
+    /// <summary>
+    /// Cierto para un transient inlineado propio del contenedor: no tiene miembro al que
+    /// reenviar, pero su valor si se puede reconstruir en el sitio con
+    /// <see cref="AppendValue"/>.
+    ///
+    /// <para>Sin esto quedaba fuera de la API generica, y un tipo registrado dos veces
+    /// -un transient inlineado y un singleton- devolvia un solo elemento en los miembros
+    /// plurales. Se excluyen los externos: su valor no es del contenedor.</para>
+    /// </summary>
+    internal bool IsInlineable;
 
     /// <summary>
     /// Discriminador de este servicio en el <c>switch</c> de la API generica: el

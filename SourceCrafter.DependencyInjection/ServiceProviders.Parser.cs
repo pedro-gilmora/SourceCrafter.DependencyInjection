@@ -336,6 +336,18 @@ internal partial class ServiceProviders
 
             //(lifetime, interfaceType?.ToDisplayString(), type.ToDisplayString(), name).Dump("Checking:");
 
+            // El miembro generado habla siempre en 'Task<T>', aunque la fabrica declare
+            // 'ValueTask<T>'. Un 'ValueTask' expuesto obliga a cada consumidor a adaptarlo
+            // -y a respetar sus reglas de consumo unico- para acabar detras de un 'Task' de
+            // todas formas, porque el campo que lo respalda ya es 'Task<T>' (ver
+            // 'BackingFieldTypeName'). 'initialAsyncType' conserva la forma real de la
+            // fabrica, que es lo unico que necesita la adaptacion, y esa se paga una sola
+            // vez, dentro del contenedor.
+            //
+            // Se normaliza aqui, antes de construir el resolver: la salida temprana del
+            // transient simple congela su 'AsyncKind' unas lineas mas abajo.
+            if (AsyncKind is AsyncKind.ValueTask) AsyncKind = AsyncKind.Task;
+
             var deepParamsCount = 0;
             var services = CollectionsMarshal.GetValueRefOrAddDefault(dependencyValueBuilders, key, out var exportSignatureExists) ??= [];
 
@@ -409,12 +421,14 @@ internal partial class ServiceProviders
                 (backingFieldName, methodName) = GetResolverName();
 
                 // Un transient sin dependencias se inlinea en el call site y sale por aqui
-                // sin generar miembro. El problema es que entonces resulta *irresoluble*
-                // desde otro ensamblado: la interceptacion es por compilacion, y sin miembro
-                // con nombre la API generica cae en el stub que lanza. `exportTransients` lo
-                // expone sin tocar el inlinado, que se sigue aplicando dentro de la propia
+                // sin generar miembro. `exportTransients` lo expone ademas como miembro con
+                // nombre, sin tocar el inlinado, que se sigue aplicando dentro de la propia
                 // compilacion.
-                if (exportTransients && !isExternal) RegisterExposedMember(resolver);
+                if (!isExternal)
+                {
+                    if (exportTransients) RegisterExposedMember(resolver);
+                    else if (resolver is not null) resolver.IsInlineable = true;
+                }
 
                 //TryRegisterInterceptorMethod();
                 CommitRenderState();
@@ -775,6 +789,8 @@ internal partial class ServiceProviders
             // el autor lo pidio con `exportTransients`.
             if (!isExternal && (isCached || !isSimpleTransient || exportTransients))
                 RegisterExposedMember(resolver);
+            else if (!isExternal && resolver is not null)
+                resolver.IsInlineable = true;
 
             resolver.TransientWithoutCachedDeps = hasNoCachedDeps;
             resolver.AsyncKind = AsyncKind;
@@ -800,8 +816,8 @@ internal partial class ServiceProviders
                             BuildAndExpose = render.AppendMethod
                         });
 
-                // Solo un resolver con miembro se puede despachar desde la API generica:
-                // el switch reenvia al nombre, no reconstruye el valor.
+                // El miembro con nombre es al que reenvia la API generica; los transients
+                // inlineados se resuelven reconstruyendo su valor.
                 if (exposed is not null)
                 {
                     exposed.MemberName = methodName;
@@ -1067,7 +1083,7 @@ internal partial class ServiceProviders
                                     (AsyncKind, isFactoryIndexerProperty) = fieldOrProp switch
                                     {
                                         IPropertySymbol { Type: ITypeSymbol type, IsIndexer: var isIndexer } => (initialAsyncType = type.TryGetAsyncType(out factoryReturnType), isIndexer),
-                                        _ => (((IFieldSymbol)fieldOrProp).Type.TryGetAsyncType(out factoryReturnType), false)
+                                        _ => (initialAsyncType = ((IFieldSymbol)fieldOrProp).Type.TryGetAsyncType(out factoryReturnType), false)
                                     };
 
                                     if (factoryReturnType is not { TypeKind: TypeKind.Interface, IsAbstract: true })

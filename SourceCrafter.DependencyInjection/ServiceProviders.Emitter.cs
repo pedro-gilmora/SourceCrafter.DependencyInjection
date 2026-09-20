@@ -70,6 +70,7 @@ internal partial class ServiceProviders
             Dictionary<FirstLevelDependencyKey, Interceptor> interceptors,
             ref bool addTasksExtensions,
             ref string? ensureLockType,
+            ref bool requiresProviderInterfaces,
             ref int interceptorsCount,
             out string fileName,
             out string codeStr)
@@ -138,12 +139,27 @@ internal partial class ServiceProviders
 ");
             }
 
-            code.AppendLine(generatedCodeAttribute)
-                .Append(modifiers)
-                .AddSpace()
-                .Append(typeName);
+			// El plan de interfaces tiene que existir antes de la declaracion del tipo:
+			// aporta su lista de bases y declara, delante de el, las interfaces con clave.
+			var emitGenericApi = genericApi && dependencyValueBuilders.Count > 0;
 
-			AddDisposabilityInterface(code, effectiveDisposability, isInterfaceProvider);
+			GenericApiEmitter.ProviderPlan? providerPlan = emitGenericApi
+				? GenericApiEmitter.Build(dependencyValueBuilders, className)
+				: null;
+
+			if (providerPlan is not null)
+			{
+				requiresProviderInterfaces = true;
+
+				GenericApiEmitter.AppendKeyedInterfaces(code, providerPlan);
+			}
+
+			code.AppendLine(generatedCodeAttribute)
+				.Append(modifiers)
+				.AddSpace()
+				.Append(typeName);
+
+			AddDisposabilityInterface(code, effectiveDisposability, isInterfaceProvider, providerPlan);
 
 			if (!hasUserEnvironmentName)
 			{
@@ -357,8 +373,6 @@ internal partial class ServiceProviders
 ");
 			}
 
-            var emitGenericApi = genericApi && dependencyValueBuilders.Count > 0;
-
             if (implementsServiceProvider || emitGenericApi)
             {
                 code.Append(@"
@@ -371,12 +385,13 @@ internal partial class ServiceProviders
     object? global::System.IServiceProvider.GetService(global::System.Type serviceType) => throw new global::System.NotImplementedException();
 ");
 
-                if (emitGenericApi)
+                if (providerPlan is not null)
                 {
                     // La API generica se emite como despachador real y no como firma que
                     // lanza: es el fallback de los interceptores para los sitios de llamada
                     // que el compilador no puede enlazar al contenedor concreto.
-                    GenericApiEmitter.Emit(code, GenericApiEmitter.Collect(dependencyValueBuilders));
+                    GenericApiEmitter.AppendImplementations(code, providerPlan);
+                    GenericApiEmitter.Emit(code, providerPlan);
                 }
 
                 code.Append(@"
@@ -555,41 +570,30 @@ public static class ").Append(typeName).Append(@"Extensions
             for (var i = disposers.Count - 1; i >= 0; i--) disposers[i](code, true);
         }
 
-        void AddDisposabilityInterface(StringBuilder code, Disposability disposability, bool isInterface = false)
+        void AddDisposabilityInterface(
+            StringBuilder code,
+            Disposability disposability,
+            bool isInterface = false,
+            GenericApiEmitter.ProviderPlan? providerPlan = null)
         {
+            List<string> bases = [];
+
+            if (isInterface) bases.Add("I" + typeName);
+
             switch (disposability)
             {
-                case Disposability.Disposable:
-
-                    code.Append(" :");
-
-                    if (isInterface) code.Append(" I").Append(typeName).Append(',');
-
-                    code.Append(@" global::System.IDisposable
-{");
-
-                    break;
-
-                case Disposability.AsyncDisposable:
-
-                    code.Append(" :");
-
-                    if (isInterface) code.Append(" I").Append(typeName).Append(',');
-
-                    code.Append(@" global::System.IAsyncDisposable
-{");
-
-                    break;
-
-                default:
-
-                    if (isInterface) code.Append(" : I").Append(typeName);
-
-                    code.Append(@"
-{");
-
-                    break;
+                case Disposability.Disposable: bases.Add("global::System.IDisposable"); break;
+                case Disposability.AsyncDisposable: bases.Add("global::System.IAsyncDisposable"); break;
             }
+
+            // Una interfaz por servicio expuesto: es lo que permite al despachador generico
+            // resolver con una prueba de tipo en vez de comparar nombres de tipo.
+            if (providerPlan is not null) bases.AddRange(providerPlan.BaseInterfaces);
+
+            if (bases.Count > 0) code.Append(" : ").Append(string.Join(", ", bases));
+
+            code.Append(@"
+{");
         }
 
         internal static void AddOrUpdateIntercerceptor(

@@ -14,7 +14,7 @@
 - **Attribute-Based Registration**: Mark services with `[Singleton]`, `[Scoped]`, `[Transient]` on your container
 - **Multiple Lifetimes**: `Singleton` (application-wide), `Scoped` (per container instance), `Transient` (always new)
 - **Factory Support**: Use static methods, properties, or fields to provide instances
-- **Smart Async Handling**: `Task<T>` and `ValueTask<T>` factories are automatically cached; no redundant executions
+- **Smart Async Handling**: `Task<T>` and `ValueTask<T>` factories are automatically cached; no redundant executions. Generated async members are always `Task<T>`, so a `ValueTask` factory is adapted once inside the container
 - **Intelligent Disposal**: Container automatically implements `IAsyncDisposable` or `IDisposable` based on dependencies
 - **Flexible Configuration**: JSON settings, custom namespaces, and advanced caching strategies
 - **Scoped Isolation**: Create isolated scopes for request lifecycles with built-in disposal tracking
@@ -26,6 +26,19 @@
 ---
 
 ## Installation
+
+### Packages
+
+| Package | Kind | Install when |
+|---|---|---|
+| [`SourceCrafter.DependencyInjection`](https://www.nuget.org/packages/SourceCrafter.DependencyInjection) | Generator | You are building the container. Brings the attributes with it |
+| [`SourceCrafter.DependencyInjection.MsConfiguration`](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.MsConfiguration) | Generator | The container binds `appsettings.json` via `[JsonSetting<T>]`. Use **instead of** the core generator |
+| [`SourceCrafter.DependencyInjection.Metadata`](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.Metadata) | Attributes only | You are a library author annotating types without shipping the generator |
+| [`SourceCrafter.DependencyInjection.MsConfiguration.Metadata`](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.MsConfiguration.Metadata) | Attributes only | Same, for the configuration attributes |
+
+The two generators are mutually exclusive: the configuration one is a superset. The metadata
+packages carry no generator, so the consumer of your library is the one that decides which
+generator runs.
 
 ### Core Package
 Install the compile-time generator:
@@ -39,6 +52,11 @@ configuration-aware generator **instead of** the core one:
 ```bash
 dotnet add package SourceCrafter.DependencyInjection.MsConfiguration
 ```
+
+`[JsonConfiguration]` may be applied to the assembly (`[assembly: JsonConfiguration]`), which
+is where it naturally belongs - the configuration file is the assembly's, not a particular
+container's. Container-level attributes still win over the assembly one, and the order in
+which you write the attributes never changes the result.
 
 ---
 
@@ -183,6 +201,8 @@ public class AppSettings
 | `[JsonSetting<T>(section)]` | Config | Static | Maps a setting section loaded from `appsettings.json` |
 | `[Scoped(name, source: Method)]` | Per instance | Instance | Named factory-produced services |
 
+Every lifetime attribute also takes `locks:` (see [Lock placement](#lock-placement)).
+
 #### `[ServiceProvider]` options
 
 | Option | Default | Effect |
@@ -217,11 +237,29 @@ plus the older `{0}`, which is the key:
 [Scoped<Other>("aux",  nameFormat: "The{type}For{key}")]      // TheOtherForAux
 ```
 
+#### Lock placement
+
+Cached registrations are initialized lazily, so they are guarded. `locks:` chooses where the
+guard lives:
+
+| Value | Lock |
+|---|---|
+| `Default` | Matches the lifetime: `static` for singletons, per-instance for scoped |
+| `Global` | One `static` lock shared by every container instance |
+| `Instance` | One lock per container/scope instance, shared by its services |
+| `Dedicated` | A lock of its own, so unrelated services never wait on each other |
+| `None` | No guard at all - only for factories that are cheap and idempotent |
+
+The lock scope must match the scope of the field it guards, so `Global` on a `Scoped`
+registration is rejected with `SCDI18`: a container-wide lock would serialize unrelated
+scopes without adding any exclusion. Locks are created on first use, so a scope that never
+resolves a given service never allocates one.
+
 ### Key Behaviors
 
-**Factory Method Caching**: Any `Task<T>` or `ValueTask<T>` used as a factory is cached even in transient scenarios to prevent redundant async work.
+**Factory Method Caching**: Any `Task<T>` or `ValueTask<T>` used as a factory is cached even in transient scenarios to prevent redundant async work. Whatever the factory returns, the generated member exposes `Task<T>`: the conversion is paid once, by the container, and not by every consumer.
 
-**Smart Disposal**: The container automatically detects if any registered service is `IAsyncDisposable` and generates async disposal code. If all disposables are synchronous, a sync `Dispose()` is generated instead.
+**Smart Disposal**: The container automatically detects if any registered service is `IAsyncDisposable` and generates async disposal code. If all disposables are synchronous, a sync `Dispose()` is generated instead. A service whose resolution *faulted* is simply skipped: disposal is cleanup and never becomes the source of a new exception, which would otherwise replace the real one inside an `await using` block. A synchronous `IDisposable` that can only be reached by awaiting its factory makes the container `IAsyncDisposable`, since there is no way to honour a synchronous `Dispose()` without blocking.
 
 **Scoped Isolation**: Call `container.CreateScope()` to create an isolated scope instance. Scoped services registered in that scope are cached independently; disposal doesn't affect the parent.
 
@@ -279,6 +317,36 @@ An async factory must declare **exactly** the exposed service type: `Task<T>` is
 so `Task<Impl>` is not a `Task<IService>`. The generator reports `SCDI16` instead of
 awaiting and re-wrapping, which would cost an allocation on every resolution.
 
+### Generic factories
+
+A factory may be generic. The template itself is not a service - `ILogger<T>` does not
+designate anything until `T` is known - so it is registered as a template and **closed by
+consumption**: the generator instantiates it once per constructed type some consumer actually
+asks for.
+
+```csharp
+[ServiceProvider]
+[Transient(source: nameof(_GetRepo))]
+public partial class AppContainer
+{
+	static Repo<T> _GetRepo<T>() where T : IEntity => new();
+}
+```
+
+Three rules come out of that design:
+
+- **Every type parameter must be constrained** (`SCDI19`). Constraints are what the generator
+  matches against; an unconstrained `T` makes the factory applicable to everything, which
+  removes any basis for choosing it.
+- **Only `Transient`** (`SCDI22`). A cached lifetime would need one backing field per
+  constructed type, and that set is known from the consumers, not from the registration. If a
+  particular constructed type has to be cached, register it separately with its own lifetime.
+- **Ambiguity is not guessed** (`SCDI21`). When two templates match equally well, give them
+  distinct keys and request by key instead of relying on declaration order.
+
+Asking for a constructed type no template accepts reports `SCDI20`, naming the closest
+candidate and the constraint it fails, rather than the generic "service not registered".
+
 ### Generic `IServiceProvider` API
 
 By default the container exposes only the strongly-typed resolvers it generated. Opt into
@@ -298,25 +366,38 @@ These members are the **fallback of interception**. An interceptor rewrites the 
 so it resolves with no comparison at all — but it can only do that when the compiler binds
 the concrete container there. When it cannot (the container arrives through an
 `IServiceProvider`-typed variable, or the call lives in another assembly) the call survives
-and lands here, where it is dispatched by runtime type:
+and lands here.
+
+Dispatch is done with a **type test against a generated provider interface**, not by
+comparing type names. The container implements one small explicit interface per exposed
+service, so the runtime work is a cast the JIT already knows how to do:
 
 ```csharp
 public TOut GetRequiredService<TOut>() where TOut : notnull
 {
-    switch (typeof(TOut).FullName)
-    {
-        case "MyApp.IClock":
-            return (TOut)(object)Clock;
-    }
+    if (this is global::SourceCrafter.DependencyInjection.IProvider<TOut> __p0)
+        return __p0.GetService();
 
-    throw new InvalidOperationException($"No service of type '{typeof(TOut)}' is registered.");
+    throw new InvalidOperationException($"No service of type '{typeof(TOut).FullName}' is registered.");
 }
 ```
 
-Keyed members discriminate type and key in a single comparison, over
-`$"{typeof(TOut).FullName}|{key}"`. Constructed generics are the exception: their runtime
-`FullName` embeds the assembly-qualified name of every type argument, so it cannot be
-emitted as a `case` label and they are matched with `typeof(TOut) == typeof(X)` instead.
+Keyed members keep a `switch (key)` — the key is a runtime value, so it is the only part
+that cannot become a type test — and inside each branch they test the keyed interface the
+same way. Constructed generics need no special case: an interface test binds them like any
+other type. The interfaces are an implementation detail: they are `internal` to the
+generated compilation and implemented explicitly, so they never widen the container's
+public surface.
+
+Each surface serves **only its own registrations**. The async members resolve async
+registrations; they never fall back to the synchronous providers, which already have their
+own surface. Likewise, the plural async interface is declared only when the type has at
+least one async registration: wrapping values that are available without waiting in an
+already-completed task is work the caller never asked for.
+
+Async members are always shaped as `Task<T>`, even when the factory returns `ValueTask<T>`.
+The adaptation happens once, inside the container, instead of making every consumer pay for
+a `ValueTask`-to-`Task` conversion of its own.
 
 When a type has several registrations, the **singular** members return the last one
 registered — the export type is the only criterion, whether it is an interface, an abstract
@@ -347,6 +428,9 @@ public partial class AppContainer { }
 
 Consumers can then use `container.Leaf`. Inlining is unaffected: inside the declaring
 compilation the call site still builds the instance in place.
+
+Having no named member never removes the registration from the **plural** members either:
+an inlined transient is rebuilt in place as one more element of the returned array.
 
 ### IServiceProvider-like Interception
 
@@ -448,6 +532,11 @@ All generator diagnostics use the `SCDI` prefix:
 | `SCDI15` | The container already declares a parameterless constructor |
 | `SCDI16` | An async factory must declare the exposed service type |
 | `SCDI17` | Two parameters of the same service type both resolve with no key |
+| `SCDI18` | `LockOptions.Global` is not compatible with a scoped dependency |
+| `SCDI19` | A generic factory type parameter must be constrained |
+| `SCDI20` | No generic factory accepts the requested type argument |
+| `SCDI21` | Two generic factories produce the same constructed type |
+| `SCDI22` | Generic factories can only be registered as transient |
 
 Frequent situations:
 

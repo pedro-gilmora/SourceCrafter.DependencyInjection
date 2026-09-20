@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -13,35 +14,96 @@ internal partial class ServiceProviders
     /// en el sitio, asi que resuelve sin ninguna comparacion; pero solo puede hacerlo si el
     /// compilador logra enlazar el contenedor concreto en ese sitio. Cuando no lo logra
     /// (el contenedor llega por una variable de tipo interfaz, o la llamada esta en otro
-    /// ensamblado) la llamada sobrevive y aterriza en estos miembros, que discriminan por
-    /// tipo en ejecucion. Por eso conviven: el interceptor es mas granular, este es el
-    /// que garantiza que la llamada siempre resuelve.</para>
+    /// ensamblado) la llamada sobrevive y aterriza en estos miembros.</para>
+    ///
+    /// <para>La discriminacion <b>no</b> se hace sobre cadenas. Cada contenedor implementa,
+    /// de forma explicita, una interfaz generica por servicio expuesto
+    /// (<c>IProvider&lt;T&gt;</c> y companeras) y el despachador se limita a una prueba de
+    /// tipo <c>this is IProvider&lt;TOut&gt;</c>: el runtime resuelve por tabla de
+    /// interfaces en vez de comparar <c>typeof(TOut).FullName</c> contra una lista de
+    /// literales. Solo sobrevive el <c>switch</c> sobre la clave, porque la clave si es un
+    /// dato de ejecucion.</para>
     /// </summary>
     internal static class GenericApiEmitter
     {
         /// <summary>
+        /// Espacio de nombres de las interfaces compartidas, emitidas una sola vez por
+        /// compilacion en <c>Utils.g.cs</c>.
+        /// </summary>
+        internal const string SharedNamespace = "global::SourceCrafter.DependencyInjection.";
+
+        /// <summary>
+        /// Las interfaces de resolucion hablan siempre en <c>Task&lt;T&gt;</c>. Un
+        /// <c>ValueTask&lt;T&gt;</c> intermedio no ahorra nada aqui -el valor se consume una
+        /// sola vez y detras hay una tarea de todos modos- y obligaba a adaptar en cada
+        /// consumidor.
+        /// </summary>
+        const string TaskOf = "global::System.Threading.Tasks.Task<";
+
+        /// <summary>
         /// Un servicio tal y como lo ve el despachador, ya proyectado a cadenas.
         /// </summary>
-        /// <param name="RuntimeTypeName">
-        /// <c>typeof(T).FullName</c> del tipo expuesto, o <c>null</c> si es un generico
-        /// construido (se discrimina por <c>typeof</c>, no por cadena).
+        /// <param name="MemberName">
+        /// Miembro del contenedor al que reenviar, o <c>null</c> si el servicio es un
+        /// transient inlineado: entonces el valor se reconstruye con <paramref name="Append"/>.
         /// </param>
         internal readonly record struct Entry(
-            string? RuntimeTypeName,
             string ExportTypeFullName,
             string Key,
             AsyncKind AsyncKind,
-            string MemberName,
-            bool IsMethodShaped);
+            string? MemberName,
+            bool IsMethodShaped,
+            AppendValue Append);
+
+        internal enum ImplKind { Single, SingleAsync, Multiple, MultipleAsync }
+
+        /// <summary>
+        /// Una implementacion explicita de interfaz a emitir dentro del contenedor.
+        /// </summary>
+        internal sealed class Implementation(string interfaceName, string exportTypeFullName, ImplKind kind, List<Entry> entries)
+        {
+            internal readonly string InterfaceName = interfaceName;
+            internal readonly string ExportTypeFullName = exportTypeFullName;
+            internal readonly ImplKind Kind = kind;
+            internal readonly List<Entry> Entries = entries;
+        }
+
+        /// <summary>
+        /// Las interfaces declaradas para una clave concreta. Solo se declara la que
+        /// realmente tiene implementacion.
+        /// </summary>
+        internal sealed class KeyDispatch(string key)
+        {
+            internal readonly string Key = key;
+            internal string? SyncInterface, AsyncInterface, MultipleInterface, MultipleAsyncInterface;
+        }
+
+        /// <summary>
+        /// Todo lo que un contenedor necesita para atender la API generica: su lista de
+        /// bases, las interfaces con clave que le son propias, las implementaciones
+        /// explicitas y el mapa de claves del despachador.
+        /// </summary>
+        internal sealed class ProviderPlan
+        {
+            internal readonly List<string> BaseInterfaces = [];
+            internal readonly List<Implementation> Implementations = [];
+            internal readonly List<KeyDispatch> Keys = [];
+            internal readonly List<(string Name, ImplKind Kind)> KeyedInterfaces = [];
+
+            internal bool HasSync, HasAsync, HasMultiple, HasMultipleAsync;
+        }
 
         /// <summary>
         /// Proyecta los resolvedores registrados a las entradas que el despachador puede
-        /// atender. Se descartan los que no exponen miembro: un transient inlineado sin
-        /// <c>exportTransients</c> no tiene nombre al que reenviar.
+        /// atender.
+        ///
+        /// <para>Un transient inlineado no tiene miembro al que reenviar, pero si un valor
+        /// que reconstruir en el sitio, asi que <b>tambien</b> entra: descartarlo hacia
+        /// desaparecer una registracion entera de los miembros plurales.</para>
         ///
         /// <para>Se conservan <b>todos</b> los registros, en orden: los miembros plurales
         /// devuelven cada uno de ellos. Son los singulares los que se quedan con uno solo,
-        /// via <see cref="LastPerIdentity"/>.</para>
+        /// el ultimo registrado.</para>
         /// </summary>
         internal static List<Entry> Collect(DependencyDictionary services)
         {
@@ -51,15 +113,19 @@ internal partial class ServiceProviders
             {
                 foreach (var resolver in group.Values)
                 {
-                    if (resolver.MemberName is not { Length: > 0 } member) continue;
+                    var member = resolver.MemberName is { Length: > 0 } name ? name : null;
+
+                    // Sin miembro y sin valor inlineable (un servicio externo) no hay nada
+                    // que emitir.
+                    if (member is null && !resolver.IsInlineable) continue;
 
                     entries.Add(new(
-                        resolver.RuntimeTypeName,
                         resolver.ExportTypeFullName,
                         resolver.Key.key,
                         resolver.AsyncKind,
                         member,
-                        resolver.MemberIsMethodShaped));
+                        resolver.MemberIsMethodShaped,
+                        resolver.AppendValue));
                 }
             }
 
@@ -67,77 +133,348 @@ internal partial class ServiceProviders
         }
 
         /// <summary>
-        /// Reduce las entradas a una por tipo expuesto y clave, quedandose con la
-        /// <b>ultima</b> registrada.
-        ///
-        /// <para>El tipo expuesto es el unico criterio: si es una interfaz o una clase
-        /// abstracta da igual, gana el ultimo registro de ese tipo. Ademas de ser la regla
-        /// pedida, evita emitir dos <c>case</c> con la misma etiqueta, que no compilaria.</para>
+        /// Construye el plan de interfaces de un contenedor. Devuelve <c>null</c> cuando no
+        /// hay nada que despachar.
         /// </summary>
-        static List<Entry> LastPerIdentity(IEnumerable<Entry> entries)
+        /// <param name="className">
+        /// Discrimina las interfaces con clave entre contenedores: se declaran a nivel de
+        /// espacio de nombres -una clase no puede derivar de un tipo <c>file</c>-local
+        /// (CS9053)- y por tanto sus nombres tienen que ser unicos en el ensamblado.
+        /// </param>
+        internal static ProviderPlan? Build(DependencyDictionary services, string className)
         {
-            Dictionary<(string, string), Entry> byIdentity = [];
-            List<(string, string)> order = [];
+            var entries = Collect(services);
 
-            foreach (var entry in entries)
+            if (entries.Count == 0) return null;
+
+            ProviderPlan plan = new();
+
+            // --- Sin clave -----------------------------------------------------------
+            // El singular se queda con el ultimo registro. Se mantienen separados el ultimo
+            // sincrono y el ultimo de todos para que una peticion sincrona siga alcanzando
+            // un registro sincrono anterior a uno asincrono.
+            foreach (var group in GroupBy(entries.Where(static e => e.Key is ""), static e => e.ExportTypeFullName))
             {
-                var identity = (entry.ExportTypeFullName, entry.Key);
+                if (Last(group.Where(static e => e.AsyncKind is AsyncKind.None)) is { } lastSync)
+                {
+                    Add(plan, SharedNamespace + "IProvider", group.Key, ImplKind.Single, [lastSync]);
+                    plan.HasSync = true;
+                }
 
-                if (!byIdentity.ContainsKey(identity)) order.Add(identity);
-
-                byIdentity[identity] = entry;
+                if (group[group.Count - 1] is { AsyncKind: not AsyncKind.None } lastAsync)
+                {
+                    Add(plan, SharedNamespace + "IAsyncProvider", group.Key, ImplKind.SingleAsync, [lastAsync]);
+                    plan.HasAsync = true;
+                }
             }
 
-            return [.. order.Select(id => byIdentity[id])];
+            // Un sitio sin clave recoge tambien los registros con clave: es lo que hace el
+            // fallback de los interceptores y lo que MS DI documenta para las variantes
+            // plurales sin clave.
+            foreach (var group in GroupBy(entries.Where(static e => e.AsyncKind is AsyncKind.None), static e => e.ExportTypeFullName))
+            {
+                Add(plan, SharedNamespace + "IMultipleProvider", group.Key, ImplKind.Multiple, group);
+                plan.HasMultiple = true;
+            }
+
+            // La variante plural asincrona agrupa unicamente los registros asincronos, igual
+            // que la singular se queda con el ultimo asincrono. Un registro sincrono ya lo
+            // devuelve la interfaz plural sincrona, y colarlo aqui obligaba a envolver en una
+            // tarea valores que el llamante podia obtener sin esperar nada. Si el grupo no
+            // tiene ninguno asincrono, no hay interfaz plural asincrona que declarar.
+            foreach (var group in GroupBy(entries.Where(static e => e.AsyncKind is not AsyncKind.None), static e => e.ExportTypeFullName))
+            {
+                Add(plan, SharedNamespace + "IMultipleAsyncProvider", group.Key, ImplKind.MultipleAsync, group);
+                plan.HasMultipleAsync = true;
+            }
+
+            // --- Con clave -----------------------------------------------------------
+            Dictionary<string, byte> usedNames = [];
+
+            foreach (var keyed in GroupBy(entries.Where(static e => e.Key is not ""), static e => e.Key))
+            {
+                KeyDispatch dispatch = new(keyed.Key);
+
+                var prefix = "I" + className + PascalCase(keyed.Key, usedNames);
+
+                foreach (var group in GroupBy(keyed, static e => e.ExportTypeFullName))
+                {
+                    if (Last(group.Where(static e => e.AsyncKind is AsyncKind.None)) is { } lastSync)
+                    {
+                        dispatch.SyncInterface = Declare(plan, dispatch.SyncInterface, prefix + "Provider", ImplKind.Single);
+                        Add(plan, dispatch.SyncInterface, group.Key, ImplKind.Single, [lastSync]);
+                    }
+
+                    if (group[group.Count - 1] is { AsyncKind: not AsyncKind.None } lastAsync)
+                    {
+                        dispatch.AsyncInterface = Declare(plan, dispatch.AsyncInterface, prefix + "AsyncProvider", ImplKind.SingleAsync);
+                        Add(plan, dispatch.AsyncInterface, group.Key, ImplKind.SingleAsync, [lastAsync]);
+                    }
+
+                    if (group.Where(static e => e.AsyncKind is AsyncKind.None).ToList() is { Count: > 0 } allSync)
+                    {
+                        dispatch.MultipleInterface = Declare(plan, dispatch.MultipleInterface, prefix + "MultipleProvider", ImplKind.Multiple);
+                        Add(plan, dispatch.MultipleInterface, group.Key, ImplKind.Multiple, allSync);
+                    }
+
+                    if (group.Where(static e => e.AsyncKind is not AsyncKind.None).ToList() is { Count: > 0 } allAsync)
+                    {
+                        dispatch.MultipleAsyncInterface = Declare(plan, dispatch.MultipleAsyncInterface, prefix + "MultipleAsyncProvider", ImplKind.MultipleAsync);
+                        Add(plan, dispatch.MultipleAsyncInterface, group.Key, ImplKind.MultipleAsync, allAsync);
+                    }
+                }
+
+                plan.Keys.Add(dispatch);
+            }
+
+            return plan;
+
+            static string Declare(ProviderPlan plan, string? existing, string name, ImplKind kind)
+            {
+                if (existing is null) plan.KeyedInterfaces.Add((name, kind));
+
+                return name;
+            }
+
+            static void Add(ProviderPlan plan, string interfaceName, string exportType, ImplKind kind, List<Entry> entries)
+            {
+                plan.Implementations.Add(new(interfaceName, exportType, kind, entries));
+                plan.BaseInterfaces.Add(interfaceName + "<" + exportType + ">");
+            }
+        }
+
+        static Entry? Last(IEnumerable<Entry> entries)
+        {
+            Entry? last = null;
+
+            foreach (var entry in entries) last = entry;
+
+            return last;
         }
 
         /// <summary>
-        /// Emite los ocho miembros de la API generica sobre <paramref name="entries"/>.
+        /// Agrupa conservando el orden de aparicion: el orden de los registros es
+        /// observable en los miembros plurales.
         /// </summary>
-        internal static void Emit(StringBuilder code, List<Entry> entries)
+        static List<Group> GroupBy(IEnumerable<Entry> entries, Func<Entry, string> keySelector)
         {
-            if (entries.Count == 0) return;
+            Dictionary<string, Group> groups = [];
+            List<Group> order = [];
 
-            // --- Sincronos sin clave -------------------------------------------------
-            var sync = LastPerIdentity(entries.Where(e => e.Key is "" && e.AsyncKind is AsyncKind.None));
+            foreach (var entry in entries)
+            {
+                var key = keySelector(entry);
 
-            AppendSingle(code, "GetRequiredService", sync, keyed: false, asyncKind: AsyncKind.None);
+                if (!groups.TryGetValue(key, out var group))
+                {
+                    groups[key] = group = new(key);
+                    order.Add(group);
+                }
+
+                group.Add(entry);
+            }
+
+            return order;
+        }
+
+        internal sealed class Group(string key) : List<Entry>
+        {
+            internal readonly string Key = key;
+        }
+
+        /// <summary>
+        /// Convierte una clave arbitraria en un identificador Pascal. Dos claves distintas
+        /// pueden normalizar al mismo nombre (p. ej. <c>"a-b"</c> y <c>"a_b"</c>), asi que
+        /// se desambigua con un sufijo.
+        /// </summary>
+        static string PascalCase(string key, Dictionary<string, byte> used)
+        {
+            StringBuilder name = new();
+            var upper = true;
+
+            foreach (var ch in key)
+            {
+                if (char.IsLetterOrDigit(ch) || ch is '_')
+                {
+                    name.Append(upper ? char.ToUpperInvariant(ch) : ch);
+                    upper = false;
+                }
+                else
+                {
+                    upper = true;
+                }
+            }
+
+            if (name.Length == 0 || char.IsDigit(name[0])) name.Insert(0, '_');
+
+            var result = name.ToString();
+
+            if (used.TryGetValue(result, out var count))
+            {
+                used[result] = ++count;
+                return result + count;
+            }
+
+            used[result] = 0;
+
+            return result;
+        }
+
+        /// <summary>
+        /// Declara, antes del contenedor, las interfaces con clave que le pertenecen.
+        /// </summary>
+        internal static void AppendKeyedInterfaces(StringBuilder code, ProviderPlan plan)
+        {
+            foreach (var (name, kind) in plan.KeyedInterfaces)
+            {
+                code.Append("internal interface ").Append(name).Append(@"<T> where T : notnull
+{
+    ").Append(kind switch
+                {
+                    ImplKind.Single => "T GetService();",
+                    ImplKind.SingleAsync => TaskOf + "T> GetServiceAsync();",
+                    ImplKind.Multiple => "T[] GetServices();",
+                    _ => TaskOf + "T[]> GetServicesAsync();"
+                }).Append(@"
+}
+
+");
+            }
+        }
+
+        /// <summary>
+        /// Emite las implementaciones explicitas. Son explicitas para no ensuciar la
+        /// superficie publica del contenedor con un miembro por servicio expuesto.
+        /// </summary>
+        internal static void AppendImplementations(StringBuilder code, ProviderPlan plan)
+        {
+            foreach (var impl in plan.Implementations)
+            {
+                var export = impl.ExportTypeFullName;
+
+                code.Append(@"
+    ");
+
+                switch (impl.Kind)
+                {
+                    case ImplKind.Single:
+
+                        code.Append(export).Append(' ').Append(impl.InterfaceName)
+                            .Append('<').Append(export).Append(">.GetService() => ");
+
+                        AppendMember(code, impl.Entries[0], awaited: false);
+
+                        break;
+
+                    case ImplKind.SingleAsync:
+
+                        var entry = impl.Entries[0];
+
+                        code.Append(TaskOf).Append(export).Append("> ").Append(impl.InterfaceName)
+                            .Append('<').Append(export).Append(">.GetServiceAsync() => ");
+
+                        AppendMember(code, entry, awaited: false);
+
+                        // Una factoria ValueTask<T> se adapta una sola vez, aqui.
+                        if (entry.AsyncKind is AsyncKind.ValueTask) code.Append(".AsTask()");
+
+                        break;
+
+                    case ImplKind.Multiple:
+
+                        code.Append(export).Append("[] ").Append(impl.InterfaceName)
+                            .Append('<').Append(export).Append(">.GetServices() =>");
+
+                        AppendArray(code, impl, awaited: false);
+
+                        break;
+
+                    default:
+
+                        // Todos los elementos son asincronos -el plan ya excluye los
+                        // sincronos-, asi que el miembro siempre espera algo.
+                        code.Append("async ").Append(TaskOf).Append(export).Append("[]> ").Append(impl.InterfaceName)
+                            .Append('<').Append(export).Append(">.GetServicesAsync() =>");
+
+                        AppendArray(code, impl, awaited: true);
+
+                        break;
+                }
+
+                code.Append(';');
+            }
+
+            code.Append('\n');
+        }
+
+        /// <summary>
+        /// Los elementos van uno por linea: un contenedor real acumula decenas de registros
+        /// del mismo tipo y en una sola linea el miembro era ilegible.
+        /// </summary>
+        static void AppendArray(StringBuilder code, Implementation impl, bool awaited)
+        {
+            code.Append(@"
+        [");
+
+            var isFirst = true;
+
+            foreach (var entry in impl.Entries)
+            {
+                if (!isFirst) code.Append(',');
+
+                code.Append(@"
+            ");
+
+                AppendMember(code, entry, awaited);
+
+                isFirst = false;
+            }
+
+            code.Append(@"
+        ]");
+        }
+
+        static void AppendMember(StringBuilder code, Entry entry, bool awaited)
+        {
+            if (awaited && entry.AsyncKind is not AsyncKind.None) code.Append("await ");
+
+            // El transient inlineado reconstruye su valor aqui mismo; el resto reenvia a su
+            // miembro. Se emite fuera de contexto de interceptor porque el codigo vive
+            // dentro del propio contenedor y no detras de un 'provider.'.
+            if (entry.MemberName is null)
+            {
+                entry.Append(code, false, false, null);
+
+                return;
+            }
+
+            code.Append(entry.MemberName);
+
+            if (entry.IsMethodShaped) code.Append("()");
+        }
+
+        /// <summary>
+        /// Emite los miembros de la API generica. Ninguno compara cadenas de tipo: todos
+        /// preguntan por la interfaz que corresponde.
+        /// </summary>
+        internal static void Emit(StringBuilder code, ProviderPlan plan)
+        {
+            AppendSingle(code, plan, "GetRequiredService", AsyncKind.None, keyed: false);
 
             // GetService<T>() es exactamente GetRequiredService<T>() salvo en que no lanza:
-            // devuelve null, que es la semantica que MS DI documenta. No resuelve keyed ni
-            // async, asi que comparte la misma lista.
-            AppendSingle(code, "GetService", sync, keyed: false, asyncKind: AsyncKind.None, nullWhenMissing: true);
+            // devuelve null, que es la semantica que MS DI documenta.
+            AppendSingle(code, plan, "GetService", AsyncKind.None, keyed: false, nullWhenMissing: true);
 
-            AppendMultiple(code, "GetRequiredServices", entries.Where(e => e.AsyncKind is AsyncKind.None).ToList(), keyed: false, asyncKind: AsyncKind.None);
+            AppendMultiple(code, plan, "GetRequiredServices", AsyncKind.None, keyed: false);
 
-            // --- Sincronos con clave -------------------------------------------------
-            var keyedSync = entries.Where(e => e.Key is not "" && e.AsyncKind is AsyncKind.None).ToList();
+            AppendSingle(code, plan, "GetRequiredKeyedService", AsyncKind.None, keyed: true);
+            AppendMultiple(code, plan, "GetRequiredKeyedServices", AsyncKind.None, keyed: true);
 
-            AppendSingle(code, "GetRequiredKeyedService", LastPerIdentity(keyedSync), keyed: true, asyncKind: AsyncKind.None);
-            AppendMultiple(code, "GetRequiredKeyedServices", keyedSync, keyed: true, asyncKind: AsyncKind.None);
+            AppendSingle(code, plan, "GetRequiredServiceAsync", AsyncKind.Task, keyed: false);
+            AppendMultiple(code, plan, "GetRequiredServicesAsync", AsyncKind.Task, keyed: false);
 
-            // --- Asincronos ----------------------------------------------------------
-            // Un servicio sincrono tambien se puede pedir de forma asincrona, asi que las
-            // listas async incluyen a todos: el miembro es 'async' y devuelve el valor ya
-            // materializado cuando no hay nada que esperar.
-            var unkeyed = LastPerIdentity(entries.Where(e => e.Key is ""));
-            var keyedAll = entries.Where(e => e.Key is not "").ToList();
-            var keyedLast = LastPerIdentity(keyedAll);
-
-            AppendSingle(code, "GetRequiredServiceAsync", unkeyed, keyed: false, asyncKind: AsyncKind.Task);
-            AppendMultiple(code, "GetRequiredServicesAsync", entries, keyed: false, asyncKind: AsyncKind.Task);
-
-            AppendSingle(code, "GetRequiredKeyedServiceAsync", keyedLast, keyed: true, asyncKind: AsyncKind.Task);
-            AppendMultiple(code, "GetRequiredKeyedServicesAsync", keyedAll, keyed: true, asyncKind: AsyncKind.Task);
-
-            // Las variantes 'Value' devuelven ValueTask<T>. Se emiten siempre junto a las de
-            // Task: un sitio de llamada elige una u otra por el tipo que espera, y omitirlas
-            // dejaba sin compilar a quien resolvia una factory ValueTask.
-            AppendSingle(code, "GetRequiredValueServiceAsync", unkeyed, keyed: false, asyncKind: AsyncKind.ValueTask);
-            AppendMultiple(code, "GetRequiredValueServicesAsync", entries, keyed: false, asyncKind: AsyncKind.ValueTask);
-
-            AppendSingle(code, "GetRequiredKeyedValueServiceAsync", keyedLast, keyed: true, asyncKind: AsyncKind.ValueTask);
-            AppendMultiple(code, "GetRequiredKeyedValueServicesAsync", keyedAll, keyed: true, asyncKind: AsyncKind.ValueTask);
+            AppendSingle(code, plan, "GetRequiredKeyedServiceAsync", AsyncKind.Task, keyed: true);
+            AppendMultiple(code, plan, "GetRequiredKeyedServicesAsync", AsyncKind.Task, keyed: true);
         }
 
         /// <summary>
@@ -145,85 +482,192 @@ internal partial class ServiceProviders
         /// </summary>
         static void AppendSingle(
             StringBuilder code,
+            ProviderPlan plan,
             string methodName,
-            List<Entry> entries,
-            bool keyed,
             AsyncKind asyncKind,
+            bool keyed,
             bool nullWhenMissing = false)
         {
             var isAsync = asyncKind is not AsyncKind.None;
+
+            AppendSignature(code, methodName, asyncKind, keyed, plural: false);
+
+            if (keyed)
+            {
+                AppendKeyedSwitch(
+                    code,
+                    plan,
+                    isAsync
+                        ? static d => d.AsyncInterface is not null
+                        : static d => d.SyncInterface is not null,
+                    (body, dispatch, slot) =>
+                    {
+                        // Cada superficie resuelve unicamente sus propios registros: un
+                        // proveedor sincrono no participa de la API asincrona.
+                        if (isAsync)
+                        {
+                            if (dispatch.AsyncInterface is { } async)
+                                AppendTest(body, async, "GetServiceAsync", slot, awaited: true);
+                        }
+                        else if (dispatch.SyncInterface is { } sync)
+                        {
+                            AppendTest(body, sync, "GetService", slot, awaited: false);
+                        }
+                    });
+            }
+            else
+            {
+                if (isAsync)
+                {
+                    if (plan.HasAsync)
+                        AppendTest(code, SharedNamespace + "IAsyncProvider", "GetServiceAsync", 0, awaited: true);
+                }
+                else if (plan.HasSync)
+                {
+                    AppendTest(code, SharedNamespace + "IProvider", "GetService", 0, awaited: false);
+                }
+            }
+
+            AppendTail(code, keyed, nullWhenMissing ? "return default!;" : null);
+        }
+
+        /// <summary>
+        /// Emite un miembro que devuelve <b>todos</b> los servicios de un tipo.
+        /// </summary>
+        static void AppendMultiple(
+            StringBuilder code,
+            ProviderPlan plan,
+            string methodName,
+            AsyncKind asyncKind,
+            bool keyed)
+        {
+            var isAsync = asyncKind is not AsyncKind.None;
+
+            AppendSignature(code, methodName, asyncKind, keyed, plural: true);
+
+            if (keyed)
+            {
+                AppendKeyedSwitch(
+                    code,
+                    plan,
+                    isAsync
+                        ? static d => d.MultipleAsyncInterface is not null
+                        : static d => d.MultipleInterface is not null,
+                    (body, dispatch, slot) =>
+                    {
+                        if (isAsync)
+                        {
+                            if (dispatch.MultipleAsyncInterface is { } async)
+                                AppendTest(body, async, "GetServicesAsync", slot, awaited: true);
+                        }
+                        else if (dispatch.MultipleInterface is { } sync)
+                        {
+                            AppendTest(body, sync, "GetServices", slot, awaited: false);
+                        }
+                    });
+            }
+            else if (isAsync)
+            {
+                // Un grupo integramente sincrono no declara interfaz plural asincrona y
+                // tampoco se alcanza desde aqui: la API asincrona no reparte proveedores
+                // sincronos, que ya tienen su propia superficie.
+                if (plan.HasMultipleAsync)
+                    AppendTest(code, SharedNamespace + "IMultipleAsyncProvider", "GetServicesAsync", 0, awaited: true);
+            }
+            else if (plan.HasMultiple)
+            {
+                AppendTest(code, SharedNamespace + "IMultipleProvider", "GetServices", 0, awaited: false);
+            }
+
+            AppendTail(code, keyed, "return [];");
+        }
+
+        static void AppendSignature(StringBuilder code, string methodName, AsyncKind asyncKind, bool keyed, bool plural)
+        {
+            var result = plural ? "TOut[]" : "TOut";
 
             code.Append(@"
 
     public ");
 
-            if (isAsync) code.Append("async ");
+            if (asyncKind is not AsyncKind.None) code.Append("async ");
 
-            code.Append(asyncKind switch
-            {
-                AsyncKind.ValueTask => "global::System.Threading.Tasks.ValueTask<TOut>",
-                AsyncKind.Task => "global::System.Threading.Tasks.Task<TOut>",
-                _ => "TOut"
-            })
+            code.Append(asyncKind is AsyncKind.None ? result : TaskOf + result + ">")
                 .Append(' ')
                 .Append(methodName)
                 .Append("<TOut>(")
                 .Append(keyed ? "string key" : null)
                 .Append(@") where TOut : notnull
     {");
+        }
 
-            // Los genericos construidos no tienen FullName constante: se comparan por
-            // typeof, que el JIT pliega. El resto entra al switch sobre cadena.
-            var byType = entries.Where(e => e.RuntimeTypeName is null).ToList();
-            var byName = entries.Where(e => e.RuntimeTypeName is not null).ToList();
+        /// <summary>
+        /// La clave si es un dato de ejecucion, asi que conserva su <c>switch</c>. Dentro de
+        /// cada rama la resolucion vuelve a ser una prueba de tipo.
+        /// </summary>
+        static void AppendKeyedSwitch(
+            StringBuilder code,
+            ProviderPlan plan,
+            Func<KeyDispatch, bool> emits,
+            Action<StringBuilder, KeyDispatch, int> appendBody)
+        {
+            var dispatches = plan.Keys.Where(emits).ToList();
 
-            foreach (var entry in byType)
+            if (dispatches.Count == 0) return;
+
+            code.Append(@"
+
+        switch (key)
+        {");
+
+            var slot = 0;
+
+            foreach (var dispatch in dispatches)
             {
                 code.Append(@"
-        if (typeof(TOut) == typeof(").Append(entry.ExportTypeFullName).Append(')');
+            case """).Append(dispatch.Key).Append(@""":");
 
-                if (keyed) code.Append(" && key is ").Append('"').Append(entry.Key).Append('"');
+                appendBody(code, dispatch, slot);
 
-                code.Append(@") return ");
+                // Dos ranuras por rama: una prueba asincrona y su respaldo sincrono.
+                slot += 2;
 
-                AppendReturnValue(code, entry, isAsync);
-
-                code.Append(';');
+                code.Append(@"
+                break;");
             }
 
-            if (byName.Count > 0)
-            {
-                AppendSwitchHead(code, keyed);
-
-                foreach (var entry in byName)
-                {
-                    AppendCaseLabel(code, entry, keyed);
-
-                    code.Append(@"
-                return ");
-
-                    AppendReturnValue(code, entry, isAsync);
-
-                    code.Append(';');
-                }
-
-                code.Append(@"
+            code.Append(@"
         }");
-            }
+        }
 
+        /// <summary>
+        /// Los <c>case</c> de un <c>switch</c> comparten ambito, de ahi el sufijo por rama.
+        /// </summary>
+        static void AppendTest(StringBuilder code, string interfaceName, string member, int slot, bool awaited)
+        {
+            code.Append(@"
+        if (this is ").Append(interfaceName).Append("<TOut> __p").Append(slot).Append(") return ");
+
+            if (awaited) code.Append("await ");
+
+            code.Append("__p").Append(slot).Append('.').Append(member).Append("();");
+        }
+
+        static void AppendTail(StringBuilder code, bool keyed, string? fallback)
+        {
             code.Append(@"
 
         ");
 
-            if (nullWhenMissing)
+            if (fallback is not null)
             {
                 // 'default!' y no 'null': TOut es 'notnull' pero puede ser un struct, para el
                 // que null no es un valor representable.
-                code.Append("return default!;");
+                code.Append(fallback);
             }
             else
             {
-                code.Append("throw new global::System.InvalidOperationException($\"No service of type '{typeof(TOut)}'")
+                code.Append("throw new global::System.InvalidOperationException($\"No service of type '{typeof(TOut).FullName}'")
                     .Append(keyed ? " with key '{key}'" : null)
                     .Append(" is registered.\");");
             }
@@ -231,176 +675,6 @@ internal partial class ServiceProviders
             code.Append(@"
     }
 ");
-        }
-
-        /// <summary>
-        /// Emite un miembro que devuelve <b>todos</b> los servicios de un tipo.
-        ///
-        /// <para>Un sitio sin clave recoge tambien los registros con clave: es lo que hace el
-        /// fallback de los interceptores y lo que MS DI documenta para las variantes
-        /// plurales sin clave.</para>
-        /// </summary>
-        static void AppendMultiple(
-            StringBuilder code,
-            string methodName,
-            List<Entry> entries,
-            bool keyed,
-            AsyncKind asyncKind)
-        {
-            var isAsync = asyncKind is not AsyncKind.None;
-
-            code.Append(@"
-
-    public ");
-
-            if (isAsync) code.Append("async ");
-
-            code.Append(asyncKind switch
-            {
-                AsyncKind.ValueTask => "global::System.Threading.Tasks.ValueTask<TOut[]>",
-                AsyncKind.Task => "global::System.Threading.Tasks.Task<TOut[]>",
-                _ => "TOut[]"
-            })
-                .Append(' ')
-                .Append(methodName)
-                .Append("<TOut>(")
-                .Append(keyed ? "string key" : null)
-                .Append(@") where TOut : notnull
-    {");
-
-            // Se agrupa por tipo expuesto: todos los registros de un mismo tipo forman un
-            // unico array, sin importar su lifetime. Con clave el grupo incluye tambien la
-            // clave, para no mezclar registros de claves distintas en la misma respuesta.
-            // Los genericos construidos no tienen FullName constante y salen como 'if'; el
-            // resto entra al switch, igual que en los miembros singulares.
-            var groups = entries
-                .GroupBy(e => (e.RuntimeTypeName, e.ExportTypeFullName, Key: keyed ? e.Key : ""))
-                .ToList();
-
-            foreach (var group in groups.Where(g => g.Key.RuntimeTypeName is null))
-            {
-                code.Append(@"
-        if (typeof(TOut) == typeof(").Append(group.Key.ExportTypeFullName).Append(')');
-
-                if (keyed) code.Append(" && key is ").Append('"').Append(group.Key.Key).Append('"');
-
-                code.Append(@") return ");
-
-                AppendArray(code, group, isAsync);
-
-                code.Append(';');
-            }
-
-            var byName = groups.Where(g => g.Key.RuntimeTypeName is not null).ToList();
-
-            if (byName.Count > 0)
-            {
-                AppendSwitchHead(code, keyed);
-
-                foreach (var group in byName)
-                {
-                    code.Append(@"
-            case """).Append(group.Key.RuntimeTypeName);
-
-                    if (keyed) code.Append('|').Append(group.Key.Key);
-
-                    code.Append(@""":
-                return ");
-
-                    AppendArray(code, group, isAsync);
-
-                    code.Append(';');
-                }
-
-                code.Append(@"
-        }");
-            }
-
-            code.Append(@"
-
-        return [];
-    }
-");
-        }
-
-        /// <summary>
-        /// Emite el array con todos los registros de un grupo, ya convertido a <c>TOut[]</c>.
-        /// </summary>
-        static void AppendArray(StringBuilder code, IEnumerable<Entry> group, bool isAsync)
-        {
-            var exportType = group.First().ExportTypeFullName;
-
-            code.Append("(TOut[])(object)new ").Append(exportType).Append("[] { ");
-
-            var isFirst = true;
-
-            foreach (var entry in group)
-            {
-                if (!isFirst) code.Append(", ");
-
-                AppendMemberAccess(code, entry, isAsync, cast: false);
-
-                isFirst = false;
-            }
-
-            code.Append(" }");
-        }
-
-        /// <summary>
-        /// Abre el <c>switch</c> de discriminacion. Con clave se discrimina sobre
-        /// <c>$"{typeof(T).FullName}|{key}"</c>, que resuelve tipo y clave en una sola
-        /// comparacion en vez de anidar dos switches.
-        /// </summary>
-        static void AppendSwitchHead(StringBuilder code, bool keyed)
-        {
-            code.Append(keyed
-                ? @"
-
-        switch ($""{typeof(TOut).FullName}|{key}"")
-        {"
-                : @"
-
-        switch (typeof(TOut).FullName)
-        {");
-        }
-
-        static void AppendCaseLabel(StringBuilder code, Entry entry, bool keyed)
-        {
-            code.Append(@"
-            case """).Append(entry.RuntimeTypeName);
-
-            if (keyed) code.Append('|').Append(entry.Key);
-
-            code.Append(@""":");
-        }
-
-        /// <summary>
-        /// Emite el valor de retorno de un miembro singular, ya convertido a <c>TOut</c>.
-        /// </summary>
-        static void AppendReturnValue(StringBuilder code, Entry entry, bool isAsync)
-        {
-            // La conversion pasa por 'object' porque el compilador no puede saber que TOut
-            // es el tipo del resolver. Es el precio de la compatibilidad con IServiceProvider
-            // y no cuesta nada en ejecucion: sobre una referencia es una conversion de
-            // identidad, y sobre un struct el JIT especializa el metodo por tipo y colapsa
-            // el par box/unbox al mismo tipo.
-            code.Append("(TOut)(object)");
-
-            AppendMemberAccess(code, entry, isAsync, cast: true);
-        }
-
-        /// <summary>
-        /// Emite el acceso al miembro que resuelve el servicio, esperandolo si hace falta.
-        /// </summary>
-        static void AppendMemberAccess(StringBuilder code, Entry entry, bool isAsync, bool cast)
-        {
-            var mustAwait = entry.AsyncKind is not AsyncKind.None;
-
-            if (mustAwait) code.Append("await ");
-
-            code.Append(entry.MemberName);
-
-            if (entry.IsMethodShaped) code.Append("()");
         }
     }
 }
