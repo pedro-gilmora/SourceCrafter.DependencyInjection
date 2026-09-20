@@ -172,27 +172,24 @@ public class AsyncFactoryCompositionTests
 	}
 
 	/// <summary>
-	/// Con el campo de resultado, la publicacion pasa siempre por la funcion local
-	/// <c>async Task&lt;T&gt;</c>, cuya maquina de estados produce directamente lo que se
-	/// guarda en el campo. Asi no queda <b>ninguna</b> conversion entre formas de tarea, ni
-	/// siquiera en el camino de publicacion.
+	/// El miembro generado es <c>Task&lt;T&gt;</c> aunque la fabrica declare
+	/// <c>ValueTask&lt;T&gt;</c>, asi que el camino caliente devuelve el campo de la tarea
+	/// —que ya es de ese tipo— sin envolver ni convertir nada. El acelerador de resultado
+	/// existia solo porque envolver en <c>ValueTask</c> era gratis; reconstruir un
+	/// <c>Task</c> desde el resultado habria asignado 72 B en cada lectura.
 	/// </summary>
 	[Fact]
 	public void TheValueTaskFastPathWrapsInsteadOfConverting()
 	{
 		var code = GeneratorHarness.Run(ValueTaskFactoryWithAsyncDep).Source("Container");
 
-		// Los dos campos: la tarea comparte la resolucion en vuelo, el resultado acelera.
 		code.Should().Contain("private global::System.Threading.Tasks.Task<global::Probe.Made>? _getMadeAsyncCached;");
-		code.Should().Contain("private global::Probe.Made? _getMadeAsyncCachedResult;");
 
-		// Camino caliente: comprobacion de nulo y envoltura, que no asigna.
-		code.Should().Contain(
-			"if(_getMadeAsyncCachedResult is { } __v) return new global::System.Threading.Tasks.ValueTask<global::Probe.Made>(__v);");
+		// Camino caliente: una sola lectura del campo, sin conversion alguna.
+		code.Should().Contain("if(_getMadeAsyncCached is { IsCompletedSuccessfully: true } __v) return __v;");
 
-		// La funcion local acompana al campo, no al miembro, y publica el resultado.
-		code.Should().Contain("async global::System.Threading.Tasks.Task<global::Probe.Made> ResolveCoreAsync()");
-		code.Should().Contain("return _getMadeAsyncCachedResult = __r;");
+		// Ni el miembro ni el camino de publicacion mencionan ya 'ValueTask'.
+		code.Should().NotContain("ValueTask<global::Probe.Made>");
 
 		// Sin conversiones: la maquina de estados ya produce la forma del campo.
 		code.Should().NotContain("_GetMadeAsync(__v0.Result)");
@@ -225,9 +222,9 @@ public class AsyncFactoryCompositionTests
 	}
 
 	/// <summary>
-	/// El liberador debe anular <b>los dos</b> campos. Si el acelerador de lectura
-	/// sobreviviera, el camino caliente seguiria entregando la instancia ya desechada sin
-	/// llegar nunca al candado.
+	/// El liberador anula el campo de la tarea, que es la unica fuente de verdad: al ser
+	/// el miembro <c>Task&lt;T&gt;</c> ya no hay acelerador de resultado que pudiera
+	/// sobrevivir y seguir entregando la instancia desechada.
 	/// </summary>
 	const string ValueTaskDisposable = """
 		using SourceCrafter.DependencyInjection.Attributes;
@@ -255,7 +252,7 @@ public class AsyncFactoryCompositionTests
 		var code = GeneratorHarness.Run(ValueTaskDisposable).Source("Container");
 
 		code.Should().Contain("_getHeldAsyncCached = null;");
-		code.Should().Contain("_getHeldAsyncCachedResult = null;");
+		code.Should().NotContain("_getHeldAsyncCachedResult");
 	}
 
 	/// <summary>

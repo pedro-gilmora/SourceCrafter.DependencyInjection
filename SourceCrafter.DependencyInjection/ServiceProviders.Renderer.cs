@@ -475,6 +475,13 @@ internal sealed class ResolverRenderer
                     {
                         AppendInstance(code, true);
                     }
+
+                    // Un transient no cachea, asi que aqui la llamada a la fabrica ES el
+                    // valor del miembro. Si la fabrica declara 'ValueTask<T>' y el miembro
+                    // es 'Task<T>', la adaptacion se paga en este punto.
+                    if (initialAsyncType is AsyncKind.ValueTask && AsyncKind is AsyncKind.Task)
+                        code.Append(".AsTask()");
+
                     code.Append(@";
 ");
                 }
@@ -1023,8 +1030,10 @@ internal sealed class ResolverRenderer
 
             internal string GetTypeName(string typeName)
             {
+                // El tipo del miembro lo decide 'AsyncKind', no la forma de la fabrica:
+                // una fabrica 'ValueTask<T>' se expone igualmente como 'Task<T>'.
                 return AsyncKind > 0
-                    ? $"global::System.Threading.Tasks.{(initialAsyncType is AsyncKind.ValueTask ? "Value" : null)}Task<{exportTypeFullName}>"
+                    ? $"global::System.Threading.Tasks.{(AsyncKind is AsyncKind.ValueTask ? "Value" : null)}Task<{exportTypeFullName}>"
                     : typeName;
             }
 

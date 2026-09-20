@@ -5,9 +5,9 @@ using Xunit;
 namespace SourceCrafter.DependencyInjection.Tests;
 
 /// <summary>
-/// Huecos en la cobertura de las formas <c>ValueTask</c>. Las guardas del acelerador de
-/// resultado (tipo valor, liberacion, tipo de referencia) ya las fija
-/// <see cref="AsyncFactoryCompositionTests"/>; aqui van las dos formas que no cubria nadie.
+/// Huecos en la cobertura de las fabricas declaradas con <c>ValueTask</c>: el miembro que
+/// las expone es siempre <c>Task&lt;T&gt;</c>, y la adaptacion se paga una sola vez dentro
+/// del contenedor.
 /// </summary>
 public class ValueTaskVariantTests
 {
@@ -40,25 +40,18 @@ public class ValueTaskVariantTests
 
 		var code = result.Source("Container");
 
-		code.Should().Contain("ValueTask<global::Probe.TransientDep> TransientAsync");
-		code.Should().Contain("=> _GetTransientAsync();", "sin cache no hay nada que envolver");
+		code.Should().Contain("Task<global::Probe.TransientDep> TransientAsync");
+		code.Should().Contain(".AsTask();", "la fabrica 'ValueTask' se adapta una sola vez, aqui");
 		code.Should().NotContain("_transientAsyncCached", "un transient no tiene campo de respaldo");
 		code.Should().NotContain("lock(", "ni candado");
 	}
 
 	/// <summary>
-	/// Caracterizacion, no aprobacion.
-	///
-	/// <para>Un servicio que hereda su asincronia de las dependencias se promociona a
-	/// <c>Task&lt;T&gt;</c> aunque todas ellas sean <c>ValueTask&lt;T&gt;</c>, porque la
-	/// promocion fija <c>AsyncKind.Task</c> en vez del tipo de la dependencia y <c>Task</c> es
-	/// el maximo del enum. El efecto secundario es que el acelerador de resultado, que exige
-	/// <c>ValueTask</c>, no alcanza nunca a los servicios compuestos -- que son la mayoria en un
-	/// grafo real.</para>
-	///
-	/// <para>No se cambia porque altera la firma publica del miembro generado, asi que es una
-	/// decision de API y no una optimizacion interna. Este test esta aqui para que revertirlo
-	/// sea deliberado. Ver la nota en <c>ServiceProviders.Parser.cs</c>.</para>
+	/// Todo miembro asincrono generado habla en <c>Task&lt;T&gt;</c>, tanto el que hereda su
+	/// asincronia de las dependencias como el que la toma de una fabrica
+	/// <c>ValueTask&lt;T&gt;</c>. Antes cada uno conservaba la forma de su origen, de modo que
+	/// dos servicios del mismo grafo exponian tipos de tarea distintos y cada consumidor
+	/// tenia que adaptarlos.
 	/// </summary>
 	[Fact]
 	public void AComposedServiceIsPromotedToTaskEvenIfEveryDependencyIsValueTask()
@@ -85,11 +78,11 @@ public class ValueTaskVariantTests
 
 		var code = result.Source("Container");
 
-		// La dependencia si conserva su forma.
-		code.Should().Contain("ValueTask<global::Probe.Dep> DepAsync");
+		// La fabrica sigue siendo 'ValueTask', pero el miembro que la expone no.
+		code.Should().Contain("Task<global::Probe.Dep> DepAsync");
+		code.Should().NotContain("ValueTask<global::Probe.Dep> DepAsync");
 
 		code.Should().Contain("Task<global::Probe.Composed> GetComposedAsync()");
 		code.Should().NotContain("ValueTask<global::Probe.Composed> GetComposedAsync()");
-		code.Should().NotContain("_composedTaskResult", "sin ValueTask no hay acelerador");
 	}
 }

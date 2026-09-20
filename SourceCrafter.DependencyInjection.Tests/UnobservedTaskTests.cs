@@ -90,19 +90,18 @@ public class UnobservedTaskTests
 	[Fact]
 	public void ValueTaskElementsAreLeftAlone()
 	{
-		// ValueTask<T> no expone Exception, y AsTask() sobre una ya consumida lanza. No hay
-		// forma de observarla sin consumirla, asi que ahi no se emite el catch en vez de
-		// emitir algo que no compila.
+		// Una fabrica 'ValueTask<T>' ya no deja rastro en el miembro: este es 'Task<T>' y
+		// la adaptacion ocurre una sola vez, dentro del contenedor. Por eso sus elementos
+		// si se pueden observar -- antes no, porque 'ValueTask<T>' no expone 'Exception' y
+		// 'AsTask()' sobre una ya consumida lanza.
 		var result = GeneratorHarness.Run(
 			TwoTaskElements.Replace("Task<IService> _Get", "ValueTask<IService> _Get")
-				.Replace("Task.FromResult<IService>(new Alpha())", "new ValueTask<IService>(new Alpha())")
-				// Un resolvedor ValueTask expone la variante 'ValueAsync' del metodo plural.
-				.Replace("Task<IService[]> All(Container c) => c.GetRequiredServicesAsync<IService>()",
-					"ValueTask<IService[]> All(Container c) => c.GetRequiredValueServicesAsync<IService>()"));
+				.Replace("Task.FromResult<IService>(new Alpha())", "new ValueTask<IService>(new Alpha())"));
 
 		var code = result.Source("Container");
 
-		code.Should().NotContain(".Exception;");
+		code.Should().Contain("_ = __t0.Exception;");
+		code.Should().Contain("_ = __t1.Exception;");
 		result.Errors.Should().BeEmpty();
 	}
 }
