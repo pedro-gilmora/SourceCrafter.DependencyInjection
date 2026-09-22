@@ -15,7 +15,7 @@ namespace Benchmarks.HandCoded.Scenarios;
 /// </para>
 /// <para>
 /// <b>Aviso sobre la fila de Jab.</b> Jab no expone miembros con nombre: su superficie publica es
-/// <c>GetService&lt;T&gt;()</c>, que hace una prueba de tipo en cada llamada. Su cifra incluye ese
+/// <c>GetService&lt;TProvide&gt;()</c>, que hace una prueba de tipo en cada llamada. Su cifra incluye ese
 /// despacho porque es lo unico que un usuario de Jab puede escribir, no porque el banco le añada
 /// trabajo. Comparar su numero con una lectura de campo compara dos APIs, no dos motores.
 /// </para>

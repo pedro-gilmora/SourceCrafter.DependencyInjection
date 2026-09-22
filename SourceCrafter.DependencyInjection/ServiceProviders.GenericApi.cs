@@ -457,23 +457,23 @@ internal partial class ServiceProviders
         /// Emite los miembros de la API generica. Ninguno compara cadenas de tipo: todos
         /// preguntan por la interfaz que corresponde.
         /// </summary>
-        internal static void Emit(StringBuilder code, ProviderPlan plan)
+        internal static void Emit(StringBuilder code, ProviderPlan plan, bool allCallsEarlyBound)
         {
-            AppendSingle(code, plan, "GetRequiredService", AsyncKind.None, keyed: false);
+            AppendSingle(code, plan, "GetRequiredService", AsyncKind.None, keyed: false, allCallsEarlyBound);
 
             // GetService<T>() es exactamente GetRequiredService<T>() salvo en que no lanza:
             // devuelve null, que es la semantica que MS DI documenta.
-            AppendSingle(code, plan, "GetService", AsyncKind.None, keyed: false, nullWhenMissing: true);
+            AppendSingle(code, plan, "GetService", AsyncKind.None, keyed: false, allCallsEarlyBound, nullWhenMissing: true);
 
             AppendMultiple(code, plan, "GetRequiredServices", AsyncKind.None, keyed: false);
 
-            AppendSingle(code, plan, "GetRequiredKeyedService", AsyncKind.None, keyed: true);
+            AppendSingle(code, plan, "GetRequiredKeyedService", AsyncKind.None, keyed: true, allCallsEarlyBound);
             AppendMultiple(code, plan, "GetRequiredKeyedServices", AsyncKind.None, keyed: true);
 
-            AppendSingle(code, plan, "GetRequiredServiceAsync", AsyncKind.Task, keyed: false);
+            AppendSingle(code, plan, "GetRequiredServiceAsync", AsyncKind.Task, keyed: false, allCallsEarlyBound);
             AppendMultiple(code, plan, "GetRequiredServicesAsync", AsyncKind.Task, keyed: false);
 
-            AppendSingle(code, plan, "GetRequiredKeyedServiceAsync", AsyncKind.Task, keyed: true);
+            AppendSingle(code, plan, "GetRequiredKeyedServiceAsync", AsyncKind.Task, keyed: true, allCallsEarlyBound);
             AppendMultiple(code, plan, "GetRequiredKeyedServicesAsync", AsyncKind.Task, keyed: true);
         }
 
@@ -486,9 +486,11 @@ internal partial class ServiceProviders
             string methodName,
             AsyncKind asyncKind,
             bool keyed,
+            bool allCallsEarlyBound,
             bool nullWhenMissing = false)
         {
             var isAsync = asyncKind is not AsyncKind.None;
+            var alwaysReturns = false;
 
             AppendSignature(code, methodName, asyncKind, keyed, plural: false);
 
@@ -507,25 +509,57 @@ internal partial class ServiceProviders
                         if (isAsync)
                         {
                             if (dispatch.AsyncInterface is { } async)
-                                AppendTest(body, async, "GetServiceAsync", slot, awaited: true);
+                                AppendTest(body, async, "GetServiceAsync", slot, awaited: true, plural: false);
                         }
                         else if (dispatch.SyncInterface is { } sync)
                         {
-                            AppendTest(body, sync, "GetService", slot, awaited: false);
+                            AppendTest(body, sync, "GetService", slot, awaited: false, plural: false);
                         }
                     });
+            }
+            else if (nullWhenMissing)
+            {
+                // Devolver 'default' ante un tipo no registrado es la semantica documentada.
+                // No se usa '?.' porque 'TOut' es 'notnull' pero no esta restringido a 'class'
+                // ni a 'struct', y el acceso condicional exigiria hacerlo anulable (CS8978).
+                // La rama afirmativa resuelve con la misma conversion que el resto de la
+                // superficie singular, no con la variable del patron.
+                if (plan.HasSync)
+                {
+                    code.Append(@"
+        return this is ")
+                        .Append(SharedNamespace)
+                        .Append("IProvider<TOut> ? ");
+
+                    AppendCast(code, SharedNamespace + "IProvider", allCallsEarlyBound);
+
+                    code.Append("GetService() : default!;");
+
+                    alwaysReturns = true;
+                }
             }
             else
             {
                 if (isAsync)
                 {
                     if (plan.HasAsync)
-                        AppendTest(code, SharedNamespace + "IAsyncProvider", "GetServiceAsync", 0, awaited: true);
+                    {
+                        AppendDirect(code, SharedNamespace + "IAsyncProvider", "GetServiceAsync", awaited: true, allCallsEarlyBound);
+                        alwaysReturns = true;
+                    }
                 }
                 else if (plan.HasSync)
                 {
-                    AppendTest(code, SharedNamespace + "IProvider", "GetService", 0, awaited: false);
+                    AppendDirect(code, SharedNamespace + "IProvider", "GetService", awaited: false, allCallsEarlyBound);
+                    alwaysReturns = true;
                 }
+            }
+
+            if (alwaysReturns)
+            {
+                // Tras un 'return' incondicional cualquier respaldo seria codigo muerto.
+                AppendClose(code);
+                return;
             }
 
             AppendTail(code, keyed, nullWhenMissing ? "return default!;" : null);
@@ -558,11 +592,11 @@ internal partial class ServiceProviders
                         if (isAsync)
                         {
                             if (dispatch.MultipleAsyncInterface is { } async)
-                                AppendTest(body, async, "GetServicesAsync", slot, awaited: true);
+                                AppendTest(body, async, "GetServicesAsync", slot, awaited: true, plural: true);
                         }
                         else if (dispatch.MultipleInterface is { } sync)
                         {
-                            AppendTest(body, sync, "GetServices", slot, awaited: false);
+                            AppendTest(body, sync, "GetServices", slot, awaited: false, plural: true);
                         }
                     });
             }
@@ -572,11 +606,11 @@ internal partial class ServiceProviders
                 // tampoco se alcanza desde aqui: la API asincrona no reparte proveedores
                 // sincronos, que ya tienen su propia superficie.
                 if (plan.HasMultipleAsync)
-                    AppendTest(code, SharedNamespace + "IMultipleAsyncProvider", "GetServicesAsync", 0, awaited: true);
+                    AppendTest(code, SharedNamespace + "IMultipleAsyncProvider", "GetServicesAsync", 0, awaited: true, plural: true);
             }
             else if (plan.HasMultiple)
             {
-                AppendTest(code, SharedNamespace + "IMultipleProvider", "GetServices", 0, awaited: false);
+                AppendTest(code, SharedNamespace + "IMultipleProvider", "GetServices", 0, awaited: false, plural: true);
             }
 
             AppendTail(code, keyed, "return [];");
@@ -641,16 +675,78 @@ internal partial class ServiceProviders
         }
 
         /// <summary>
-        /// Los <c>case</c> de un <c>switch</c> comparten ambito, de ahi el sufijo por rama.
+        /// Resolucion singular sin clave.
+        ///
+        /// <para>Prioridad 1: si <b>todas</b> las llamadas al contenedor llegan por su propio
+        /// tipo generado, el enlace es temprano y el analisis ya verifico que el servicio
+        /// existe -SCDI11 lo reporta cuando no-, asi que la comprobacion sobra y se emite
+        /// <c>Unsafe.As</c>.</para>
+        ///
+        /// <para>Prioridad 2: en cualquier otro caso se emite <c>(this as IProvider&lt;TOut&gt;)!</c>,
+        /// que conserva la comprobacion del runtime.</para>
         /// </summary>
-        static void AppendTest(StringBuilder code, string interfaceName, string member, int slot, bool awaited)
+        static void AppendDirect(StringBuilder code, string interfaceName, string member, bool awaited, bool allCallsEarlyBound)
         {
             code.Append(@"
-        if (this is ").Append(interfaceName).Append("<TOut> __p").Append(slot).Append(") return ");
+        return ");
 
             if (awaited) code.Append("await ");
 
-            code.Append("__p").Append(slot).Append('.').Append(member).Append("();");
+            AppendCast(code, interfaceName, allCallsEarlyBound);
+
+            code.Append(member).Append("();");
+        }
+
+        /// <summary>
+        /// Conversion al proveedor, ya sea la libre de comprobacion o la forzada. Deja el
+        /// acumulador justo antes del nombre del miembro.
+        /// </summary>
+        static void AppendCast(StringBuilder code, string interfaceName, bool allCallsEarlyBound)
+        {
+            if (allCallsEarlyBound)
+            {
+                code.Append("global::System.Runtime.CompilerServices.Unsafe.As<")
+                    .Append(interfaceName)
+                    .Append("<TOut>>(this).");
+            }
+            else
+            {
+                code.Append("(this as ").Append(interfaceName).Append("<TOut>)!.");
+            }
+        }
+
+        /// <summary>
+        /// Rama de un <c>case</c>. El plural enlaza la variable del patron; el singular usa
+        /// el <c>as</c> forzado, que es la forma con la que se resuelve un unico servicio.
+        /// </summary>
+        static void AppendTest(StringBuilder code, string interfaceName, string member, int slot, bool awaited, bool plural)
+        {
+            code.Append(@"
+        if (this is ").Append(interfaceName).Append("<TOut>");
+
+            if (plural) code.Append(" __p").Append(slot);
+
+            code.Append(") return ");
+
+            if (awaited) code.Append("await ");
+
+            if (plural)
+            {
+                code.Append("__p").Append(slot).Append('.');
+            }
+            else
+            {
+                code.Append("(this as ").Append(interfaceName).Append("<TOut>)!.");
+            }
+
+            code.Append(member).Append("();");
+        }
+
+        static void AppendClose(StringBuilder code)
+        {
+            code.Append(@"
+    }
+");
         }
 
         static void AppendTail(StringBuilder code, bool keyed, string? fallback)

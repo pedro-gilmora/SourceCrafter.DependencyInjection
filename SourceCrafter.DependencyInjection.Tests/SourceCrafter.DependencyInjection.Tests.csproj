@@ -10,6 +10,8 @@
 		<Features>InterceptorsPreview</Features>
 		<LangVersion>preview</LangVersion>
 		<InterceptorsNamespaces>$(InterceptorsNamespaces);SourceCrafter.DependencyInjection.Tests</InterceptorsNamespaces>
+		<!-- Microsoft.CodeAnalysis.CSharp.Analyzer.Testing arrastra paquetes solo de .NET Framework que funcionan en net10.0 -->
+		<NoWarn>$(NoWarn);NU1701</NoWarn>
 	</PropertyGroup>
 	<ItemGroup>
 		<PackageReference Include="BenchmarkDotNet" Version="0.15.8" />

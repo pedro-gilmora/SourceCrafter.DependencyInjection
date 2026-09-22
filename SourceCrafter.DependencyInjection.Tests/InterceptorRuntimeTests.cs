@@ -36,7 +36,7 @@ public partial class ChainedContainer
 
 public interface IFailing { }
 public sealed class FailingRoot : IFailing { }
-public sealed class FailingLeaf(IFailing root) : IFailing { }
+public sealed class FailingLeaf(IFailing root) : IFailing { public IFailing Root => root; }
 
 [ServiceProvider(genericApi: true)]
 [Singleton<IFailing>("root", source: nameof(_GetRootAsync))]
