@@ -44,6 +44,17 @@ internal record InvokeInfo(
 {
     internal required Location Location;
     internal bool InvalidAsyncTypeArg;
+
+    /// <summary>
+    /// El receptor <b>no</b> es el contenedor generado visto por su tipo concreto: viene por una
+    /// abstraccion (interfaz, clase base, <c>object</c>) o por un tipo que no se pudo resolver.
+    /// <para>
+    /// Decide el cuerpo del despachador generico. SCDI11 solo garantiza el registro de lo que se
+    /// ve en compilacion; un receptor ligado en ejecucion puede traer un <c>TOut</c> que el
+    /// generador nunca vio, asi que su contenedor conserva la comprobacion.
+    /// </para>
+    /// </summary>
+    internal bool IsLateBoundReceiver;
 }
 
 class AsyncLocalResolver(DependencyKey dep)

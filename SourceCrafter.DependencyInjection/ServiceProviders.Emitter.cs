@@ -68,6 +68,7 @@ internal partial class ServiceProviders
         internal void Emit(
             Dictionary<string, byte> uniqueNames,
             Dictionary<FirstLevelDependencyKey, Interceptor> interceptors,
+            bool allCallsEarlyBound,
             ref bool addTasksExtensions,
             ref string? ensureLockType,
             ref bool requiresProviderInterfaces,
@@ -391,7 +392,7 @@ internal partial class ServiceProviders
                     // lanza: es el fallback de los interceptores para los sitios de llamada
                     // que el compilador no puede enlazar al contenedor concreto.
                     GenericApiEmitter.AppendImplementations(code, providerPlan);
-                    GenericApiEmitter.Emit(code, providerPlan);
+                    GenericApiEmitter.Emit(code, providerPlan, allCallsEarlyBound);
                 }
 
                 code.Append(@"

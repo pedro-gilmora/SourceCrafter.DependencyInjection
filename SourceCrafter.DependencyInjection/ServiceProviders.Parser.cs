@@ -1333,12 +1333,6 @@ internal partial class ServiceProviders
                     hasScopedDependencies = true;
                 }
 
-                if (AsyncKind is not 0 && factoryKind is SymbolKind.Method && !((IMethodSymbol)factory!).Parameters.Any(p => p.Type.FullGlobalQualifiedName is CancelTokenFQMetaName))
-                {
-                    //factory.ToDisplayString().Dump("Cancellation token should be Appendd");
-                    diagnostics.Add(ServiceContainerDiagnostics.CancellationTokenShouldBeProvided(factory, attrSyntax));
-                }
-
                 key = (exportTypeFullName, name);
                 subKey = (lifetime, typeFullName, name);
 
