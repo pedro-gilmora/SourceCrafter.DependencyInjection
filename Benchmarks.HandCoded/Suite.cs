@@ -50,6 +50,12 @@ public enum Suite
     /// </summary>
     HeadToHeadLazyCircle = 1 << 12,
 
+    /// <summary>
+    /// Devirtualizacion del despachador generico sobre un contenedor de 100 dependencias: sitio de
+    /// llamada cerrado (interceptado) frente a generico abierto, y referencia frente a valor.
+    /// </summary>
+    GenericResolverDevirtualization = 1 << 13,
+
     /// <summary>Las cuatro celdas de la matriz atomica (lifetime x async-kind x disposability).</summary>
     Matrix = MatrixSingleton | MatrixScoped | MatrixTransientPlain | MatrixTransientDisposable,
 
@@ -60,6 +66,7 @@ public enum Suite
     Report = Control | HeadToHead,
 
     All = Control | Publication | EagerVsLazy | ScopeLifecycle | Matrix | HeadToHead | HeadToHeadLazyCircle
+        | GenericResolverDevirtualization
 }
 
 /// <summary>
@@ -82,6 +89,7 @@ public static class SuiteMap
         (Suite.HeadToHeadCreation, typeof(HeadToHeadCreationBenchmark)),
         (Suite.HeadToHeadTransient, typeof(HeadToHeadTransientBenchmark)),
         (Suite.HeadToHeadLazyCircle, typeof(HeadToHeadLazyCircleBenchmark)),
+        (Suite.GenericResolverDevirtualization, typeof(GenericResolverDevirtualizationBenchmark)),
     ];
 
     public static Type[] Resolve(Suite suite) =>

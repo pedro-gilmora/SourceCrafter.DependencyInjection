@@ -48,7 +48,10 @@ public class GenericResolverTests
             "GetRequiredService<TOut>() where TOut : notnull => throw",
             "the generic API is the interceptor fallback, so it must resolve and not throw");
 
-        code.Should().Contain("if (this is global::SourceCrafter.DependencyInjection.IProvider<TOut>");
+        // El despachador resuelve por interfaz: 'as' con '!' cuando el servicio debe existir,
+        // y prueba de tipo cuando hay que poder distinguir su ausencia.
+        code.Should().Contain("return (this as global::SourceCrafter.DependencyInjection.IProvider<TOut>)!.GetService();");
+        code.Should().Contain("this is global::SourceCrafter.DependencyInjection.IMultipleProvider<TOut>");
     }
 
     [Fact]
@@ -90,9 +93,10 @@ public class GenericResolverTests
     {
         var code = Generated();
 
-        // GetService<T>() es un inlining de GetRequiredService<T>() que no lanza.
+        // GetService<T>() resuelve como GetRequiredService<T>() pero sin lanzar: la prueba
+        // de tipo distingue el registro ausente y el condicional devuelve 'default'.
         code.Should().Contain("public TOut GetService<TOut>() where TOut : notnull");
-        code.Should().Contain("return default!;");
+        code.Should().Contain("<TOut>)!.GetService() : default!;");
         code.Should().Contain("throw new global::System.InvalidOperationException");
 
         // El mensaje nombra el tipo completo: 'typeof(TOut)' a secas repite el nombre corto

@@ -40,6 +40,8 @@ namespace SourceCrafter.DependencyInjection.Tests
     {
         public IDatabase Database { get; } = application;
 
+        public int Count { get; } = count;
+
         public ValueTask DisposeAsync()
         {
             return default;
@@ -58,6 +60,8 @@ namespace SourceCrafter.DependencyInjection.Tests
 
     public class Database(AppSettings settings, Guid reqId) : IDatabase
     {
+        public Guid RequestId { get; } = reqId;
+
         public void TrySave(out string setting1)
         {
             setting1 = settings.Setting1;
@@ -79,7 +83,13 @@ namespace SourceCrafter.DependencyInjection.Tests
         void TrySave(out string setting1);
     }
 
-    public class EmployeeController(IAuthService authService, IDatabase application, int count, Guid reqId);
+    public class EmployeeController(IAuthService authService, IDatabase application, int count, Guid reqId)
+    {
+        public IAuthService AuthService { get; } = authService;
+        public IDatabase Database { get; } = application;
+        public int Count { get; } = count;
+        public Guid RequestId { get; } = reqId;
+    }
 
     public interface ILogger<T>
     {
@@ -99,8 +109,8 @@ namespace SourceCrafter.DependencyInjection.Tests
     public class AppSettings
 
     {
-        public string Setting1 { get; set; }
-        public string Setting2 { get; set; }
+        public string Setting1 { get; set; } = string.Empty;
+        public string Setting2 { get; set; } = string.Empty;
     }
 
 
@@ -135,6 +145,8 @@ namespace SourceCrafter.DependencyInjection.Tests.Sub
     {
         public IDatabase Database { get; } = application;
 
+        public int Times { get; } = times;
+
         public ValueTask DisposeAsync()
         {
             return default;
@@ -153,6 +165,8 @@ namespace SourceCrafter.DependencyInjection.Tests.Sub
 
     public class Database(AppSettings settings, Guid serverId) : IDatabase
     {
+        public Guid ServerId { get; } = serverId;
+
         public void TrySave(out string setting1)
         {
             setting1 = settings.Setting1;
@@ -174,12 +188,18 @@ namespace SourceCrafter.DependencyInjection.Tests.Sub
         void TrySave(out string setting1);
     }
 
-    public class EmployeeController(IAuthService authService, IDatabase application, int counter, Guid serverId);
+    public class EmployeeController(IAuthService authService, IDatabase application, int counter, Guid serverId)
+    {
+        public IAuthService AuthService { get; } = authService;
+        public IDatabase Database { get; } = application;
+        public int Counter { get; } = counter;
+        public Guid ServerId { get; } = serverId;
+    }
 
     public class AppSettings
 
     {
-        public string Setting1 { get; set; }
-        public string Setting2 { get; set; }
+        public string Setting1 { get; set; } = string.Empty;
+        public string Setting2 { get; set; } = string.Empty;
     }
 }

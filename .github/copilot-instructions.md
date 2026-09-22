@@ -382,3 +382,9 @@ Este proyecto **no** usa `AnalyzerReleases.*.md` (por eso `RS2008` está suprimi
 - Para depurar el generador: configuración `DEBUG_SG` (activa `Debugger.Launch()` en `Initialize`).
 - Los tests usan xUnit v3 + FluentAssertions; las llamadas que aceptan `CancellationToken` deben
   usar `TestContext.Current.CancellationToken` (regla `xUnit1051`).
+- **Antes de que el usuario haga push**, revisar y actualizar
+  `SourceCrafter.DependencyInjection\README.md` si el cambio altera la superficie pública o el
+  comportamiento observable: atributos y sus parámetros, enums, forma del contenedor generado,
+  nombres de miembros, diagnósticos `SCDI`, paquetes o pasos de instalación. El README documenta
+  **guías de diseño y superficie pública**; el porqué, las mediciones y la anatomía del código
+  generado van en `INTERNALS.md`. Un refactor interno sin efecto observable no lo toca.

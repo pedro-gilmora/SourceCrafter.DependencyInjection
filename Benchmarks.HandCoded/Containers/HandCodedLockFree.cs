@@ -179,7 +179,7 @@ public sealed class LockFreeContainer : IDisposable, IAsyncDisposable
     // matriz: si dos celdas que ejecutan el mismo codigo no empatan, la corrida no es publicable.
     //
     // Las celdas con desecho NO son identicas. Sin candado hay que publicar la lista con CAS y
-    // luego protegerla igualmente, porque List<T> no es segura entre hilos. Es el sitio donde
+    // luego protegerla igualmente, porque List<TProvide> no es segura entre hilos. Es el sitio donde
     // "sin candado" deja de ahorrar nada: se acaba necesitando exclusion de todas formas.
 
     private List<IDisposable>? _transientDisposables;

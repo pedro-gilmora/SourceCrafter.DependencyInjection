@@ -439,7 +439,7 @@ public class LockingStrategyTests
             }
         });
 
-        outsiderHoldsTheContainer.Wait(Timeout).Should().BeTrue();
+        outsiderHoldsTheContainer.Wait(Timeout, TestContext.Current.CancellationToken).Should().BeTrue();
 
         var resolutionGotThrough = Monitor.TryEnter(container, Timeout);
         if (resolutionGotThrough) Monitor.Exit(container);
