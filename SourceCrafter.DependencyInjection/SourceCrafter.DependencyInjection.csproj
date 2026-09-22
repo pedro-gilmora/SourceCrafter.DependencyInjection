@@ -20,7 +20,6 @@
 			))
 		</PackageVersion>
 		<Nullable>enable</Nullable>
-		<EnableDefaultCompileItems>false</EnableDefaultCompileItems>
 		<IsRoslynComponent>true</IsRoslynComponent>
 		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 		<Configurations>Debug;Release;Pack;DEBUG_SG;DISG_HOST;DISG</Configurations>
@@ -52,41 +51,9 @@
 	<ItemGroup>
 		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
 		<None Include="..\README.md">
-		  <Pack>True</Pack>
-		  <PackagePath>\</PackagePath>
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
 		</None>
-		<Compile Include="ServiceProviders.cs" />
-		<Compile Include="ServiceProviders.Delegates.cs">
-			<DependentUpon>ServiceProviders.cs</DependentUpon>
-		</Compile>
-		<Compile Include="ServiceProviders.Enums.cs">
-			<DependentUpon>ServiceProviders.cs</DependentUpon>
-		</Compile>
-		<Compile Include="ServiceProviders.GenericApi.cs" />
-		<Compile Include="ServiceProviders.Models.cs">
-			<DependentUpon>ServiceProviders.cs</DependentUpon>
-		</Compile>
-		<Compile Include="GlobalUsings.cs" />
-		<Compile Include="Helpers.cs">
-			<DependentUpon>ServiceProviders.cs</DependentUpon>
-		</Compile>
-		<Compile Include="ServiceProviders.Parser.cs">
-			<DependentUpon>ServiceProviders.cs</DependentUpon>
-		</Compile>
-		<Compile Include="ServiceProviders.Renderer.cs">
-			<DependentUpon>ServiceProviders.cs</DependentUpon>
-		</Compile>
-		<Compile Include="ServiceProviders.Emitter.cs">
-			<DependentUpon>ServiceProviders.cs</DependentUpon>
-		</Compile>
-		<Compile Include="ServiceContainerDiagnostics.cs" />
-		<!--<Compile Include="..\Solution\Utils\Map.cs">
-			<Link>Utils\Map.cs</Link>
-		</Compile>
-
-		<Compile Include="..\Solution\Utils\Set.cs">
-			<Link>Utils\Set.cs</Link>
-		</Compile>-->
 	</ItemGroup>
 
 	<!--<ItemGroup>

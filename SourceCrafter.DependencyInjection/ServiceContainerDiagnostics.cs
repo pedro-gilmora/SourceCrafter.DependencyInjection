@@ -65,23 +65,6 @@ internal static class ServiceContainerDiagnostics
             providerClassName);
     }
 
-    internal static Diagnostic CancellationTokenShouldBeProvided(ISymbol factory, SyntaxNode? node)
-    {
-        DiagnosticDescriptor rule = new(
-            id: "SCDI04",
-            title: $"",
-            messageFormat: "A CancellationToken parameter should be provided to factory method '{0}'",
-            category: "SourceCrafter.DependencyInjection.Usage",
-            defaultSeverity: DiagnosticSeverity.Warning,
-            isEnabledByDefault: true
-        );
-
-        return Diagnostic.Create(
-            rule,
-            node?.GetLocation(),
-            factory);
-    }
-
     internal static Diagnostic InvalidKeyType(ExpressionSyntax arg)
     {
         DiagnosticDescriptor rule = new(

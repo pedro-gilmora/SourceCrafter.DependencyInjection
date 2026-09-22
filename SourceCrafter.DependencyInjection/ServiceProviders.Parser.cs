@@ -28,7 +28,7 @@ internal partial class ServiceProviders
                 (modifiers, typeName) = ($"{mods} {keyword}".TrimStart(), $"{identifier}{typeParamsList}");
                 break;
             case InterfaceDeclarationSyntax { Modifiers: var mods, Identifier: { } identifier, TypeParameterList: var typeParamsList }:
-                (modifiers, typeName) = ($"{mods/*.Except([SyntaxFactory.Token(SyntaxKind.InterfaceKeyword)])*/} partial class".TrimStart(), $"{identifier.ValueText[1..]}{typeParamsList}");
+                (modifiers, typeName) = ($"{mods} partial class".TrimStart(), $"{identifier.ValueText[1..]}{typeParamsList}");
                 break;
             default: return null!;
         };
@@ -1331,12 +1331,6 @@ internal partial class ServiceProviders
                 if (!hasScopedDependencies && lifetime is Lifetime.Scoped)
                 {
                     hasScopedDependencies = true;
-                }
-
-                if (AsyncKind is not 0 && factoryKind is SymbolKind.Method && !((IMethodSymbol)factory!).Parameters.Any(p => p.Type.FullGlobalQualifiedName is CancelTokenFQMetaName))
-                {
-                    //factory.ToDisplayString().Dump("Cancellation token should be Appendd");
-                    diagnostics.Add(ServiceContainerDiagnostics.CancellationTokenShouldBeProvided(factory, attrSyntax));
                 }
 
                 key = (exportTypeFullName, name);

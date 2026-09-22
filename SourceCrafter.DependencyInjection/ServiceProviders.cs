@@ -95,7 +95,7 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                         // Estado por pasada: no debe vivir en los objetos que Roslyn
                         // cachea entre compilaciones incrementales.
                         HashSet<InterceptableLocation> acknowledged = [];
-                        List<(Emitter emitter, Dictionary<FirstLevelDependencyKey, Interceptor> interceptors)> pending = [];
+                        List<(Emitter emitter, Dictionary<FirstLevelDependencyKey, Interceptor> interceptors, bool allEarlyBound)> pending = [];
 
                         // Solo compiten por una llamada los contenedores que realmente
                         // van a emitir interceptors. Se indexa por posicion porque dos
@@ -119,7 +119,14 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                             if (claims[i] is { } owned)
                                 InterceptorsAppender(emitters[i], owned, emitterInterceptors, acknowledged, c);
 
-                            pending.Add((emitters[i], emitterInterceptors));
+                            // La decision es por contenedor y se toma sobre TODAS sus llamadas:
+                            // basta un receptor ligado en ejecucion para que el despachador tenga
+                            // que seguir comprobando. Sin llamadas reclamadas no hay nada que
+                            // asegurar, asi que tampoco se relaja.
+                            var allEarlyBound = claims[i] is { Count: > 0 } calls
+                                && !calls.Any(static call => call.IsLateBoundReceiver);
+
+                            pending.Add((emitters[i], emitterInterceptors, allEarlyBound));
                         }
 
                         foreach (var call in msCalls)
@@ -139,13 +146,13 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                         var interceptorsCount = 0;
                         Dictionary<string, byte> countedNames = [];
 
-                        foreach (var (emitter, emitterInterceptors) in pending)
+                        foreach (var (emitter, emitterInterceptors, allEarlyBound) in pending)
                         {
                             // Un emisor sin servicios solo esta aqui para transportar sus
                             // diagnosticos: emitir su archivo produciria un contenedor vacio.
                             if (emitter.HasServices)
                             {
-                                emitter.Emit(countedNames, emitterInterceptors, ref requiresTaskExtensions, ref ensureLockType, ref requiresProviderInterfaces, ref interceptorsCount, out var file, out var code);
+                                emitter.Emit(countedNames, emitterInterceptors, allEarlyBound, ref requiresTaskExtensions, ref ensureLockType, ref requiresProviderInterfaces, ref interceptorsCount, out var file, out var code);
                                 files.Add((file + ".g", code));
                             }
 
@@ -192,11 +199,13 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
     }
 
     private const string InterceptsLocationContent = @"
+#pragma warning disable CS9113
 namespace System.Runtime.CompilerServices
 {
     [AttributeUsage(AttributeTargets.Method, AllowMultiple = true)]
     public sealed class InterceptsLocationAttribute(int version, string data) : global::System.Attribute;
-}";
+}
+#pragma warning restore CS9113";
 
     /// <summary>
     /// Contrato de resolucion por servicio expuesto. Cada contenedor las implementa de
@@ -597,6 +606,20 @@ internal static class Extensions
 
         if (AsyncKind is 0 && methodName.EndsWith("Async")) AsyncKind = AsyncKind.Task;
 
+        // El despachador generico solo puede prescindir de la comprobacion si NINGUN sitio de
+        // llamada llega por algo que no sea el contenedor generado en persona.
+        //
+        // No basta con descartar interfaces: tambien hay que descartar 'dynamic' (el enlace
+        // ocurre entero en ejecucion), las clases base y cualquier derivado. La prueba
+        // afirmativa lo cubre todo de una vez: el tipo del receptor debe llevar el propio
+        // '[ServiceProvider]', que es lo que marca al contenedor que estamos generando. Una
+        // base no lo lleva; un derivado tampoco, y ademas podria aportar registros que este
+        // analisis no ha visto.
+        var earlyBound = callContainerType is INamedTypeSymbol { TypeKind: TypeKind.Class or TypeKind.Struct } named
+            && named.GetAttributes().Any(IsGeneratedServiceProvider);
+
+        var lateBound = !earlyBound;
+
         return new(
             callContainerType.AllInterfaces.Any(i => i.GetAttributes().Any(IsGeneratedServiceProvider)),
             callContainerType.NameOnly,
@@ -612,6 +635,7 @@ internal static class Extensions
             methodName.Contains("Services", StringComparison.Ordinal))
         {
             InvalidAsyncTypeArg = methodWithTaskTypeArg,
+            IsLateBoundReceiver = lateBound,
             Location = memberAccess.GetLocation()
         };
     }

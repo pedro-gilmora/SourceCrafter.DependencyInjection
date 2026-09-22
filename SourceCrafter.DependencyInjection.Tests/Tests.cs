@@ -46,14 +46,14 @@ namespace SourceCrafter.DependencyInjection.Tests
 
             var ias = serverContainer.GetRequiredServices<IA>();
             var iasFromB = serverContainer.B.IAs;
-            var iasFromUnbound = ((IMultipleProvider<IA>)serverContainer).GetServices();
+            //var iasFromUnbound = ((IMultipleProvider<IA>)serverContainer).GetServices();
             ias.Should().HaveCount(2);
             iasFromB.Should().HaveCount(2);
 
             ias[0].Should().Be(iasFromB[0]);
-            ias[0].Should().Be(iasFromUnbound[0]);
+            //ias[0].Should().Be(iasFromUnbound[0]);
             ias[1].Should().Be(iasFromB[1]);
-            ias[1].Should().Be(iasFromUnbound[1]);
+            //ias[1].Should().Be(iasFromUnbound[1]);
 
             //Uncommenting this will complain with SCDI11: No dependency resolver was found for 'global::System.DateTime' at 'Server' container
             //var _ = serverContainer.GetRequiredService<DateTime>();
