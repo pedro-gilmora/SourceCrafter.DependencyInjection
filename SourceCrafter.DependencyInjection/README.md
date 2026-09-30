@@ -472,6 +472,31 @@ Because the array is shared, **do not mutate what these methods return**. Detail
 reasoning behind the missing lock are in
 [INTERNALS.md](INTERNALS.md#caching-of-the-array-returned-by-the-plural-overloads).
 
+### Partial generators (extension point)
+
+Other generators can build on top of every container without re-parsing its attributes.
+A partial generator is an analyzer assembly whose **name starts with
+`SourceCrafter.DependencyInjection.Partial`**, linking `Solution/Interop/PartialGenerationContracts.cs`
+and deriving from `ServiceProviderPartial`:
+
+```csharp
+public sealed class MyPartial : ServiceProviderPartial
+{
+    public override void AnalyzeContainer(
+        ServiceProviderInfo container, PartialContribution contribution, CancellationToken token)
+    {
+        // container.ContainerType, container.SemanticModel, container.Compilation
+        // container.Services: lifetime, key, member name/shape, export & impl ITypeSymbol...
+        contribution.AddSource($"{container.ClassName}.Mine", "/* code */");
+    }
+}
+```
+
+- It runs at parse time, so Roslyn symbols are live — **never retain them** past the call.
+- Containers without registered services are offered too.
+- Reference it next to the main generator with `OutputItemType="Analyzer"`.
+- See `SourceCrafter.DependencyInjection.Partial.ServiceCatalog` for a working sample.
+
 ---
 
 ## Cancellation
