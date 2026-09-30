@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<LangVersion>preview</LangVersion>
+		<Nullable>enable</Nullable>
+		<IsPackable>false</IsPackable>
+		<IsRoslynComponent>true</IsRoslynComponent>
+		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+		<Configurations>Debug;Release;DEBUG_SG</Configurations>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<!--
+			Se enlaza el contrato en vez de referenciar el generador. Roslyn aisla cada
+			directorio de analizadores en su propio AssemblyLoadContext, asi que referenciar
+			el dll tampoco daria identidad de tipo compartida: el enganche se hace por nombre
+			completo y todo lo que cruza la frontera son string[].
+		-->
+		<Compile Include="..\Solution\Interop\PartialGenerationContracts.cs">
+			<Link>Interop\PartialGenerationContracts.cs</Link>
+		</Compile>
+	</ItemGroup>
+
+</Project>

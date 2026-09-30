@@ -35,6 +35,7 @@
 		<ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration\SourceCrafter.DependencyInjection.MsConfiguration.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" UndefineProperties="TargetFramework" />
 		<ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" />
 		<ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" UndefineProperties="TargetFramework" />
+		<ProjectReference Include="..\SourceCrafter.DependencyInjection.Partial.ServiceCatalog\SourceCrafter.DependencyInjection.Partial.ServiceCatalog.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" UndefineProperties="TargetFramework" />
 		<ProjectReference Include="..\SourceCrafter.DependencyInjection.Metadata\SourceCrafter.DependencyInjection.Metadata.csproj" />
 	</ItemGroup>
 	<ItemGroup>

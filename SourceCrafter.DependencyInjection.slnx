@@ -1,4 +1,4 @@
-﻿<Solution>
+<Solution>
   <Configurations>
     <BuildType Name="Debug" />
     <BuildType Name="DEBUG_SG" />
@@ -40,6 +40,7 @@
     <BuildType Solution="DEBUG_SG|*" Project="Debug" />
   </Project>
   <Project Path="SourceCrafter.DependencyInjection.MsConfiguration/SourceCrafter.DependencyInjection.MsConfiguration.csproj" />
+  <Project Path="SourceCrafter.DependencyInjection.Partial.ServiceCatalog/SourceCrafter.DependencyInjection.Partial.ServiceCatalog.csproj" />
   <Project Path="SourceCrafter.DependencyInjection.Tests/SourceCrafter.DependencyInjection.Tests.csproj" />
   <Project Path="SourceCrafter.DependencyInjection/SourceCrafter.DependencyInjection.csproj" />
 </Solution>
