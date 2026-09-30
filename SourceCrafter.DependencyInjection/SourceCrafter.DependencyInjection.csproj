@@ -49,6 +49,19 @@
 	</ItemGroup>
 
 	<ItemGroup>
+		<!--
+			Contratos de extensibilidad compartidos con los ensamblados
+			SourceCrafter.DependencyInjection.Partial.*. Cada lado enlaza su *propia* copia:
+			Roslyn carga cada directorio de analizadores en su propio AssemblyLoadContext,
+			asi que compartir el dll no daria identidad de tipo comun de todas formas. Por eso
+			el enganche real viaja en string[] (ver PartialGeneration.cs).
+		-->
+		<Compile Include="..\Solution\Interop\PartialGenerationContracts.cs">
+			<Link>Interop\PartialGenerationContracts.cs</Link>
+		</Compile>
+	</ItemGroup>
+
+	<ItemGroup>
 		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
 		<None Include="..\README.md">
 			<Pack>True</Pack>

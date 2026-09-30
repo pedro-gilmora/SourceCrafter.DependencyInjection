@@ -1,6 +1,7 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using SourceCrafter.DependencyInjection;
+using SourceCrafter.DependencyInjection.Generation;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -42,6 +43,133 @@ internal partial class ServiceProviders
         internal readonly DependencyDictionary DependencyValueBuilders = dependencyValueBuilders;
         internal readonly string ContainerFullTypeName = containerFullTypeName;
         internal readonly string ClassName = className;
+
+        /// <summary>
+        /// Archivos extra aportados por los generadores parciales para este contenedor.
+        ///
+        /// <para>
+        /// Se rellena en <see cref="AnalyzePartials"/>, durante el parseo, porque es el unico
+        /// momento en que los simbolos siguen vivos. Es estado derivado, no parseado: queda fuera
+        /// de <see cref="Equals(Emitter?)"/> y de <see cref="GetHashCode"/> a proposito, porque
+        /// es funcion pura del emisor y del registro -inmutable- de parciales.
+        /// </para>
+        /// </summary>
+        internal List<PartialFile> PartialFiles { get; } = [];
+
+        /// <summary>
+        /// Ofrece el contenedor a cada generador parcial, en orden de prioridad, y recoge lo que
+        /// aporten.
+        ///
+        /// <para>
+        /// Se llama desde el parser, con <paramref name="containerType"/> y
+        /// <paramref name="semanticModel"/> aun vigentes. Ni el emisor ni los parciales guardan
+        /// esos simbolos: lo unico que sobrevive son los <see cref="PartialFile"/> y los
+        /// diagnosticos, ya renderizados a texto.
+        /// </para>
+        /// </summary>
+        internal void AnalyzePartials(
+            INamedTypeSymbol containerType,
+            SemanticModel semanticModel,
+            SyntaxNode? declaration,
+            CancellationToken cancelToken)
+        {
+            PartialFiles.Clear();
+
+            if (PartialGeneratorRegistry.Partials is not { Count: > 0 } registered) return;
+
+            var container = PartialCodec.EncodeContainer(
+                nameSpace,
+                ClassName,
+                ContainerFullTypeName,
+                typeName,
+                modifiers,
+                isInterfaceProvider,
+                implementsServiceProvider,
+                genericApi,
+                (byte)containerDisposability,
+                (byte)scopedDisposability);
+
+            var (services, symbols) = EncodeServices(semanticModel.Compilation);
+
+            foreach (var partial in registered)
+            {
+                cancelToken.ThrowIfCancellationRequested();
+
+                var (files, partialDiagnostics) = partial.Analyze(
+                    containerType, semanticModel, declaration, container, services, symbols, cancelToken);
+
+                foreach (var row in files)
+                {
+                    if (row is [{ Length: > 0 } fileName, { } code]) PartialFiles.Add(new(fileName, code));
+                }
+
+                foreach (var diagnostic in partialDiagnostics) Diagnostics.Add(diagnostic);
+            }
+        }
+
+        /// <summary>
+        /// Proyeccion de cada <see cref="ResolverBuilder"/>: los metadatos como cadenas y, en
+        /// paralelo, el simbolo del tipo expuesto.
+        ///
+        /// <para>
+        /// El simbolo se re-resuelve desde la <c>Compilation</c> en vez de guardarse en el
+        /// resolver: el emisor sobrevive entre pasadas incrementales y un <c>ISymbol</c> dentro
+        /// anclaria la compilacion entera. Se devuelve <c>null</c> para lo que no tiene nombre de
+        /// metadatos estable (tuplas, genericos construidos); esos casos siguen alcanzables
+        /// desde la propia <c>Compilation</c>.
+        /// </para>
+        /// </summary>
+        private (string[][] Data, object?[] Symbols) EncodeServices(Compilation compilation)
+        {
+            List<string[]> rows = [];
+            List<object?> symbols = [];
+
+            foreach (var group in dependencyValueBuilders.Values)
+            {
+                foreach (var resolver in group.Values)
+                {
+                    rows.Add(PartialCodec.EncodeService(
+                        resolver.ExportTypeFullName,
+                        resolver.Key.key,
+                        (byte)resolver.Key.lifetime,
+                        (byte)resolver.AsyncKind,
+                        resolver.MemberName,
+                        resolver.MemberIsMethodShaped,
+                        resolver.IsInlineable,
+                        resolver.ImplTypeFullName,
+                        resolver.IsCached,
+                        resolver.IsFactory,
+                        resolver.IsExternal,
+                        (byte)resolver.Disposability));
+
+                    // Dos entradas por servicio, en el mismo orden que espera 'PartialCodec.Decode'.
+                    symbols.Add(ResolveExportType(compilation, resolver.ExportTypeFullName));
+                    symbols.Add(ResolveExportType(compilation, resolver.ImplTypeFullName));
+                }
+            }
+
+            return ([.. rows], [.. symbols]);
+        }
+
+        /// <summary>
+        /// <c>GetTypeByMetadataName</c> espera un nombre de metadatos (<c>Ns.Tipo`1</c>), no el
+        /// formato cualificado con <c>global::</c> que usa el renderizador, y devuelve
+        /// <c>null</c> ante cualquier forma que no sea un tipo con nombre.
+        /// </summary>
+        private static ITypeSymbol? ResolveExportType(Compilation compilation, string exportTypeFullName)
+        {
+            if (exportTypeFullName is not { Length: > 0 }) return null;
+
+            var name = exportTypeFullName.StartsWith("global::", StringComparison.Ordinal)
+                ? exportTypeFullName["global::".Length..]
+                : exportTypeFullName;
+
+            // Un tipo generico construido no se puede pedir por nombre de metadatos; el parcial
+            // lo alcanza por la Compilation si lo necesita.
+            if (name.IndexOf('<') >= 0 || name.IndexOf('(') >= 0) return null;
+
+            return compilation.GetTypeByMetadataName(name);
+        }
 
         /// <summary>
         /// Un contenedor cuyas registraciones fallaron todas no tiene nada que emitir, pero

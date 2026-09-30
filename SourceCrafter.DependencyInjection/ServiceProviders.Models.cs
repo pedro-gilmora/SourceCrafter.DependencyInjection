@@ -116,6 +116,17 @@ internal class ResolverBuilder(string toStr)
     /// </summary>
     internal bool MemberIsMethodShaped;
 
+    /// <summary>
+    /// Metadatos que solo consumen los generadores parciales. Se guardan aqui -y no se releen
+    /// del simbolo- porque el emisor sobrevive entre pasadas incrementales y un <c>ISymbol</c>
+    /// anclaria la compilacion entera.
+    /// </summary>
+    internal string ImplTypeFullName = "";
+    internal bool IsCached;
+    internal bool IsFactory;
+    internal bool IsExternal;
+    internal Disposability Disposability;
+
     public override string ToString() => toStr;
 }
 /// <summary>

@@ -122,7 +122,13 @@ internal partial class ServiceProviders
             TryRegisterService(attr, null, out _, cancelToken);
         }
 
-        if (dependencyValueBuilders.Count == 0 && diagnostics.Count == 0) return null!;
+        // Un contenedor sin servicios ni diagnosticos no emite archivo propio, pero sigue
+        // siendo metadata valida: un parcial puede querer generar sobre el (p.ej. un cliente
+        // RPC que solo declara el contrato y no registra nada). Por eso solo se corta aqui
+        // cuando ademas no hay ningun parcial que pueda opinar.
+        if (dependencyValueBuilders.Count == 0
+            && diagnostics.Count == 0
+            && PartialGeneratorRegistry.Partials.Count == 0) return null!;
 
         // El generador ya no emite constructor para los candados (se crean de forma
         // perezosa), asi que solo hay conflicto real si algun resolver usa el token de vida.
@@ -157,6 +163,15 @@ internal partial class ServiceProviders
             dependencyValueBuilders,
             dependencyMemberBuilders,
             diagnostics);
+
+        // Los parciales corren aqui, no en el pipeline de salida: es el unico punto donde
+        // `providerType` y `model` siguen vigentes. Fuera de esta llamada la Compilation ya no
+        // se puede tocar sin anclarla en la cache incremental.
+        emitter.AnalyzePartials(
+            providerType,
+            model,
+            providerDeclarationSyntax,
+            cancelToken);
 
         diagnostics = null!;
         dependencyValueBuilders = null!;
@@ -431,7 +446,7 @@ internal partial class ServiceProviders
                 }
 
                 //TryRegisterInterceptorMethod();
-                CommitRenderState();
+                CommitRenderState(resolver);
                 return true;
             }
 
@@ -797,7 +812,7 @@ internal partial class ServiceProviders
 
             //TryRegisterInterceptorMethod();
 
-            CommitRenderState();
+            CommitRenderState(resolver);
 
             return true;
 
@@ -927,8 +942,19 @@ internal partial class ServiceProviders
             // Congela el estado del parser en un renderizador inmutable, ya proyectado a
             // cadenas, banderas y enumeraciones. Se invoca en cada salida exitosa,
             // siempre antes de que el emisor pueda ejecutar los delegados.
-            void CommitRenderState()
+            void CommitRenderState(ResolverBuilder? target = null)
             {
+                // 'resolver' es un parametro 'out' y no se puede capturar aqui, asi que el
+                // llamador lo pasa cuando ya lo tiene construido.
+                if (target is not null)
+                {
+                    target.ImplTypeFullName = typeFullName ?? "";
+                    target.IsCached = isCached;
+                    target.IsFactory = isFactory;
+                    target.IsExternal = isExternal;
+                    target.Disposability = disposability;
+                }
+
                 render.Value = new()
                 {
                     typeFullName = typeFullName,

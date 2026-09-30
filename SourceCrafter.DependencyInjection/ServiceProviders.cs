@@ -156,6 +156,27 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                                 files.Add((file + ".g", code));
                             }
 
+                            // Los parciales corren aunque el contenedor no emita archivo: un
+                            // contenedor sin servicios sigue siendo metadata valida sobre la que
+                            // otro generador puede querer decidir.
+                            // Los parciales ya corrieron durante el parseo, que es donde los
+                            // simbolos estaban vivos; aqui solo se emiten sus archivos. Un
+                            // contenedor sin servicios tampoco se salta: sigue siendo metadata
+                            // valida sobre la que un parcial pudo decidir.
+                            foreach (var (name, partialCode) in emitter.PartialFiles)
+                            {
+                                var partialFileName = name;
+
+                                // Misma politica de colisiones que los contenedores: sufijo
+                                // numerico. Dos parciales distintos no pueden pisarse el archivo.
+                                ref var partialCount = ref CollectionsMarshal
+                                    .GetValueRefOrAddDefault(countedNames, partialFileName, out var partialExists);
+
+                                if (partialExists) partialFileName += "_" + ++partialCount;
+
+                                files.Add((partialFileName + ".g", partialCode));
+                            }
+
                             foreach (var item in emitter.Diagnostics)
                             {
                                 diagnostics.Add(item);
