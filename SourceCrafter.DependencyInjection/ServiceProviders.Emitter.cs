@@ -49,9 +49,9 @@ internal partial class ServiceProviders
         ///
         /// <para>
         /// Se rellena en <see cref="AnalyzePartials"/>, durante el parseo, porque es el unico
-        /// momento en que los simbolos siguen vivos. Es estado derivado, no parseado: queda fuera
-        /// de <see cref="Equals(Emitter?)"/> y de <see cref="GetHashCode"/> a proposito, porque
-        /// es funcion pura del emisor y del registro -inmutable- de parciales.
+        /// momento en que los simbolos siguen vivos. Entra en <see cref="Equals(Emitter?)"/>:
+        /// depende tambien de las opciones globales y de la compilacion, no solo del emisor, y
+        /// sin compararlo un cambio de RID/TFM dejaria en cache los archivos viejos.
         /// </para>
         /// </summary>
         internal List<PartialFile> PartialFiles { get; } = [];
@@ -71,6 +71,7 @@ internal partial class ServiceProviders
             INamedTypeSymbol containerType,
             SemanticModel semanticModel,
             SyntaxNode? declaration,
+            Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions globalOptions,
             CancellationToken cancelToken)
         {
             PartialFiles.Clear();
@@ -96,7 +97,7 @@ internal partial class ServiceProviders
                 cancelToken.ThrowIfCancellationRequested();
 
                 var (files, partialDiagnostics) = partial.Analyze(
-                    containerType, semanticModel, declaration, container, services, symbols, cancelToken);
+                    containerType, semanticModel, declaration, container, services, symbols, globalOptions, cancelToken);
 
                 foreach (var row in files)
                 {
@@ -816,7 +817,8 @@ public static class ").Append(typeName).Append(@"Extensions
                 && _modifiers == modifiers
                 && _envName == envName
                 && _dependencyMemberBuilder.Count == dependencyMemberBuilder.Count
-                && dependencyMemberBuilder.All(kv => _dependencyMemberBuilder.TryGetValue(kv.Key, out var found) && found.Equals(kv.Value));
+                && dependencyMemberBuilder.All(kv => _dependencyMemberBuilder.TryGetValue(kv.Key, out var found) && found.Equals(kv.Value))
+                && other.PartialFiles.SequenceEqual(PartialFiles);
         }
 
         public override int GetHashCode()

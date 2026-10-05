@@ -234,13 +234,14 @@ internal sealed class PartialGeneratorHandle(object instance, MethodInfo analyze
         string[] containerData,
         string[][] serviceData,
         object?[] serviceSymbols,
+        Microsoft.CodeAnalysis.Diagnostics.AnalyzerConfigOptions globalOptions,
         CancellationToken cancelToken)
     {
         try
         {
             var result = analyze.Invoke(
                 instance,
-                [containerType, semanticModel, declaration, containerData, serviceData, serviceSymbols, cancelToken]);
+                [containerType, semanticModel, declaration, containerData, serviceData, serviceSymbols, globalOptions, cancelToken]);
 
             if (result is null) return ([], []);
 

@@ -1,6 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Diagnostics;
 using SourceCrafter.DependencyInjection;
 using System;
 using System.Collections.Generic;
@@ -15,6 +16,7 @@ internal partial class ServiceProviders
 {
     private static Emitter TryParseContainer(
         in GeneratorAttributeSyntaxContext gasc,
+        AnalyzerConfigOptions globalOptions,
         in CancellationToken cancelToken)
     {
         var model = gasc.SemanticModel;
@@ -171,6 +173,7 @@ internal partial class ServiceProviders
             providerType,
             model,
             providerDeclarationSyntax,
+            globalOptions,
             cancelToken);
 
         diagnostics = null!;

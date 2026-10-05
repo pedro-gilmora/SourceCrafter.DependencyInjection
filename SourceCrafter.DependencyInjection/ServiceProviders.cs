@@ -75,10 +75,17 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                 .Collect()
                 .WithTrackingName("AssemblyExternalProvidersRegistrations");
 
+        // Las opciones globales (build_property.*) se cruzan con cada contenedor antes del
+        // parseo: los parciales corren dentro de el y necesitan decidir con ellas (RID, TFM).
+        var globalOptions = context.AnalyzerConfigOptionsProvider
+                .Select(static (provider, _) => provider.GlobalOptions);
+
         var servicesContainers = context.SyntaxProvider
                 .ForAttributeWithMetadataName(ServiceProviderFullTypeName,
                     static (node, a) => true,
-                    static (gasc, c) => TryParseContainer(gasc, c))
+                    static (gasc, c) => gasc)
+                .Combine(globalOptions)
+                .Select(static (pair, c) => TryParseContainer(pair.Left, pair.Right, c))
                 .Where(e => e is not null)
                 .WithComparer(EmitterEqualityComparer.Default)
                 .WithTrackingName("EmitterCreation")

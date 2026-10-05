@@ -1,4 +1,5 @@
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Diagnostics;
 using System.Collections.Generic;
 using System.Threading;
 
@@ -136,7 +137,8 @@ public sealed class ServiceProviderInfo(
     IReadOnlyList<ServiceInfo> services,
     INamedTypeSymbol containerType,
     SemanticModel semanticModel,
-    SyntaxNode? declaration)
+    SyntaxNode? declaration,
+    AnalyzerConfigOptions globalOptions)
 {
     /// <summary>Espacio de nombres del contenedor, o <c>null</c> si esta en el global.</summary>
     public string? Namespace { get; } = nameSpace;
@@ -179,6 +181,12 @@ public sealed class ServiceProviderInfo(
 
     /// <summary>Sintaxis de la declaracion del contenedor, si esta disponible.</summary>
     public SyntaxNode? Declaration { get; } = declaration;
+
+    /// <summary>
+    /// Opciones globales del analizador (<c>build_property.*</c>: <c>TargetFramework</c>,
+    /// <c>RuntimeIdentifier</c> si es <c>CompilerVisibleProperty</c>, ...).
+    /// </summary>
+    public AnalyzerConfigOptions GlobalOptions { get; } = globalOptions;
 }
 
 /// <summary>
@@ -251,6 +259,7 @@ public interface IIncrementalGeneratorPartial
     /// Dos entradas por servicio, intercaladas: el <c>ITypeSymbol</c> del tipo expuesto y el del
     /// tipo de la implementacion. Cualquier elemento puede ser <c>null</c>.
     /// </param>
+    /// <param name="globalOptions">El <c>AnalyzerConfigOptions</c> global de la compilacion.</param>
     /// <param name="cancelToken">Cancelacion de la pasada de generacion.</param>
     /// <returns>
     /// <c>{ archivos, diagnosticos }</c>: los archivos como filas
@@ -263,6 +272,7 @@ public interface IIncrementalGeneratorPartial
         string[] containerData,
         string[][] serviceData,
         object?[] serviceSymbols,
+        object globalOptions,
         CancellationToken cancelToken);
 }
 
@@ -338,7 +348,8 @@ public static class PartialCodec
         SyntaxNode? declaration,
         string[] container,
         string[][] services,
-        object?[] serviceSymbols)
+        object?[] serviceSymbols,
+        AnalyzerConfigOptions globalOptions)
     {
         var decoded = new ServiceInfo[services.Length];
 
@@ -379,7 +390,8 @@ public static class PartialCodec
             decoded,
             containerType,
             semanticModel,
-            declaration);
+            declaration,
+            globalOptions);
     }
 }
 
@@ -412,6 +424,7 @@ public abstract class ServiceProviderPartial : IIncrementalGeneratorPartial
         string[] containerData,
         string[][] serviceData,
         object?[] serviceSymbols,
+        object globalOptions,
         CancellationToken cancelToken)
     {
         PartialContribution contribution = new();
@@ -423,7 +436,8 @@ public abstract class ServiceProviderPartial : IIncrementalGeneratorPartial
                 declaration as SyntaxNode,
                 containerData,
                 serviceData,
-                serviceSymbols),
+                serviceSymbols,
+                (AnalyzerConfigOptions)globalOptions),
             contribution,
             cancelToken);
 
