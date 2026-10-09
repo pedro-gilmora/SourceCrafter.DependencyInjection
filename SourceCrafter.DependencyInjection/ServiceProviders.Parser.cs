@@ -140,7 +140,7 @@ internal partial class ServiceProviders
                 providerType.Locations.FirstOrDefault() ?? Location.None,
                 className));
 
-        var nameSpace = providerType.ContainingNamespace is { } ns ? ns.ToDisplayString() : null;
+        var nameSpace = providerType.ContainingNamespace is { IsGlobalNamespace: false } ns ? ns.ToDisplayString() : null;
 
         Emitter emitter = new(
             providerType.MetadataLongName,
