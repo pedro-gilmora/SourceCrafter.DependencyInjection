@@ -227,7 +227,7 @@ internal sealed class PartialGeneratorHandle(object instance, MethodInfo analyze
     /// nuestro lado no es visible desde el <c>MethodInfo</c> del otro.
     /// </para>
     /// </summary>
-    internal (string[][] Files, Diagnostic[] Diagnostics) Analyze(
+    internal (string[][] Files, Diagnostic[] Diagnostics, string[][] Disposers) Analyze(
         INamedTypeSymbol containerType,
         SemanticModel semanticModel,
         SyntaxNode? declaration,
@@ -243,11 +243,13 @@ internal sealed class PartialGeneratorHandle(object instance, MethodInfo analyze
                 instance,
                 [containerType, semanticModel, declaration, containerData, serviceData, serviceSymbols, globalOptions, cancelToken]);
 
-            if (result is null) return ([], []);
+            if (result is null) return ([], [], []);
 
             var type = result.GetType();
             var files = type.GetField("Item1")?.GetValue(result) as string[][] ?? [];
             var raw = type.GetField("Item2")?.GetValue(result) as object[] ?? [];
+            // Ausente en parciales compilados contra el contrato anterior (tupla de dos).
+            var disposers = type.GetField("Item3")?.GetValue(result) as string[][] ?? [];
 
             var diagnostics = new List<Diagnostic>(raw.Length);
 
@@ -256,11 +258,11 @@ internal sealed class PartialGeneratorHandle(object instance, MethodInfo analyze
                 if (item is Diagnostic diagnostic) diagnostics.Add(diagnostic);
             }
 
-            return (files, [.. diagnostics]);
+            return (files, [.. diagnostics], disposers);
         }
         catch (Exception e) when (e is not OperationCanceledException)
         {
-            return ([], []);
+            return ([], [], []);
         }
     }
 }

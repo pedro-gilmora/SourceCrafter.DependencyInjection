@@ -212,8 +212,22 @@ public sealed class PartialContribution
         if (diagnostic is not null) diagnostics.Add(diagnostic);
     }
 
+    /// <summary>
+    /// Incluye <paramref name="member"/> -un miembro de instancia que el parcial declara en el
+    /// contenedor- en el <c>Dispose</c>/<c>DisposeAsync</c> raiz que emite el generador. Se libera
+    /// despues de los servicios (se considera creado antes que ellos) y nunca desde un ambito.
+    /// </summary>
+    public void AddDisposer(string member, PartialDisposability disposability)
+    {
+        if (member is { Length: > 0 } && disposability is not PartialDisposability.None)
+            disposers.Add([member, ((byte)disposability).ToString()]);
+    }
+
+    private readonly List<string[]> disposers = [];
+
     internal IReadOnlyList<PartialFile> Files => files;
     internal IReadOnlyList<Diagnostic> Diagnostics => diagnostics;
+    internal IReadOnlyList<string[]> Disposers => disposers;
 }
 
 /// <summary>
@@ -262,10 +276,12 @@ public interface IIncrementalGeneratorPartial
     /// <param name="globalOptions">El <c>AnalyzerConfigOptions</c> global de la compilacion.</param>
     /// <param name="cancelToken">Cancelacion de la pasada de generacion.</param>
     /// <returns>
-    /// <c>{ archivos, diagnosticos }</c>: los archivos como filas
-    /// <c>{ nombre, codigo }</c> y los diagnosticos como <c>Diagnostic</c>.
+    /// <c>{ archivos, diagnosticos, liberadores }</c>: los archivos como filas
+    /// <c>{ nombre, codigo }</c>, los diagnosticos como <c>Diagnostic</c> y los liberadores como
+    /// filas <c>{ miembro, disposability }</c>. El receptor lee <c>Item3</c> solo si existe, asi que
+    /// un parcial anterior (tupla de dos) sigue enlazando.
     /// </returns>
-    (string[][] Files, object[] Diagnostics) Analyze(
+    (string[][] Files, object[] Diagnostics, string[][] Disposers) Analyze(
         object containerType,
         object semanticModel,
         object? declaration,
@@ -417,7 +433,7 @@ public abstract class ServiceProviderPartial : IIncrementalGeneratorPartial
         PartialContribution contribution,
         CancellationToken cancelToken);
 
-    (string[][] Files, object[] Diagnostics) IIncrementalGeneratorPartial.Analyze(
+    (string[][] Files, object[] Diagnostics, string[][] Disposers) IIncrementalGeneratorPartial.Analyze(
         object containerType,
         object semanticModel,
         object? declaration,
@@ -453,7 +469,7 @@ public abstract class ServiceProviderPartial : IIncrementalGeneratorPartial
 
         for (var i = 0; i < diagnostics.Length; i++) diagnostics[i] = contribution.Diagnostics[i];
 
-        return (files, diagnostics);
+        return (files, diagnostics, [.. contribution.Disposers]);
     }
 }
 

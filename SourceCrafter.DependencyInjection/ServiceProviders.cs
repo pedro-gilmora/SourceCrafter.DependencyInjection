@@ -157,7 +157,7 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                         {
                             // Un emisor sin servicios solo esta aqui para transportar sus
                             // diagnosticos: emitir su archivo produciria un contenedor vacio.
-                            if (emitter.HasServices)
+                            if (emitter.HasServices || emitter.PartialDisposers.Count > 0)
                             {
                                 emitter.Emit(countedNames, emitterInterceptors, allEarlyBound, ref requiresTaskExtensions, ref ensureLockType, ref requiresProviderInterfaces, ref interceptorsCount, out var file, out var code);
                                 files.Add((file + ".g", code));

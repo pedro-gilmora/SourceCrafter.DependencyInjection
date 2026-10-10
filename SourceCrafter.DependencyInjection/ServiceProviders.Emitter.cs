@@ -57,6 +57,13 @@ internal partial class ServiceProviders
         internal List<PartialFile> PartialFiles { get; } = [];
 
         /// <summary>
+        /// Miembros que los parciales declaran en el contenedor y que el <c>Dispose</c> raiz debe
+        /// liberar. Mismo ciclo de vida y misma razon de entrar en la igualdad que
+        /// <see cref="PartialFiles"/>.
+        /// </summary>
+        internal List<(string Member, Disposability Disposability)> PartialDisposers { get; } = [];
+
+        /// <summary>
         /// Ofrece el contenedor a cada generador parcial, en orden de prioridad, y recoge lo que
         /// aporten.
         ///
@@ -75,6 +82,7 @@ internal partial class ServiceProviders
             CancellationToken cancelToken)
         {
             PartialFiles.Clear();
+            PartialDisposers.Clear();
 
             if (PartialGeneratorRegistry.Partials is not { Count: > 0 } registered) return;
 
@@ -96,12 +104,20 @@ internal partial class ServiceProviders
             {
                 cancelToken.ThrowIfCancellationRequested();
 
-                var (files, partialDiagnostics) = partial.Analyze(
+                var (files, partialDiagnostics, disposers) = partial.Analyze(
                     containerType, semanticModel, declaration, container, services, symbols, globalOptions, cancelToken);
 
                 foreach (var row in files)
                 {
                     if (row is [{ Length: > 0 } fileName, { } code]) PartialFiles.Add(new(fileName, code));
+                }
+
+                foreach (var row in disposers)
+                {
+                    if (row is [{ Length: > 0 } member, { } kind]
+                        && byte.TryParse(kind, out var d)
+                        && d is (byte)Disposability.Disposable or (byte)Disposability.AsyncDisposable)
+                        PartialDisposers.Add((member, (Disposability)d));
                 }
 
                 foreach (var diagnostic in partialDiagnostics) Diagnostics.Add(diagnostic);
@@ -224,6 +240,15 @@ internal partial class ServiceProviders
             // reflejando el valor parseado, no el derivado en tiempo de emisión.
             var effectiveDisposability = (Disposability)Math.Max((byte)scopedDisposability, (byte)containerDisposability);
 
+            // Los miembros aportados por parciales solo los libera la raiz.
+            var partialAsyncDisposers = 0;
+
+            foreach (var (_, d) in PartialDisposers)
+            {
+                if (d > effectiveDisposability) effectiveDisposability = d;
+                if (d is Disposability.AsyncDisposable) partialAsyncDisposers++;
+            }
+
             // Un desechable *sincrono* resuelto de forma *asincrona* solo se alcanza tras
             // esperar la tarea que lo envuelve, asi que su liberador es forzosamente
             // 'async'. Antes esto salia como 'async void' —excepciones no observables que
@@ -316,9 +341,21 @@ internal partial class ServiceProviders
 			List<string> scopedMembers = ctx.ScopedMembers;
 			List<DisposeBuilder> scopedDisposers = ctx.ScopedDisposers, singletonDisposers = ctx.SingletonDisposers;
 
+			// Delante: se recorren en orden inverso, asi que se liberan despues de los servicios.
+			for (var i = PartialDisposers.Count - 1; i >= 0; i--)
+			{
+				var (member, d) = PartialDisposers[i];
+
+				singletonDisposers.Insert(0, d is Disposability.AsyncDisposable
+					? (c, awaits) => c.Append(@"
+		").Append(awaits ? "await " : "return ").Append(member).Append(".DisposeAsync();")
+					: (c, _) => c.Append(@"
+		").Append(member).Append(".Dispose();"));
+			}
+
 			// Liberadores que exigen 'await'; los sincronos no obligan a marcar el metodo async.
 			int scopedAwaitCount = asyncScopedAsyncDisposable + asyncScopedDisposable + scopedAsyncDisposable,
-				singletonAwaitCount = asyncSingletonAsyncDisposable + asyncSingletonDisposable + singletonAsyncDisposable;
+				singletonAwaitCount = asyncSingletonAsyncDisposable + asyncSingletonDisposable + singletonAsyncDisposable + partialAsyncDisposers;
 
 			bool isDisposable = effectiveDisposability > Disposability.None,
 				usesLifetimeToken = ctx.UsesLifetimeToken,
@@ -463,8 +500,9 @@ internal partial class ServiceProviders
 				// devuelva ValueTask: la maquina de estados exige 'return;'.
 				var isAsyncMethod = !singleReturn && awaitCount > 0;
 
+				// Solo 'virtual' si hay 'Scoped' que lo redefina: en un contenedor sellado seria CS0549.
 				code.Append(@"
-	public virtual ");
+	public ").Append(scopedMembers.Count > 0 ? "virtual " : null);
 
 				if (isAsyncMethod) code.Append("async ");
 
@@ -818,7 +856,8 @@ public static class ").Append(typeName).Append(@"Extensions
                 && _envName == envName
                 && _dependencyMemberBuilder.Count == dependencyMemberBuilder.Count
                 && dependencyMemberBuilder.All(kv => _dependencyMemberBuilder.TryGetValue(kv.Key, out var found) && found.Equals(kv.Value))
-                && other.PartialFiles.SequenceEqual(PartialFiles);
+                && other.PartialFiles.SequenceEqual(PartialFiles)
+                && other.PartialDisposers.SequenceEqual(PartialDisposers);
         }
 
         public override int GetHashCode()
