@@ -59,6 +59,9 @@
 		<Compile Include="..\Solution\Interop\PartialGenerationContracts.cs">
 			<Link>Interop\PartialGenerationContracts.cs</Link>
 		</Compile>
+		<Compile Include="..\Solution\Utils\CodeBuilder.cs">
+			<Link>Utils\CodeBuilder.cs</Link>
+		</Compile>
 	</ItemGroup>
 
 	<ItemGroup>
