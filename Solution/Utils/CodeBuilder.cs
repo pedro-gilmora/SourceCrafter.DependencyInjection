@@ -17,6 +17,8 @@ internal sealed class CodeBuilder(int depth = 0, int capacity = 1024)
 
     private readonly StringBuilder _sb = new(capacity);
     private int _depth = depth;
+    // Desplazamiento de la linea en curso (Line(text, offset)); vuelve a 0 en cada salto.
+    private int _offset;
     private bool _lineStart = true;
     // ponytail: bit n = el bloque de profundidad n sigue en su linea de apertura (un salto los rompe todos); mas alla de 64 niveles se cierran multilinea.
     private ulong _inline;
@@ -93,6 +95,29 @@ internal sealed class CodeBuilder(int depth = 0, int capacity = 1024)
         }
 
         return Append(text);
+    }
+
+    /// <summary>Como <see cref="Line(string?)"/> pero solo esa linea va a <c>Depth + offset</c> (+1 continuacion, -1 etiqueta); la profundidad no cambia.</summary>
+    public CodeBuilder Line(string? text, int offset)
+    {
+        Line();
+        _offset = offset;
+        return Append(text);
+    }
+
+    /// <summary>Exactamente <paramref name="breaks"/> saltos y luego <paramref name="text"/> (<c>PrependLine(2, x)</c> == <c>Append("\n\n" + x)</c>); a diferencia de <see cref="Blank"/> no es idempotente.</summary>
+    public CodeBuilder PrependLine(int breaks, string? text = null)
+    {
+        while (breaks-- > 0) NewLine();
+        return Append(text);
+    }
+
+    /// <summary><c>(</c> + <paramref name="body"/> + <c>)</c>; sin parentesis si <paramref name="wrap"/> es false (tuplas de un elemento).</summary>
+    public CodeBuilder Parens(Action? body, bool wrap = true)
+    {
+        if (wrap) Append('(');
+        body?.Invoke();
+        return wrap ? Append(')') : this;
     }
 
     /// <summary>Termina la linea actual (si tiene algo) y asegura una linea en blanco; idempotente y nula al inicio del buffer o tras <c>{</c>.</summary>
@@ -193,7 +218,7 @@ internal sealed class CodeBuilder(int depth = 0, int capacity = 1024)
 
         if (_lineStart)
         {
-            _sb.Append(' ', _depth * IndentSize);
+            _sb.Append(' ', Math.Max(0, _depth + _offset) * IndentSize);
             _lineStart = false;
         }
 
@@ -207,6 +232,7 @@ internal sealed class CodeBuilder(int depth = 0, int capacity = 1024)
         _sb.Length = end;
         _sb.Append('\n');
         _lineStart = true;
+        _offset = 0;
         _inline = 0;
     }
 
