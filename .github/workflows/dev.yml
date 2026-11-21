@@ -19,6 +19,8 @@ permissions:
   contents: write
   pull-requests: read
   actions: read
+  # Trusted publishing en nuget.org: NuGet/login canjea el token OIDC por una clave de 1 hora.
+  id-token: write
 
 jobs:
   # Cada disparador trae los datos en un sitio distinto: el push los lleva en el
@@ -157,6 +159,13 @@ jobs:
         "@
         }
       
+    - name: NuGet login (trusted publishing)
+      if: needs.resolve.outputs.base_ref == 'dev' && startsWith(needs.resolve.outputs.title, '[Release]')
+      uses: NuGet/login@v1
+      id: login
+      with:
+        user: pedro.gilmora
+
     - name: Publish generator and endpoints to Nuget
       # Se publica solo si el commit (o la PR) empieza por [Release]; la rama que decide es la destino del merge.
       if: needs.resolve.outputs.base_ref == 'dev' && startsWith(needs.resolve.outputs.title, '[Release]')
@@ -171,7 +180,7 @@ jobs:
           packages[$package_name]=$version
 
           # Execute nuget push for each package ('if !' so that 'bash -e' does not abort before logging the error)
-          if ! output=$(dotnet nuget push "$package" --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" 2>&1); then
+          if ! output=$(dotnet nuget push "$package" --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json" 2>&1); then
             # Remove from packages
             unset packages["$package_name"]
 
