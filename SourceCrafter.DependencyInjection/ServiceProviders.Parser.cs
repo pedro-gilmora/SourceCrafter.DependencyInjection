@@ -44,6 +44,8 @@ internal partial class ServiceProviders
 
         bool
             hasScopedDependencies = false,
+            hasHostedServices = false,
+            hasHostedScopedServices = false,
             implementsServiceProvider = providerType.AllInterfaces.Any(i => i.FullGlobalQualifiedName == "global::System.IServiceProvider"),
             genericApi = false,
             exportTransients = false;
@@ -52,6 +54,11 @@ internal partial class ServiceProviders
         var hasUserEnvironmentName =
             providerType.GetMembers("EnvironmentName").Length > 0
             || providerType.GetMembers("EnvironmentVariableName").Length > 0;
+
+        var hasUserHostServices = providerType.GetMembers(HostServicesMemberName).Length > 0;
+
+        // Tipos declarados con [Hosted<T>]: el contenedor implementa IHostedProvider<T> por cada uno (GetHosted*).
+        List<(string Type, bool Scoped)> hostedServices = [];
 
         // El generador emite un constructor sin parametros para inicializar candados y
         // cancelacion. Si el usuario ya declaro uno, se le avisa en vez de dejar que el
@@ -151,6 +158,10 @@ internal partial class ServiceProviders
             implementsServiceProvider,
             genericApi,
             hasUserEnvironmentName,
+            hasHostedServices,
+            hasHostedScopedServices,
+            hasUserHostServices,
+            hostedServices,
             className,
             typeName,
             envName,
@@ -271,7 +282,9 @@ internal partial class ServiceProviders
                 isStaticFactory = false,
                 isFactoryFromCurrentProvider = false,
                 isFactoryIndexerProperty = false,
-                needsCancelToken = false;
+                needsCancelToken = false,
+                isHosted = false,
+                isHostedScoped = false;
 
             string
                 name = string.Empty,
@@ -381,7 +394,9 @@ internal partial class ServiceProviders
                 return false;
             }
 
-            bool hasNoCachedDeps = lifetime is Lifetime.Transient;
+            // Un [Hosted] lee HostServices del contenedor: sus consumidores no se pueden inlinear en los interceptores estaticos.
+            bool hasNoCachedDeps = lifetime is Lifetime.Transient && !isHosted;
+            bool requiresHostScope = false;
 
             // Takes or create a new Resolver instance
             resolver = CollectionsMarshal.GetValueRefOrAddDefault(services, subKey, out var implExists) ??=
@@ -392,7 +407,8 @@ internal partial class ServiceProviders
                     AppendValue = render.AppendValue,
                     AsyncKind = AsyncKind,
                     ParamsLength = prms.Length,
-                    TransientWithoutCachedDeps = isSimpleTransient,
+                    TransientWithoutCachedDeps = isSimpleTransient && !isHosted,
+                    RequiresHostScope = isHostedScoped,
                     RuntimeTypeName = (exportType ?? type)?.RuntimeFullName
                 };
 
@@ -412,7 +428,8 @@ internal partial class ServiceProviders
 
             asyncLocalResolvers = resolver.AsyncLocalResolvers;
 
-            disposability = type!.GetDisposability();
+            // Un servicio del host lo libera el host.
+            disposability = isHosted ? Disposability.None : type!.GetDisposability();
 
             // Determines disposability at instance or scoped instance level
             if (isCached)
@@ -614,6 +631,16 @@ internal partial class ServiceProviders
                         if (foundService.PassCancelToken && !needsCancelToken)
                             needsCancelToken = true;
 
+                        // Un singleton viviria mas que el ambito del host del que sale la dependencia.
+                        if (foundService.RequiresHostScope)
+                        {
+                            if (lifetime is Lifetime.Singleton)
+                                diagnostics.Add(ServiceContainerDiagnostics.SingletonDependsOnScopedHostedService(
+                                    attrSyntax.GetLocation(), typeFullName, foundService.ExportTypeFullName));
+                            else if (lifetime is Lifetime.Transient)
+                                requiresHostScope = true;
+                        }
+
                         var AppendParam = foundService!.AppendValue;
                         var foundExportTypeFullName = foundService.ExportTypeFullName;
 
@@ -811,6 +838,7 @@ internal partial class ServiceProviders
                 resolver.IsInlineable = true;
 
             resolver.TransientWithoutCachedDeps = hasNoCachedDeps;
+            resolver.RequiresHostScope |= requiresHostScope;
             resolver.AsyncKind = AsyncKind;
 
             //TryRegisterInterceptorMethod();
@@ -974,6 +1002,8 @@ internal partial class ServiceProviders
                     isCached = isCached,
                     isFactory = isFactory,
                     isExternal = isExternal,
+                    isHosted = isHosted,
+                    isHostedScoped = isHostedScoped,
                     hasNoCachedDeps = hasNoCachedDeps,
                     hasAsyncDependencies = hasAsyncDependencies,
                     needsCancelToken = needsCancelToken,
@@ -1006,6 +1036,14 @@ internal partial class ServiceProviders
 
                 attrSyntax = _attrSyntax;
                 attrClass = _attrClass;
+                isHosted = _attrClass.FullGlobalQualifiedNonGenericName is HostedAttr;
+
+                if (isHosted)
+                {
+                    // El lifetime del atributo solo elige de donde se pide (raiz o ambito del host); aqui nunca se cachea.
+                    isHostedScoped = attr.ConstructorArguments is [{ Value: byte hostedLifetime }] && (Lifetime)hostedLifetime is Lifetime.Scoped;
+                    lifetime = Lifetime.Transient;
+                }
 
                 if (isExternal = _attrClass.ContainingNamespace.ToDisplayString() != BaseAttributesNS)
                     externalAssemblies.Add(_attrClass.ContainingAssembly.MetadataName.Replace(".Metadata", ""));
@@ -1261,6 +1299,28 @@ internal partial class ServiceProviders
                 // cierto es que todavia no hay nada que registrar.
                 if (genericFactoryTemplate is not null) return true;
 
+                if (isHosted)
+                {
+                    // El host resuelve en sincrono: una tarea no tiene sentido como servicio suyo.
+                    if (type?.TryGetAsyncType(out _) is not null and not AsyncKind.None)
+                    {
+                        diagnostics.Add(ServiceContainerDiagnostics.HostedServiceMustBeSynchronous(attrSyntax.GetLocation(), type.ToDisplayString()));
+                        return false;
+                    }
+
+                    hasHostedServices = true;
+
+                    // El ambito del host es AsyncServiceScope/IServiceScopeFactory: viven en Microsoft.Extensions.DependencyInjection.Abstractions.
+                    if (isHostedScoped && model.Compilation.GetTypeByMetadataName("Microsoft.Extensions.DependencyInjection.IServiceScopeFactory") is null)
+                    {
+                        diagnostics.Add(ServiceContainerDiagnostics.ScopedHostedServiceNeedsServiceScopes(attrSyntax.GetLocation(), type!.ToDisplayString()));
+                        return false;
+                    }
+
+                    hasHostedScopedServices |= isHostedScoped;
+                    hostedServices.Add((typeFullName, isHostedScoped));
+                }
+
                 // El alcance efectivo del candado. 'Default' se resuelve aqui, ya conocido el
                 // lifetime: un singleton comparte campo entre instancias del contenedor y
                 // necesita el candado estatico. Un scoped, en cambio, no se sincroniza por
@@ -1372,6 +1432,8 @@ internal partial class ServiceProviders
                     IMethodSymbol factoryMethod => factoryMethod.Parameters,
                     IPropertySymbol { IsIndexer: true } factoryProperty => factoryProperty.Parameters,
                     IFieldSymbol => [],
+                    // Lo construye el host: sus parametros no son dependencias de este contenedor.
+                    _ when isHosted => [],
                     _ => GetConstructorParameters(type)
                 }
                     is { IsDefaultOrEmpty: false, Length: > 0 } parameters)

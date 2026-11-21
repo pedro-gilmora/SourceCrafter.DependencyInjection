@@ -25,5 +25,6 @@ BenchmarkSwitcher
         typeof(AsyncPublicationReadBenchmark),
         typeof(AsyncPublicationWriteBenchmark),
         typeof(ValueTaskStorageReadBenchmark),
-        typeof(ValueTaskStorageWriteBenchmark)])
+        typeof(ValueTaskStorageWriteBenchmark),
+        typeof(DispatchBenchmark)])
     .Run(args, HarnessConfig.Instance);

@@ -78,6 +78,10 @@ internal sealed class ResolverRenderer
     internal bool isCached { get; init; }
     internal bool isFactory { get; init; }
     internal bool isExternal { get; init; }
+    /// <summary>[Hosted]: se pide a <c>HostServices</c> en cada resolucion, sin construir, cachear ni liberar.</summary>
+    internal bool isHosted { get; init; }
+    /// <summary>[Hosted(Lifetime.Scoped)]: se pide al ambito del host que abre el ambito del contenedor.</summary>
+    internal bool isHostedScoped { get; init; }
     internal bool hasNoCachedDeps { get; init; }
     internal bool hasAsyncDependencies { get; init; }
     internal bool needsCancelToken { get; init; }
@@ -1044,7 +1048,11 @@ internal sealed class ResolverRenderer
                 // 'new' suelto, con '__vN' sin declarar (CS0103), y ademas quien lo consumia
                 // trataba el objeto recien construido como si fuese la tarea (CS1061).
                 // Se llama al miembro, que si devuelve Task<T>.
-                if (IsMethodShaped)
+                if (isHosted)
+                {
+                    AppendInstance(code, asyncContext, interceptorContext, newIndentedLine);
+                }
+                else if (IsMethodShaped)
                 {
                     AppendCachedCaller(code, interceptorContext, newIndentedLine);
                 }
@@ -1076,6 +1084,15 @@ internal sealed class ResolverRenderer
 
             internal void AppendInstance(StringBuilder code, bool isAsyncContext, bool appendInterceptorProvider = false, string? newIndentedLine = null, bool useHoisted = false)
             {
+                if (isHosted)
+                {
+                    code.Append("((").Append(typeFullName).Append(")(")
+                        .Append(appendInterceptorProvider ? "provider." : null).Append(isHostedScoped ? "__HostScopeServices.GetService(typeof(" : "HostServices?.GetService(typeof(").Append(typeFullName)
+                        .Append(")) ?? throw new global::System.InvalidOperationException(\"").Append(typeFullName.Replace("global::", ""))
+                        .Append(" is not available in HostServices.\")))");
+                    return;
+                }
+
                 code.Append("new ")
                     .Append(typeFullName)
                     .Append('(');
@@ -1205,6 +1222,8 @@ internal sealed class ResolverRenderer
                         && isCached == other.isCached
                         && isFactory == other.isFactory
                         && isExternal == other.isExternal
+                        && isHosted == other.isHosted
+                        && isHostedScoped == other.isHostedScoped
                         && hasNoCachedDeps == other.hasNoCachedDeps
                         && hasAsyncDependencies == other.hasAsyncDependencies
                         && needsCancelToken == other.needsCancelToken

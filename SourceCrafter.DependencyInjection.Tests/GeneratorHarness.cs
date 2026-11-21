@@ -159,6 +159,19 @@ static class GeneratorHarness
     }
 
     /// <summary>
+    /// Compila <paramref name="source"/> con <c>Microsoft.Extensions.DependencyInjection.Abstractions</c>, que aporta los ambitos del host de [Hosted(Lifetime.Scoped)].
+    /// </summary>
+    internal static Result RunWithServiceScopes(string source)
+    {
+        var compilation = CreateCompilation(source).AddReferences(
+            MetadataReference.CreateFromFile(Path.Combine(AppContext.BaseDirectory, "Microsoft.Extensions.DependencyInjection.Abstractions.dll")));
+
+        var driver = CreateDriver().RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
+
+        return Collect(driver, output);
+    }
+
+    /// <summary>
     /// Ejecuta el generador varias veces sobre el mismo driver, tal y como hace el IDE al
     /// reevaluar una compilacion sin cambios. Devuelve la salida de cada pasada.
     /// </summary>

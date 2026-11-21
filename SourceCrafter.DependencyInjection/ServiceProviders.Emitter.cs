@@ -24,6 +24,10 @@ internal partial class ServiceProviders
         bool implementsServiceProvider,
         bool genericApi,
         bool hasUserEnvironmentName,
+        bool hasHostedServices,
+        bool hasHostedScopedServices,
+        bool hasUserHostServices,
+        IReadOnlyList<(string Type, bool Scoped)> hostedServices,
         string className,
         string typeName,
         string envName,
@@ -43,6 +47,10 @@ internal partial class ServiceProviders
         internal readonly DependencyDictionary DependencyValueBuilders = dependencyValueBuilders;
         internal readonly string ContainerFullTypeName = containerFullTypeName;
         internal readonly string ClassName = className;
+        internal readonly bool HasHostedServices = hasHostedServices;
+        internal readonly bool HasHostedScopedServices = hasHostedScopedServices;
+        internal readonly bool HasUserHostServices = hasUserHostServices;
+        internal readonly IReadOnlyList<(string Type, bool Scoped)> HostedServices = hostedServices;
 
         /// <summary>
         /// Archivos extra aportados por los generadores parciales para este contenedor.
@@ -86,6 +94,10 @@ internal partial class ServiceProviders
 
             if (PartialGeneratorRegistry.Partials is not { Count: > 0 } registered) return;
 
+            // Los parciales deciden con esto como liberar cada ambito (p.ej. 'await using' en LiteSpeedLink):
+            // el ambito del host de [Hosted(Lifetime.Scoped)] lo hace IAsyncDisposable aunque ningun servicio lo sea.
+            var hostScopeDisposability = HasHostedScopedServices ? (byte)Disposability.AsyncDisposable : (byte)0;
+
             var container = PartialCodec.EncodeContainer(
                 nameSpace,
                 ClassName,
@@ -95,8 +107,8 @@ internal partial class ServiceProviders
                 isInterfaceProvider,
                 implementsServiceProvider,
                 genericApi,
-                (byte)containerDisposability,
-                (byte)scopedDisposability);
+                Math.Max((byte)containerDisposability, hostScopeDisposability),
+                Math.Max((byte)scopedDisposability, hostScopeDisposability));
 
             var (services, symbols) = EncodeServices(semanticModel.Compilation);
 
@@ -271,6 +283,10 @@ internal partial class ServiceProviders
             if (ctx.UsesLifetimeToken && effectiveDisposability is Disposability.None)
                 effectiveDisposability = Disposability.Disposable;
 
+            // Cada ambito libera el ambito del host que abrio (AsyncServiceScope).
+            if (HasHostedScopedServices)
+                effectiveScopedDisposability = effectiveDisposability = Disposability.AsyncDisposable;
+
             // Los servicios resueltos de forma as\u00edncrona necesitan TryDispose/TryDisposeAsync
             // para desenvolver el valor cacheado, sean IDisposable o IAsyncDisposable.
             if (asyncSingletonAsyncDisposable + asyncScopedAsyncDisposable
@@ -316,6 +332,54 @@ internal partial class ServiceProviders
 
 			AddDisposabilityInterface(code, effectiveDisposability, isInterfaceProvider, providerPlan);
 
+			// [Hosted]: el host que aloja el contenedor le pasa sus servicios; los ambitos los heredan en CreateScope.
+			if (HasHostedServices && !HasUserHostServices)
+				code.Append(@"
+	public global::System.IServiceProvider? ").Append(HostServicesMemberName).Append(@" { get; init; }
+");
+
+			// GetHosted*: solo los tipos declarados con [Hosted<T>] (IHostedProvider<T>); pedir otro no compila.
+			foreach (var (hostedType, scoped) in HostedServices)
+			{
+				var provider = scoped ? "__HostScopeServices" : HostServicesMemberName + "?";
+
+				code.Append(@"
+	").Append(hostedType).Append("? global::SourceCrafter.DependencyInjection.IHostedProvider<").Append(hostedType).Append(@">.GetHostedService()
+		=> (").Append(hostedType).Append("?)").Append(provider).Append(".GetService(typeof(").Append(hostedType).Append(@"));
+
+	global::System.Collections.Generic.IEnumerable<").Append(hostedType).Append("> global::SourceCrafter.DependencyInjection.IHostedProvider<").Append(hostedType).Append(@">.GetHostedServices()
+		=> (global::System.Collections.Generic.IEnumerable<").Append(hostedType).Append(">?)").Append(provider)
+					.Append(".GetService(typeof(global::System.Collections.Generic.IEnumerable<").Append(hostedType).Append(">)) ?? global::System.Array.Empty<").Append(hostedType).Append(">()").Append(@";
+");
+			}
+
+			// Ambito del host por ambito del contenedor, abierto al primer [Hosted(Lifetime.Scoped)] que se resuelva: una
+			// peticion que no lo usa no paga nada. La raiz (o un ambito sin HostServices) no tiene.
+			if (HasHostedScopedServices)
+				code.Append(@"
+	private global::Microsoft.Extensions.DependencyInjection.IServiceScope? __hostScope;
+
+	private global::Microsoft.Extensions.DependencyInjection.IServiceScope? __HostScope()
+	{
+		if (__hostScope is { } __scope) return __scope;
+
+		if (_root is null || ").Append(HostServicesMemberName).Append(@"?.GetService(typeof(global::Microsoft.Extensions.DependencyInjection.IServiceScopeFactory)) is not global::Microsoft.Extensions.DependencyInjection.IServiceScopeFactory __factory)
+			return null;
+
+		__scope = __factory.CreateScope();
+
+		// Dos primeras resoluciones concurrentes en el mismo ambito: gana una; la otra libera el suyo, aun vacio.
+		if (global::System.Threading.Interlocked.CompareExchange(ref __hostScope, __scope, null) is not { } __winner) return __scope;
+
+		__scope.Dispose();
+
+		return __winner;
+	}
+
+	internal global::System.IServiceProvider __HostScopeServices => __HostScope()?.ServiceProvider
+		?? throw new global::System.InvalidOperationException(""Per-request [Hosted] services need a scope created with HostServices set: use CreateScope()."");
+");
+
 			if (!hasUserEnvironmentName)
 			{
 				// El nombre de la variable se expone como constante y su lectura se hace
@@ -353,8 +417,16 @@ internal partial class ServiceProviders
 		").Append(member).Append(".Dispose();"));
 			}
 
+			// Delante: se libera despues de los servicios del ambito, que pueden usarlo al liberarse.
+			if (HasHostedScopedServices)
+				scopedDisposers.Insert(0, (c, awaits) => c.Append(awaits
+					? @"
+		if (__hostScope is { } __hs) await new global::Microsoft.Extensions.DependencyInjection.AsyncServiceScope(__hs).DisposeAsync();"
+					: @"
+		return __hostScope is { } __hs ? new global::Microsoft.Extensions.DependencyInjection.AsyncServiceScope(__hs).DisposeAsync() : default;"));
+
 			// Liberadores que exigen 'await'; los sincronos no obligan a marcar el metodo async.
-			int scopedAwaitCount = asyncScopedAsyncDisposable + asyncScopedDisposable + scopedAsyncDisposable,
+			int scopedAwaitCount = asyncScopedAsyncDisposable + asyncScopedDisposable + scopedAsyncDisposable + (HasHostedScopedServices ? 1 : 0),
 				singletonAwaitCount = asyncSingletonAsyncDisposable + asyncSingletonDisposable + singletonAsyncDisposable + partialAsyncDisposers;
 
 			bool isDisposable = effectiveDisposability > Disposability.None,
@@ -394,7 +466,7 @@ internal partial class ServiceProviders
 
 			code.Append(members);
 
-			if (scopedMembers.Count > 0)
+			if (scopedMembers.Count > 0 || HasHostedScopedServices)
 			{
 				// 'Scoped' se sella. No es cosmetico: mientras la clase quedaba abierta, el JIT
 				// no podia devirtualizar Dispose/Root/CreateScope sobre ella y recurria a
@@ -409,13 +481,13 @@ internal partial class ServiceProviders
 
 	public virtual ").Append(typeName).Append(@" Root => this;
 
-	public virtual Scoped CreateScope() => new() { _root = this };
+	public virtual Scoped CreateScope() => new() { _root = this").Append(HasHostedServices ? ", " + HostServicesMemberName + " = " + HostServicesMemberName : null).Append(@" };
 
 	public sealed class Scoped : ").Append(typeName).Append(@"
 	{
 		public override ").Append(typeName).Append(@" Root => _root;
 
-		public override Scoped CreateScope() => new() { _root = _root };
+		public override Scoped CreateScope() => new() { _root = _root").Append(HasHostedServices ? ", " + HostServicesMemberName + " = " + HostServicesMemberName : null).Append(@" };
 ");
 
 				// Un ambito nunca debe liberar los singletons de la raiz: por eso
@@ -502,7 +574,7 @@ internal partial class ServiceProviders
 
 				// Solo 'virtual' si hay 'Scoped' que lo redefina: en un contenedor sellado seria CS0549.
 				code.Append(@"
-	public ").Append(scopedMembers.Count > 0 ? "virtual " : null);
+	public ").Append(scopedMembers.Count > 0 || HasHostedScopedServices ? "virtual " : null);
 
 				if (isAsyncMethod) code.Append("async ");
 
@@ -758,6 +830,9 @@ public static class ").Append(typeName).Append(@"Extensions
             // resolver con una prueba de tipo en vez de comparar nombres de tipo.
             if (providerPlan is not null) bases.AddRange(providerPlan.BaseInterfaces);
 
+            foreach (var (hostedType, _) in HostedServices)
+                bases.Add("global::SourceCrafter.DependencyInjection.IHostedProvider<" + hostedType + ">");
+
             if (bases.Count > 0) code.Append(" : ").Append(string.Join(", ", bases));
 
             code.Append(@"
@@ -849,6 +924,10 @@ public static class ").Append(typeName).Append(@"Extensions
                 && _implementsServiceProvider == implementsServiceProvider
                 && _genericApi == genericApi
                 && _hasUserEnvironmentName == hasUserEnvironmentName
+                && other.HasHostedServices == HasHostedServices
+                && other.HasHostedScopedServices == HasHostedScopedServices
+                && other.HasUserHostServices == HasUserHostServices
+                && other.HostedServices.SequenceEqual(HostedServices)
                 && _nameSpace == nameSpace
                 && _typeName == typeName
                 && other.ClassName == ClassName
@@ -869,6 +948,7 @@ public static class ").Append(typeName).Append(@"Extensions
             hashCode.Add(implementsServiceProvider);
             hashCode.Add(genericApi);
             hashCode.Add(hasUserEnvironmentName);
+            hashCode.Add(HasHostedServices);
             hashCode.Add(nameSpace);
             hashCode.Add(typeName);
             hashCode.Add(ClassName);

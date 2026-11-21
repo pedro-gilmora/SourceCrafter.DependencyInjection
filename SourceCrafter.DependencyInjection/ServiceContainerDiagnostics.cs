@@ -483,4 +483,60 @@ internal static class ServiceContainerDiagnostics
 
         return Diagnostic.Create(rule, location, factoryName, lifetimeName);
     }
+
+    internal static Diagnostic HostedServiceMustBeSynchronous(Location location, string typeName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI23",
+            title: "Hosted services are resolved synchronously",
+            messageFormat: "'{0}' cannot be [Hosted]: the host resolves services synchronously. Register the result type instead.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true
+        );
+
+        return Diagnostic.Create(rule, location, typeName);
+    }
+
+    internal static Diagnostic SingletonDependsOnScopedHostedService(Location location, string consumer, string dependency)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI24",
+            title: "A singleton cannot depend on a per-request hosted service",
+            messageFormat: "Singleton '{0}' depends on '{1}', a [Hosted(Lifetime.Scoped)] service that lives only as long as a scope. Register the consumer as Scoped or Transient.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true
+        );
+
+        return Diagnostic.Create(rule, location, consumer.Replace("global::", ""), dependency.Replace("global::", ""));
+    }
+
+    internal static Diagnostic ScopedHostedServiceNeedsServiceScopes(Location location, string typeName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI25",
+            title: "Per-request hosted services need Microsoft.Extensions.DependencyInjection.Abstractions",
+            messageFormat: "'{0}' is [Hosted(Lifetime.Scoped)]: reference Microsoft.Extensions.DependencyInjection.Abstractions, which provides the host scopes.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true
+        );
+
+        return Diagnostic.Create(rule, location, typeName);
+    }
+
+    internal static Diagnostic GenericApiNotEnabled(Location location, string methodName, string containerTypeFullName)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI26",
+            title: "The container does not expose the generic API",
+            messageFormat: "'{1}' has no '{0}<T>()': add [ServiceProvider(genericApi: true)] or use the generated member of the service.",
+            category: "SourceCrafter.DependencyInjection.Usage",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true
+        );
+
+        return Diagnostic.Create(rule, location, methodName, containerTypeFullName.Replace("global::", ""));
+    }
 }

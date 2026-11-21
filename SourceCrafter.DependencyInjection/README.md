@@ -201,7 +201,7 @@ public class AppSettings
 | `[JsonSetting<T>(section)]` | Config | Static | Maps a setting section loaded from `appsettings.json` |
 | `[Scoped(name, source: Method)]` | Per instance | Instance | Named factory-produced services |
 
-Every lifetime attribute also takes `locks:` (see [Lock placement](#lock-placement)).
+Every lifetime attribute also takes `locks:` (see [Lock placement](#lock-placement)). Services owned by a host container are declared with `[Hosted<T>]` (see [Disposability Control](#disposability-control)).
 
 #### `[ServiceProvider]` options
 
@@ -269,15 +269,52 @@ resolves a given service never allocates one.
 
 ### Disposability Control
 
-Specify custom disposal behavior with the `Disposability` parameter:
+Cached services (`Singleton`, `Scoped`) whose registered type is `IDisposable`/`IAsyncDisposable` are disposed with their container or scope.
+
+#### Hosted services
+
+When the container lives inside a host (ASP.NET Core, Generic Host), declare the host's services with `[Hosted<T>]`. The container asks `HostServices` for them on every resolution: it never constructs, caches (the host already does) or disposes them.
+
 ```csharp
-[Singleton<IResource, Resource>(Disposability.AsyncDispose)]
+[ServiceProvider]
+[Hosted<ILogger<Report>>]
+[Hosted<IConfiguration>]
+[Scoped<Report>]            // Report(ILogger<Report> logger, IConfiguration config)
+public partial class Container;
+
+var container = new Container { HostServices = app.Services };
 ```
 
-Options:
-- `None`: No disposal logic generated
-- `Dispose`: Synchronous disposal (`IDisposable`)
-- `AsyncDispose`: Asynchronous disposal (`IAsyncDisposable`)
+- `HostServices` (`IServiceProvider?`, `init`) is generated unless the container already declares it; scopes inherit it.
+- A missing service throws `InvalidOperationException` naming the type.
+- Hosted registrations never make the container disposable.
+- `Task<T>`/`ValueTask<T>` cannot be hosted (`SCDI23`): the host resolves synchronously.
+
+Per-request host services (e.g. EF Core's `DbContext`) use `[Hosted<T>(Lifetime.Scoped)]`. Each container scope opens one host scope (`IServiceScopeFactory.CreateScope()`) the first time it resolves one of them, resolves those services from it, and disposes it with the scope, so the instance is shared within the scope and disposed when the scope ends. A scope that never resolves one opens no host scope and pays nothing:
+
+```csharp
+[ServiceProvider]
+[Hosted<ChatDb>(Lifetime.Scoped)]
+[Scoped<ChatHandler>]       // ChatHandler(ChatDb db)
+public partial class Container;
+
+await using var scope = container.CreateScope();
+var handler = scope.ChatHandler;   // opens the host scope on first use; disposed with 'scope'
+```
+
+- Resolving them from the root container, or from a scope created without `HostServices`, throws `InvalidOperationException`; creating that scope does not.
+- Concurrent first resolutions in the same scope share one host scope.
+- A `Singleton` that depends on one, directly or through transients, is rejected (`SCDI24`).
+- Requires `Microsoft.Extensions.DependencyInjection.Abstractions` (`SCDI25` otherwise); scopes become `IAsyncDisposable`.
+
+Containers (and their scopes) implement `IHostedProvider<T>` for each declared `[Hosted<T>]` only, so these lookups compile only for declared hosted types:
+
+```csharp
+ChatDb? db = scope.GetHostedService<ChatDb>();
+ChatDb db = scope.GetHostedRequiredService<ChatDb>();
+IEnumerable<ChatDb> all = scope.GetHostedServices<ChatDb>();
+scope.GetHostedService<string>();   // CS1929: string is not [Hosted]
+```
 
 ### Dependency Graphs
 
@@ -562,6 +599,10 @@ All generator diagnostics use the `SCDI` prefix:
 | `SCDI20` | No generic factory accepts the requested type argument |
 | `SCDI21` | Two generic factories produce the same constructed type |
 | `SCDI22` | Generic factories can only be registered as transient |
+| `SCDI23` | `Task<T>`/`ValueTask<T>` cannot be `[Hosted]` |
+| `SCDI24` | A `Singleton` depends on a per-request `[Hosted(Lifetime.Scoped)]` service |
+| `SCDI25` | `[Hosted(Lifetime.Scoped)]` needs `Microsoft.Extensions.DependencyInjection.Abstractions` |
+| `SCDI26` | `GetRequiredService<T>()` and friends on a container without `genericApi: true` |
 
 Frequent situations:
 

@@ -101,5 +101,18 @@ namespace SourceCrafter.DependencyInjection
         internal
 #endif
         abstract class DependencyAttribute(Lifetime lifetime, string key = "", string? source = null, string? nameFormat = null, LockOptions locks = LockOptions.Default) : Attribute;
+
+        /// <summary>
+        /// <typeparamref name="T"/> pertenece al host que aloja el contenedor: se pide a <c>HostServices</c> en cada resolucion.
+        /// El contenedor no lo construye, no lo cachea (ya lo hace el host) ni lo libera.
+        /// <see cref="Lifetime.Scoped"/>: se pide a un ambito del host que cada ambito del contenedor abre al usarlo y libera con el.
+        /// </summary>
+        [AttributeUsage(AttributeTargets.Class | AttributeTargets.Interface | AttributeTargets.Struct, AllowMultiple = true)]
+#if DISG_META
+        public
+#else
+        internal
+#endif
+        class HostedAttribute<T>(Lifetime lifetime = Lifetime.Singleton) : Attribute where T : notnull;
     }
 }

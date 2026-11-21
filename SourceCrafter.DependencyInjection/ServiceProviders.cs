@@ -35,9 +35,11 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
         ImplParamName = "impl",
         IfaceParamName = "iface",
         LocksParamName = "locks",
+        HostServicesMemberName = "HostServices",
         SingletonAttr = $"{GlobalBaseAttributeNS}.SingletonAttribute",
         ScopedAttr = $"{GlobalBaseAttributeNS}.ScopedAttribute",
         TransientAttr = $"{GlobalBaseAttributeNS}.TransientAttribute",
+        HostedAttr = $"{GlobalBaseAttributeNS}.HostedAttribute",
         DependencyAttr = $"{GlobalBaseAttributeNS}.DependencyAttribute",
         ServiceProviderAttr = $"global::{ServiceProviderFullTypeName}",
         DefaultEnvName = @"""DOTNET_ENVIRONMENT""";
@@ -113,7 +115,20 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                         {
                             var owner = ResolveOwner(emitters, call, diagnostics);
 
-                            if (owner < 0) continue;
+                            if (owner < 0)
+                            {
+                                // Receptor ajeno a todo contenedor generado (p.ej. el IServiceProvider de ASP.NET Core):
+                                // la llamada es de su extension, no hay nada que cubrir (sin SCDI11).
+                                if (call.IsLateBoundReceiver && !call.IsOwnedByContainerType) acknowledged.Add(call.Interceptor);
+                                // Contenedor generado sin API generica: el metodo no existe, no falta un resolver.
+                                else if (!call.IsLateBoundReceiver && IsWithoutGenericApi(emitters, call.ContainerTypeFullName))
+                                {
+                                    diagnostics.Add(ServiceContainerDiagnostics.GenericApiNotEnabled(call.Location, call.MethodName, call.ContainerTypeFullName));
+                                    acknowledged.Add(call.Interceptor);
+                                }
+
+                                continue;
+                            }
 
                             (claims[owner] ??= []).Add(call);
                         }
@@ -149,6 +164,7 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
 
                         var requiresTaskExtensions = false;
                         var requiresProviderInterfaces = false;
+                        var requiresHostedProviders = false;
                         string? ensureLockType = null;
                         var interceptorsCount = 0;
                         Dictionary<string, byte> countedNames = [];
@@ -161,6 +177,7 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                             {
                                 emitter.Emit(countedNames, emitterInterceptors, allEarlyBound, ref requiresTaskExtensions, ref ensureLockType, ref requiresProviderInterfaces, ref interceptorsCount, out var file, out var code);
                                 files.Add((file + ".g", code));
+                                requiresHostedProviders |= emitter.HostedServices.Count > 0;
                             }
 
                             // Los parciales corren aunque el contenedor no emita archivo: un
@@ -190,8 +207,8 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                             }
                         }
 
-                        if (interceptorsCount > 0 || requiresProviderInterfaces)
-                            files.Add(("Utils.g", BuildUtilsFileContent(interceptorsCount > 0, requiresProviderInterfaces)));
+                        if (interceptorsCount > 0 || requiresProviderInterfaces || requiresHostedProviders)
+                            files.Add(("Utils.g", BuildUtilsFileContent(interceptorsCount > 0, requiresProviderInterfaces, requiresHostedProviders)));
 
                         if (ensureLockType is { } lockType)
                             files.Add(("Locks.g", BuildLocksFileContent(lockType)));
@@ -265,13 +282,41 @@ namespace SourceCrafter.DependencyInjection
     }
 }";
 
-    private static string BuildUtilsFileContent(bool interceptors, bool providerInterfaces)
+    /// <summary>
+    /// GetHosted*: el contenedor implementa <c>IHostedProvider&lt;T&gt;</c> solo por cada <c>[Hosted&lt;T&gt;]</c>, asi que
+    /// pedir un tipo no declarado es un error de compilacion (no hay conversion del receptor), sin analizador.
+    /// </summary>
+    private const string HostedProvidersContent = @"
+namespace SourceCrafter.DependencyInjection
+{
+    internal interface IHostedProvider<T> where T : notnull
+    {
+        T? GetHostedService();
+
+        global::System.Collections.Generic.IEnumerable<T> GetHostedServices();
+    }
+
+    internal static class HostedProviderExtensions
+    {
+        public static T? GetHostedService<T>(this IHostedProvider<T> provider) where T : notnull => provider.GetHostedService();
+
+        public static T GetHostedRequiredService<T>(this IHostedProvider<T> provider) where T : notnull
+            => provider.GetHostedService() ?? throw new global::System.InvalidOperationException($""{typeof(T)} is not available in HostServices."");
+
+        public static global::System.Collections.Generic.IEnumerable<T> GetHostedServices<T>(this IHostedProvider<T> provider) where T : notnull
+            => provider.GetHostedServices();
+    }
+}";
+
+    private static string BuildUtilsFileContent(bool interceptors, bool providerInterfaces, bool hostedProviders)
     {
         StringBuilder code = new("// <auto-generated/>\n#nullable enable\n");
 
         if (interceptors) code.Append(InterceptsLocationContent).Append('\n');
 
         if (providerInterfaces) code.Append(ProviderInterfacesContent).Append('\n');
+
+        if (hostedProviders) code.Append(HostedProvidersContent).Append('\n');
 
         return code.ToString();
     }
@@ -397,6 +442,14 @@ internal static class Extensions
 	/// que con dos contenedores en la misma compilacion emitia dos
 	/// <c>[InterceptsLocation]</c> para la misma ubicacion.
 	/// </summary>
+	private static bool IsWithoutGenericApi(ImmutableArray<Emitter> emitters, string containerTypeFullName)
+	{
+		foreach (var emitter in emitters)
+			if (emitter.ContainerFullTypeName == containerTypeFullName) return !emitter.EmitsInterceptors;
+
+		return false;
+	}
+
 	private static int ResolveOwner(ImmutableArray<Emitter> emitters, InvokeInfo call, ImmutableArray<Diagnostic>.Builder diagnostics)
 	{
 		int exact = -1, loose = -1, exactCount = 0, looseCount = 0;
@@ -507,6 +560,8 @@ internal static class Extensions
                 SingletonAttr => (isExternal, (true, Lifetime.Singleton)),
                 ScopedAttr => (isExternal, (true, Lifetime.Scoped)),
                 TransientAttr => (isExternal, (true, Lifetime.Transient)),
+                // Sin cache propia: el host ya decide la vida de la instancia.
+                HostedAttr => (isExternal, (true, Lifetime.Transient)),
                 { } val => (val is not DependencyAttr, GetFromCtorSymbol(attrClass))
             };
 
@@ -681,7 +736,11 @@ internal static class Extensions
     {
         while (expression is ParenthesizedExpressionSyntax { Expression: { } inner }) expression = inner;
 
-        if (model.GetTypeInfo(expression, token).Type is { TypeKind: not TypeKind.Error } resolved) return resolved;
+        // Una llamada que no enlaza (p.ej. CreateScope() antes de generarse) puede traer el tipo de un candidato
+        // ajeno, como el CreateScope() de extension de Microsoft.Extensions.DependencyInjection: no vale como receptor.
+        var unbound = expression is InvocationExpressionSyntax && model.GetSymbolInfo(expression, token).Symbol is null;
+
+        if (!unbound && model.GetTypeInfo(expression, token).Type is { TypeKind: not TypeKind.Error } resolved) return resolved;
 
         return expression is InvocationExpressionSyntax { Expression: MemberAccessExpressionSyntax { Expression: { } source } }
             ? ReceiverType(model, source, token)

@@ -163,4 +163,34 @@ public class DesignConstraintTests
 		result.HasDiagnostic("SCDI17").Should().BeFalse();
 		result.Errors.Should().BeEmpty();
 	}
+
+	[Theory]
+	[InlineData("return new Container().GetRequiredService<Report>();")]
+	[InlineData("var scope = new Container().CreateScope(); return scope.GetRequiredService<Report>();")]
+	[InlineData("return new Container().CreateScope().GetRequiredService<Report>();")]
+	public void TheGenericApiOnAContainerWithoutItPointsToGenericApi(string body)
+	{
+		// Sin genericApi (ni IServiceProvider) el contenedor no tiene GetRequiredService<T>(): antes
+		// se decia SCDI11 "no hay resolver" de un servicio registrado, ocultando la causa real.
+		var result = GeneratorHarness.RunWithServiceScopes($$"""
+			using Microsoft.Extensions.DependencyInjection;
+			using SourceCrafter.DependencyInjection.Attributes;
+
+			namespace Probe;
+
+			public sealed class Report;
+
+			[ServiceProvider]
+			[Scoped<Report>]
+			public partial class Container;
+
+			static class Use
+			{
+				static Report Go() { {{body}} }
+			}
+			""");
+
+		result.HasDiagnostic("SCDI26").Should().BeTrue();
+		result.HasDiagnostic("SCDI11").Should().BeFalse();
+	}
 }
