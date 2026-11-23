@@ -55,6 +55,9 @@ internal record InvokeInfo(
     /// </para>
     /// </summary>
     internal bool IsLateBoundReceiver;
+
+    /// <summary>Llamada con clave que no es constante de compilacion: no se intercepta (la resuelve el <c>switch (key)</c> generico).</summary>
+    internal bool HasRuntimeKey;
 }
 
 class AsyncLocalResolver(DependencyKey dep)
@@ -89,6 +92,9 @@ internal class ResolverBuilder(string toStr)
 
     /// <summary>Necesita un ambito del host ([Hosted] Scoped, directo o a traves de transients).</summary>
     internal bool RequiresHostScope;
+
+    /// <summary>Su valor depende del ambito que lo resuelve: es Scoped, o un transient que (a cualquier profundidad) depende de uno.</summary>
+    internal bool ScopeBound;
 
     /// <summary>
     /// Nombre del miembro del contenedor que resuelve este servicio, o <c>null</c> si el

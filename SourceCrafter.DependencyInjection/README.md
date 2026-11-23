@@ -304,7 +304,7 @@ var handler = scope.ChatHandler;   // opens the host scope on first use; dispose
 
 - Resolving them from the root container, or from a scope created without `HostServices`, throws `InvalidOperationException`; creating that scope does not.
 - Concurrent first resolutions in the same scope share one host scope.
-- A `Singleton` that depends on one, directly or through transients, is rejected (`SCDI24`).
+- A `Singleton` that depends on one, directly or through transients, is rejected (`SCDI24`); through a `Scoped` consumer it is `SCDI27`, like any singleton that depends on scoped state. A singleton that takes the container itself always receives the root, never the scope that resolved it first.
 - Requires `Microsoft.Extensions.DependencyInjection.Abstractions` (`SCDI25` otherwise); scopes become `IAsyncDisposable`.
 
 Containers (and their scopes) implement `IHostedProvider<T>` for each declared `[Hosted<T>]` only, so these lookups compile only for declared hosted types:
@@ -446,6 +446,12 @@ The plural, un-keyed overload (`GetRequiredServices<T>()` and its async form) is
 even when *every* registration of that type carries a key, and it returns all of them. A
 call site that asks for "every service of this type" is not asking about keys, and the
 interception already collects the keyed resolvers for it.
+
+A keyed call is intercepted only when its key is a compile-time constant (a literal, a
+`const`, a `const` member such as `Keys.Secure`, or `nameof`): the interceptor goes straight
+to that key's registration. Any other key (a variable, a parameter) is left to the generic
+member's `switch (key)`, which is correct for every value. A constant key with no registration
+is `SCDI11`; it never falls back to the un-keyed registration or to every registration.
 
 ### Exporting dependency-less transients
 
@@ -603,6 +609,7 @@ All generator diagnostics use the `SCDI` prefix:
 | `SCDI24` | A `Singleton` depends on a per-request `[Hosted(Lifetime.Scoped)]` service |
 | `SCDI25` | `[Hosted(Lifetime.Scoped)]` needs `Microsoft.Extensions.DependencyInjection.Abstractions` |
 | `SCDI26` | `GetRequiredService<T>()` and friends on a container without `genericApi: true` |
+| `SCDI27` | A `Singleton` depends on a `Scoped` service, directly or through transients (it would capture the first scope that resolves it) |
 
 Frequent situations:
 

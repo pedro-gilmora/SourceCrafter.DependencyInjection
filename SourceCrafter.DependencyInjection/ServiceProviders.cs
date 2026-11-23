@@ -130,6 +130,13 @@ internal sealed partial class ServiceProviders : IIncrementalGenerator
                                 continue;
                             }
 
+                            // Clave de ejecucion: un interceptor la ataria a un solo registro; la resuelve el switch(key) de la API generica.
+                            if (call.HasRuntimeKey)
+                            {
+                                acknowledged.Add(call.Interceptor);
+                                continue;
+                            }
+
                             (claims[owner] ??= []).Add(call);
                         }
 
@@ -520,7 +527,8 @@ internal static class Extensions
 							resolver2);
 					}
 				}
-				else if (serviceCall.Key == "" && serviceCall.IsMultiple 
+				// Solo sin clave: "todos los del tipo" no es la respuesta a una clave concreta que no esta registrada.
+				else if (serviceCall.Key == "" && serviceCall.IsMultiple && !serviceCall.IsKeyed
 					&& emitter.DependencyValueBuilders.Where(dvb => dvb.Key.type == serviceCall.ReturnType).SelectMany(dvb => dvb.Value.Select(e => e.Value)).ToArray() is { Length: > 0 } items)
 				{
 					foreach (var resolver in items)
@@ -669,19 +677,17 @@ internal static class Extensions
             ? type.ContainingType
             : type).AsNonNullable();
 
-        var keyHash = invocation.ArgumentList.Arguments switch
-        {
-            [{ Expression: LiteralExpressionSyntax { Token.RawKind: (int)SyntaxKind.StringLiteralToken, Token.ValueText: string text } }, ..]
-                => text,
+        var isKeyed = methodName.Contains("Keyed", StringComparison.Ordinal);
 
-            [{ Expression: IdentifierNameSyntax id }, ..]
-                when TryGetIdentifier(model, id, cancellationToken, out string text) => text,
-
-            [{ Expression: MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax id } }, ..]
-                when TryGetIdentifier(model, id, cancellationToken, out string text) => text,
-
-            _ => ""
-        };
+        // La clave elige la implementacion: un interceptor solo puede fijarla si es una constante de compilacion (literal, const,
+        // nameof, miembro const). Cualquier otra (variable, parametro) queda null y la resuelve en ejecucion el switch(key) de la
+        // API generica; tratarla como "" la ataba al registro sin clave.
+        string? keyHash = !isKeyed
+            ? ""
+            : invocation.ArgumentList.Arguments is [{ Expression: { } keyArg }, ..]
+                && model.GetConstantValue(keyArg, cancellationToken) is { HasValue: true, Value: string constant }
+                ? constant
+                : null;
 
 
         var AsyncKind = depTypeResult.TryGetAsyncType(out depTypeResult);
@@ -712,13 +718,14 @@ internal static class Extensions
             AsyncKind,
             depTypeResult.FullGlobalQualifiedName,
             interceptor,
-            keyHash,
+            keyHash ?? "",
             isCtor,
-            methodName.Contains("Keyed", StringComparison.Ordinal),
+            isKeyed,
             methodName.Contains("Services", StringComparison.Ordinal))
         {
             InvalidAsyncTypeArg = methodWithTaskTypeArg,
             IsLateBoundReceiver = lateBound,
+            HasRuntimeKey = keyHash is null,
             Location = memberAccess.GetLocation()
         };
     }
@@ -764,17 +771,6 @@ internal static class Extensions
             }
         }
         return (false, type);
-    }
-
-    private static bool TryGetIdentifier(SemanticModel model, IdentifierNameSyntax id, CancellationToken cancellationToken, out string text)
-    {
-        if (model.GetSymbolInfo(id, cancellationToken).Symbol is IFieldSymbol { IsConst: true, HasConstantValue: true, ConstantValue: string _text })
-        {
-            text = _text;
-            return true;
-        }
-        text = null!;
-        return false;
     }
 
     static bool IsGeneratedServiceProvider(AttributeData attrData) =>

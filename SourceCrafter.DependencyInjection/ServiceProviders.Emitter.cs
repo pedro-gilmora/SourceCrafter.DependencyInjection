@@ -532,6 +532,13 @@ internal partial class ServiceProviders
 				code.Append(@"	}
 ");
 			}
+			else
+			{
+				// Sin ambitos el contenedor es su propia raiz; 'Root' existe igual para quien lo pida ([Root] o un singleton).
+				code.Append(@"
+	public ").Append(typeName).Append(@" Root => this;
+");
+			}
 
 			// Ayudante sin guardia: lo invocan tanto la raiz como cada ambito.
 			if (hasScopedDisposers)

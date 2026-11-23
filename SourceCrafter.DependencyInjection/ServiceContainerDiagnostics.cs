@@ -512,6 +512,20 @@ internal static class ServiceContainerDiagnostics
         return Diagnostic.Create(rule, location, consumer.Replace("global::", ""), dependency.Replace("global::", ""));
     }
 
+    internal static Diagnostic SingletonDependsOnScopedService(Location location, string consumer, string dependency)
+    {
+        DiagnosticDescriptor rule = new(
+            id: "SCDI27",
+            title: "A singleton cannot depend on a scoped service",
+            messageFormat: "Singleton '{0}' depends on '{1}', which is scoped (or depends on a scoped service): the first scope to resolve the singleton would be shared by every other scope. Register the consumer as Scoped or Transient.",
+            category: "SourceCrafter.DependencyInjection.Design",
+            defaultSeverity: DiagnosticSeverity.Error,
+            isEnabledByDefault: true
+        );
+
+        return Diagnostic.Create(rule, location, consumer.Replace("global::", ""), dependency.Replace("global::", ""));
+    }
+
     internal static Diagnostic ScopedHostedServiceNeedsServiceScopes(Location location, string typeName)
     {
         DiagnosticDescriptor rule = new(
