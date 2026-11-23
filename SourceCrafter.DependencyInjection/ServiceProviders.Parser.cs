@@ -396,7 +396,7 @@ internal partial class ServiceProviders
 
             // Un [Hosted] lee HostServices del contenedor: sus consumidores no se pueden inlinear en los interceptores estaticos.
             bool hasNoCachedDeps = lifetime is Lifetime.Transient && !isHosted;
-            bool requiresHostScope = false, scopeBound = lifetime is Lifetime.Scoped;
+            bool requiresHostScope = false;
 
             // Takes or create a new Resolver instance
             resolver = CollectionsMarshal.GetValueRefOrAddDefault(services, subKey, out var implExists) ??=
@@ -510,9 +510,7 @@ internal partial class ServiceProviders
 
                 if (paramType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == className || SymbolEqualityComparer.Default.Equals(paramType, providerType))
                 {
-                    // Un singleton vive en un campo estatico: con 'this' retendria el ambito que lo resolvio primero (y sus servicios).
-                    var asksForRoot = lifetime is Lifetime.Singleton
-                        || prm.GetAttributes().Any(a => a.AttributeClass?.FullGlobalQualifiedName == $"{GlobalBaseAttributeNS}.RootAttribute");
+                    var asksForRoot = prm.GetAttributes().Any(a => a.AttributeClass?.FullGlobalQualifiedName == $"{GlobalBaseAttributeNS}.RootAttribute");
                     appendParams.Add(new(selfDepInfo.Key, new SelfProviderAppender(asksForRoot).Append));
                     continue;
                 }
@@ -633,24 +631,15 @@ internal partial class ServiceProviders
                         if (foundService.PassCancelToken && !needsCancelToken)
                             needsCancelToken = true;
 
-                        // Un singleton viviria mas que el ambito del host del que sale la dependencia.
+                        // Un singleton se construye desde la raiz, que no tiene ambito del host: lo que necesite uno
+                        // (directo, o a traves de transients o scoped) fallaria al resolverse.
                         if (foundService.RequiresHostScope)
                         {
                             if (lifetime is Lifetime.Singleton)
                                 diagnostics.Add(ServiceContainerDiagnostics.SingletonDependsOnScopedHostedService(
                                     attrSyntax.GetLocation(), typeFullName, foundService.ExportTypeFullName));
-                            else if (lifetime is Lifetime.Transient)
-                                requiresHostScope = true;
-                        }
-                        // Un singleton vive en un campo estatico y se construye con el ambito que lo pide primero: lo que dependa de ese
-                        // ambito (una peticion, un usuario) quedaria compartido por todos los demas.
-                        else if (foundService.Key.lifetime is Lifetime.Scoped || foundService.ScopeBound)
-                        {
-                            if (lifetime is Lifetime.Singleton)
-                                diagnostics.Add(ServiceContainerDiagnostics.SingletonDependsOnScopedService(
-                                    attrSyntax.GetLocation(), typeFullName, foundService.ExportTypeFullName));
                             else
-                                scopeBound = true;
+                                requiresHostScope = true;
                         }
 
                         var AppendParam = foundService!.AppendValue;
@@ -851,7 +840,6 @@ internal partial class ServiceProviders
 
             resolver.TransientWithoutCachedDeps = hasNoCachedDeps;
             resolver.RequiresHostScope |= requiresHostScope;
-            resolver.ScopeBound |= scopeBound;
             resolver.AsyncKind = AsyncKind;
 
             //TryRegisterInterceptorMethod();

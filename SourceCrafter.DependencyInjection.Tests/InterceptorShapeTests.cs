@@ -114,7 +114,7 @@ public class InterceptorShapeTests
 		[Singleton<IDatabase, Database>]
 		[Scoped<IAuthService, AuthService>]
 		[Transient<IController, Controller>]
-		[Scoped<IController, AdminController>]
+		[Singleton<IController, AdminController>]
 		public partial class Container
 		{
 			private static Task<Guid> _GetReqIdAsync() => Task.FromResult(Guid.NewGuid());

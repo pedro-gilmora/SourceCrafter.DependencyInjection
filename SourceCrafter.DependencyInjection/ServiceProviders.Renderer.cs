@@ -125,6 +125,19 @@ internal sealed class ResolverRenderer
     internal string SlowPathMethodName => "__Create" + backingFieldName;
 
     /// <summary>
+    /// Un singleton se construye siempre desde la raiz: sus dependencias scoped son las del ambito raiz (vivas lo que el contenedor),
+    /// no las del primer ambito que lo pida, que se liberarian con el y quedarian compartidas por todos. Solo en el camino lento.
+    /// </summary>
+    internal void AppendRootHandOff(StringBuilder code)
+    {
+        if (lifetime is not Lifetime.Singleton) return;
+
+        code.Append(@"
+		if (!global::System.Object.ReferenceEquals(this, Root)) return Root.").Append(SlowPathMethodName).Append(@"();
+");
+    }
+
+    /// <summary>
     /// Tipo del campo que respalda a un resolver <b>asincrono cacheado</b>. Siempre
     /// <c>Task&lt;T&gt;</c>, nunca <c>ValueTask&lt;T&gt;?</c>, por dos motivos de
     /// correccion y uno de tamano:
@@ -429,11 +442,12 @@ internal sealed class ResolverRenderer
 	[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 	private ");
 						// No se marca 'static' aunque el campo lo sea: la construccion puede
-						// depender de resolvers de instancia (el generador permite que un
-						// singleton dependa de un scoped), y eso seria CS0120.
+						// depender de resolvers de instancia (un singleton puede depender de un
+						// scoped: recibe la instancia del ambito raiz), y eso seria CS0120.
 						code.Append(GetTypeName(typeFullName)).Append(' ').Append(SlowPathMethodName).Append(@"()
 	{");
 
+						AppendRootHandOff(code);
 						AppendHoistedLocals(code);
 
 						code.Append(LockBlockOpen).Append(@"
@@ -558,7 +572,11 @@ internal sealed class ResolverRenderer
 
 	[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 	private ").Append(MemberTaskTypeName).Append(' ').Append(SlowPathMethodName).Append(@"()
-	{").Append(LockBlockOpen).Append(@"
+	{");
+
+								AppendRootHandOff(code);
+
+								code.Append(LockBlockOpen).Append(@"
 			if(").Append(backingFieldName).Append(@" is { } __cached
 				&& (!__cached.IsCompleted || __cached.IsCompletedSuccessfully)) return ")
 									.Append(wrapOpen).Append("__cached").Append(wrapClose).Append(@";
@@ -602,7 +620,11 @@ internal sealed class ResolverRenderer
 
 	[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 	private ").Append(MemberTaskTypeName).Append(' ').Append(SlowPathMethodName).Append(@"()
-	{").Append(LockBlockOpen).Append(@"
+	{");
+
+								AppendRootHandOff(code);
+
+								code.Append(LockBlockOpen).Append(@"
 			if(").Append(backingFieldName).Append(@" is { } __cached
 				&& (!__cached.IsCompleted || __cached.IsCompletedSuccessfully)) return ")
 									.Append(wrapOpen).Append("__cached").Append(wrapClose).Append(@";
@@ -719,7 +741,11 @@ internal sealed class ResolverRenderer
 
 	[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
 	private ").Append(MemberTaskTypeName).Append(' ').Append(SlowPathMethodName).Append(@"()
-	{").Append(LockBlockOpen).Append(@"
+	{");
+
+								AppendRootHandOff(code);
+
+								code.Append(LockBlockOpen).Append(@"
 			if(").Append(backingFieldName).Append(@" is { } __cached
 				&& (!__cached.IsCompleted || __cached.IsCompletedSuccessfully)) return ")
 									.Append(wrapOpen).Append("__cached").Append(wrapClose).Append(@";

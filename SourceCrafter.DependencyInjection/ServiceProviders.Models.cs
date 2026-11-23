@@ -90,11 +90,8 @@ internal class ResolverBuilder(string toStr)
     internal bool PassCancelToken;
     internal bool TransientWithoutCachedDeps;
 
-    /// <summary>Necesita un ambito del host ([Hosted] Scoped, directo o a traves de transients).</summary>
+    /// <summary>Necesita un ambito del host ([Hosted] Scoped, directo o a traves de transients o scoped).</summary>
     internal bool RequiresHostScope;
-
-    /// <summary>Su valor depende del ambito que lo resuelve: es Scoped, o un transient que (a cualquier profundidad) depende de uno.</summary>
-    internal bool ScopeBound;
 
     /// <summary>
     /// Nombre del miembro del contenedor que resuelve este servicio, o <c>null</c> si el

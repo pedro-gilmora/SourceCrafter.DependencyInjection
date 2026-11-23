@@ -263,6 +263,8 @@ resolves a given service never allocates one.
 
 **Scoped Isolation**: Call `container.CreateScope()` to create an isolated scope instance. Scoped services registered in that scope are cached independently; disposal doesn't affect the parent.
 
+**Singletons live in the root scope**: the root container is a scope too. A singleton is always built from it, whichever scope asks for it first, so its scoped dependencies are the root scope's instances: they live as long as the container and are disposed with it, never with the scope that happened to resolve the singleton. Holding a root-scope instance (say, a `DbContext`) in a singleton is the consumer's choice, and so is making it safe for concurrent use. Only the first resolution pays for the hand-off to the root; afterwards the member is a field read.
+
 ---
 
 ## Advanced Topics
@@ -304,7 +306,7 @@ var handler = scope.ChatHandler;   // opens the host scope on first use; dispose
 
 - Resolving them from the root container, or from a scope created without `HostServices`, throws `InvalidOperationException`; creating that scope does not.
 - Concurrent first resolutions in the same scope share one host scope.
-- A `Singleton` that depends on one, directly or through transients, is rejected (`SCDI24`); through a `Scoped` consumer it is `SCDI27`, like any singleton that depends on scoped state. A singleton that takes the container itself always receives the root, never the scope that resolved it first.
+- A `Singleton` that depends on one, directly or through transients or scoped services, is rejected (`SCDI24`): a singleton is built from the root, which has no host scope.
 - Requires `Microsoft.Extensions.DependencyInjection.Abstractions` (`SCDI25` otherwise); scopes become `IAsyncDisposable`.
 
 Containers (and their scopes) implement `IHostedProvider<T>` for each declared `[Hosted<T>]` only, so these lookups compile only for declared hosted types:
@@ -609,7 +611,6 @@ All generator diagnostics use the `SCDI` prefix:
 | `SCDI24` | A `Singleton` depends on a per-request `[Hosted(Lifetime.Scoped)]` service |
 | `SCDI25` | `[Hosted(Lifetime.Scoped)]` needs `Microsoft.Extensions.DependencyInjection.Abstractions` |
 | `SCDI26` | `GetRequiredService<T>()` and friends on a container without `genericApi: true` |
-| `SCDI27` | A `Singleton` depends on a `Scoped` service, directly or through transients (it would capture the first scope that resolves it) |
 
 Frequent situations:
 
