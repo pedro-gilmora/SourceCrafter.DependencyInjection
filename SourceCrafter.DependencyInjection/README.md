@@ -32,13 +32,14 @@
 | Package | Kind | Install when |
 |---|---|---|
 | [`SourceCrafter.DependencyInjection`](https://www.nuget.org/packages/SourceCrafter.DependencyInjection) | Generator | You are building the container. Brings the attributes with it |
-| [`SourceCrafter.DependencyInjection.MsConfiguration`](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.MsConfiguration) | Generator | The container binds `appsettings.json` via `[JsonSetting<T>]`. Use **instead of** the core generator |
+| [`SourceCrafter.DependencyInjection.MsConfiguration`](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.MsConfiguration) | Generator extension | The container binds `appsettings.json` via `[JsonSetting<T>]`. Install it alone: it brings the core generator, the attributes and `Microsoft.Extensions.Configuration.Json`/`.Binder` |
 | [`SourceCrafter.DependencyInjection.Metadata`](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.Metadata) | Attributes only | You are a library author annotating types without shipping the generator |
 | [`SourceCrafter.DependencyInjection.MsConfiguration.Metadata`](https://www.nuget.org/packages/SourceCrafter.DependencyInjection.MsConfiguration.Metadata) | Attributes only | Same, for the configuration attributes |
 
-The two generators are mutually exclusive: the configuration one is a superset. The metadata
-packages carry no generator, so the consumer of your library is the one that decides which
-generator runs.
+The configuration generator runs next to the core one and emits only the configuration part of
+the container, so it depends on it. The metadata packages carry no generator, so the consumer of
+your library is the one that decides which generator runs. Every package also ships agent skills
+under `skills/<name>/SKILL.md`.
 
 ### Core Package
 Install the compile-time generator:
@@ -47,16 +48,17 @@ dotnet add package SourceCrafter.DependencyInjection
 ```
 
 ### With Microsoft Configuration Support
-For JSON settings (`[JsonSetting<T>]`) and MS.Extensions integration, use the
-configuration-aware generator **instead of** the core one:
+For JSON settings (`[JsonSetting<T>]`) and MS.Extensions integration, install the configuration
+extension (it brings the core generator with it):
 ```bash
 dotnet add package SourceCrafter.DependencyInjection.MsConfiguration
 ```
 
-`[JsonConfiguration]` may be applied to the assembly (`[assembly: JsonConfiguration]`), which
-is where it naturally belongs - the configuration file is the assembly's, not a particular
+`[JsonConfiguration]` is required once, usually on the assembly (`[assembly: JsonConfiguration]`),
+which is where it naturally belongs - the configuration file is the assembly's, not a particular
 container's. Container-level attributes still win over the assembly one, and the order in
-which you write the attributes never changes the result.
+which you write the attributes never changes the result. The file is resolved next to the
+application (`AppContext.BaseDirectory`), so copy `appsettings*.json` to the output directory.
 
 ---
 
@@ -590,7 +592,7 @@ All generator diagnostics use the `SCDI` prefix:
 | `SCDI03` | Factory member not found on the container |
 | `SCDI04` | An async factory should accept a `CancellationToken` |
 | `SCDI05` | A service key must be a `string` or an `enum` |
-| `SCDI06` | An interface registration requires a factory or an implementation type |
+| `SCDI06` | An interface or abstract class is registered without an implementation or a factory |
 | `SCDI07` | The container class must be declared `partial` |
 | `SCDI08` | Naming/registration conflict with an existing member |
 | `SCDI09` | The implementation does not derive from the declared service type |

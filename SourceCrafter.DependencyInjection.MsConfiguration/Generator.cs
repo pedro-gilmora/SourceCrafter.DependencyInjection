@@ -429,7 +429,9 @@ using global::Microsoft.Extensions.Configuration;
 
             lock (this)
             {
-                var fileName = global::System.IO.Path.GetFullPath(""").Append(fileName).Append(@""");
+                // Junto a la aplicacion (donde la compilacion copia appsettings*.json), no el directorio actual: lanzada desde otra
+                // carpeta o como servicio, la configuracion opcional quedaba vacia sin error. Una ruta absoluta se respeta.
+                var fileName = global::System.IO.Path.Combine(global::System.AppContext.BaseDirectory, """).Append(fileName).Append(@""");
 
                 return ")
                 .Append(@"_")

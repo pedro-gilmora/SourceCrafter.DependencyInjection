@@ -42,4 +42,9 @@
 	    <PackagePath>\</PackagePath>
 	  </None>
 	</ItemGroup>
+
+	<!-- Agent skills (agentskills.io) shipped in the package: skills/<name>/SKILL.md. -->
+	<ItemGroup>
+		<None Include="..\.github\skills\**\SKILL.md" Pack="true" PackagePath="skills" Visible="false" />
+	</ItemGroup>
 </Project>

@@ -48,6 +48,24 @@
 		<PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.0" PrivateAssets="all" />
 	</ItemGroup>
 
+	<!--
+		Este paquete es una extension del generador principal, no un sustituto: emite la configuracion y los settings que el contenedor
+		generado por el principal consume. Instalar solo este paquete debe bastar, asi que arrastra el generador principal (con sus
+		analizadores: PrivateAssets none), los atributos de configuracion y lo que usa el codigo emitido (ConfigurationBuilder,
+		AddJsonFile, Get/GetValue).
+	-->
+	<ItemGroup>
+		<ProjectReference Include="..\SourceCrafter.DependencyInjection\SourceCrafter.DependencyInjection.csproj" Aliases="scdi_core" PrivateAssets="none" />
+		<ProjectReference Include="..\SourceCrafter.DependencyInjection.MsConfiguration.Metadata\SourceCrafter.DependencyInjection.MsConfiguration.Metadata.csproj" Aliases="scdi_msconf_metadata" />
+		<PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.0" />
+	</ItemGroup>
+
+	<!-- Las referencias de arriba existen por las dependencias del paquete; los tipos transitivos (Metadata) tampoco deben entrar en ambito. -->
+	<PropertyGroup>
+		<DisableTransitiveProjectReferences>true</DisableTransitiveProjectReferences>
+	</PropertyGroup>
+
 	<ItemGroup>
 		<None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
 		<!--<None Include="$(NuGetPackageRoot)\sharedmemory\**\netstandard2.0\*.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />-->
@@ -89,4 +107,9 @@
 		</ItemGroup>
 	</Target>-->
 
+
+	<!-- Agent skills (agentskills.io) shipped in the package: skills/<name>/SKILL.md. -->
+	<ItemGroup>
+		<None Include="..\.github\skills\**\SKILL.md" Pack="true" PackagePath="skills" Visible="false" />
+	</ItemGroup>
 </Project>

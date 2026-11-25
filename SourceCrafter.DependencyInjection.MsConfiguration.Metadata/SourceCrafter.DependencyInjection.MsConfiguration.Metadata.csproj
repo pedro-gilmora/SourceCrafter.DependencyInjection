@@ -37,7 +37,8 @@
 	</Compile>
 </ItemGroup>
 <ItemGroup>
-	<ProjectReference Include="..\SourceCrafter.DependencyInjection.Metadata\SourceCrafter.DependencyInjection.Metadata.csproj" PrivateAssets="all" />
+	<!-- Dependencia publica: los atributos usan Lifetime/Disposability de Metadata (sin ella, CS0012 en el consumidor). -->
+	<ProjectReference Include="..\SourceCrafter.DependencyInjection.Metadata\SourceCrafter.DependencyInjection.Metadata.csproj" />
 </ItemGroup>
 <ItemGroup>
   <None Update="README.md">
@@ -45,4 +46,9 @@
     <PackagePath>\</PackagePath>
   </None>
 </ItemGroup>
+
+	<!-- Agent skills (agentskills.io) shipped in the package: skills/<name>/SKILL.md. -->
+	<ItemGroup>
+		<None Include="..\.github\skills\**\SKILL.md" Pack="true" PackagePath="skills" Visible="false" />
+	</ItemGroup>
 </Project>

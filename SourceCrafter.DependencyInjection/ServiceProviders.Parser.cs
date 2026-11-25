@@ -1352,6 +1352,15 @@ internal partial class ServiceProviders
                         break;
                 }
 
+                // Una interfaz o clase abstracta registrada sola, sin implementacion ni fabrica, no tiene con que construirse: sin esto el
+                // generador emitia 'new IFoo()' (CS0144 en codigo generado) o nada si el transient no se usaba. Un [Hosted] si vale: lo
+                // resuelve el host.
+                if (interfaceType is null && !isHosted && factoryReturnType is null && type is { TypeKind: TypeKind.Interface } or { IsAbstract: true, TypeKind: TypeKind.Class })
+                {
+                    diagnostics.Add(ServiceContainerDiagnostics.InterfaceRequiresFactory(attrSyntax));
+                    return false;
+                }
+
                 if (interfaceType != null)
                 {
                     var count = diagnostics.Count;

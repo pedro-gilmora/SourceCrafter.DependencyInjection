@@ -107,4 +107,18 @@ public class ConfigurationCompositionTests
 
 		result.Errors.Should().BeEmpty();
 	}
+
+	/// <summary>
+	/// El fichero se busca junto a la aplicacion (donde la compilacion copia <c>appsettings.json</c>), no en el directorio actual:
+	/// una aplicacion publicada lanzada desde otra carpeta, o un servicio (directorio actual System32), leia configuracion vacia
+	/// sin ningun error, porque el fichero es opcional por defecto.
+	/// </summary>
+	[Fact]
+	public void TheSettingsFileIsResolvedNextToTheApplication()
+	{
+		var partial = GeneratorHarness.RunWithConfiguration(AssemblyLevelConfiguration).Sources.First(s => s.Key.Contains("msConfig")).Value;
+
+		partial.Should().Contain("global::System.IO.Path.Combine(global::System.AppContext.BaseDirectory, \"appsettings\")")
+			.And.NotContain("GetFullPath");
+	}
 }

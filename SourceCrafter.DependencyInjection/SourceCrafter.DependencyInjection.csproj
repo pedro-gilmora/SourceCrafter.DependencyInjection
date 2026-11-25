@@ -48,6 +48,14 @@
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
 	</ItemGroup>
 
+	<!--
+		Instalar el generador debe bastar: el paquete depende de los atributos (Metadata). Alias para que sus tipos publicos no se
+		mezclen con los internos del propio generador; solo cuenta la dependencia del paquete.
+	-->
+	<ItemGroup>
+		<ProjectReference Include="..\SourceCrafter.DependencyInjection.Metadata\SourceCrafter.DependencyInjection.Metadata.csproj" Aliases="scdi_metadata" />
+	</ItemGroup>
+
 	<ItemGroup>
 		<!--
 			Contratos de extensibilidad compartidos con los ensamblados
@@ -98,4 +106,9 @@
 		</ItemGroup>
 	</Target>-->
 
+
+	<!-- Agent skills (agentskills.io) shipped in the package: skills/<name>/SKILL.md. -->
+	<ItemGroup>
+		<None Include="..\.github\skills\**\SKILL.md" Pack="true" PackagePath="skills" Visible="false" />
+	</ItemGroup>
 </Project>

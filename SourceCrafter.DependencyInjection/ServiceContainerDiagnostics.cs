@@ -84,8 +84,8 @@ internal static class ServiceContainerDiagnostics
     {
         DiagnosticDescriptor rule = new(
             id: "SCDI06",
-            title: "Container-internal interface-only resolver requires factory method",
-            messageFormat: "Container-internal interface-only resolver requires factory method in order to provide as dependency",
+            title: "An interface or abstract registration needs an implementation or a factory",
+            messageFormat: "An interface or abstract class can't be constructed: register it with an implementation ([Singleton<IService, Impl>]) or a factory (source:)",
             category: "SourceCrafter.DependencyInjection.Usage",
             defaultSeverity: DiagnosticSeverity.Error,
             isEnabledByDefault: true,

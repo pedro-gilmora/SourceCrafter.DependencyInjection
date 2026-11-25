@@ -29,10 +29,12 @@ diagnostic table.
 
 | Package | What it is |
 |---------|------------|
-| `SourceCrafter.DependencyInjection` | The generator. This is the one you usually want. |
+| `SourceCrafter.DependencyInjection` | The generator, plus the attributes. This is the one you usually want. |
 | `SourceCrafter.DependencyInjection.Metadata` | Attributes only, no generator. For libraries that want to declare contracts without pulling in the generator. |
-| `SourceCrafter.DependencyInjection.MsConfiguration` | The generator plus `Microsoft.Extensions.Configuration` support (`[JsonSetting<T>]`). Use instead of the core generator. |
-| `SourceCrafter.DependencyInjection.MsConfiguration.Metadata` | Attributes only, configuration flavour. |
+| `SourceCrafter.DependencyInjection.MsConfiguration` | `Microsoft.Extensions.Configuration` support (`[JsonSetting<T>]`). Install it alone: it brings the core generator, the attributes and the configuration packages the generated code uses. |
+| `SourceCrafter.DependencyInjection.MsConfiguration.Metadata` | Configuration attributes only, no generator. |
+
+Every package ships [agent skills](https://agentskills.io) under `skills/` (also in [`.github/skills`](.github/skills)), so coding agents can use the library without reverse-engineering it.
 
 ## Repository layout
 
